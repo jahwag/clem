@@ -79,7 +79,7 @@ hcloud server create \
   --name my-team
 ```
 
-`hel1` is Helsinki — the closest Hetzner location to Sweden. Other options: `nbg1` (Nuremberg), `fsn1` (Falkenstein).
+Locations: `hel1` (Helsinki), `nbg1` (Nuremberg), `fsn1` (Falkenstein). Pick the one closest to you.
 
 Wait ~2 minutes for cloud-init to finish before SSHing in. Check progress with:
 
