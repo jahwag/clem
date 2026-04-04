@@ -10,7 +10,7 @@ Tired of Crustaceans? Try Clementine.
 
 ## Prerequisites
 
-- Ubuntu 22.04 or 24.04
+- Ubuntu 24.04 or later
 - `tmux`, `systemd`
 - [Claude Code](https://claude.ai/code) installed at `~/.local/bin/claude`
 - [age](https://github.com/FiloSottile/age) and [sops](https://github.com/getsops/sops) for secrets
