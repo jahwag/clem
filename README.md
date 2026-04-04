@@ -128,20 +128,14 @@ agents:
 
 ### 4. Set up secrets
 
-Generate an age keypair (run once, on your local machine):
+Generate an age keypair and write `.sops.yaml` (run once, on your local machine):
 
 ```bash
 clem vault init
-# prints your public key and instructions for .sops.yaml
+# generates ~/.config/sops/age/keys.txt and writes .sops.yaml
 ```
 
-Create `.sops.yaml` (replace with your public key):
-
-```yaml
-creation_rules:
-  - path_regex: secrets\.sops\.yaml
-    age: age1yourpublickeyhere
-```
+`.sops.yaml` contains only the public key — commit it to your repo. The private key stays in `~/.config/sops/age/keys.txt` and never leaves your machine.
 
 Add secrets:
 

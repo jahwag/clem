@@ -49,11 +49,23 @@ func Init() error {
 		}
 	}
 
-	fmt.Printf("Age keypair generated at: %s\n\n", keysPath)
-	fmt.Printf("Public key: %s\n\n", pubKey)
-	fmt.Println("Add the following to .sops.yaml in your project:")
-	fmt.Println("---")
-	fmt.Printf("creation_rules:\n  - path_regex: secrets\\.sops\\.yaml\n    age: %s\n", pubKey)
+	fmt.Printf("Age keypair generated at: %s\n", keysPath)
+	fmt.Printf("Public key: %s\n", pubKey)
+
+	// Write .sops.yaml if it doesn't already exist
+	const sopsCfgFile = ".sops.yaml"
+	if _, err := os.Stat(sopsCfgFile); os.IsNotExist(err) {
+		content := fmt.Sprintf("creation_rules:\n  - path_regex: secrets\\.sops\\.yaml\n    age: %s\n", pubKey)
+		if err := os.WriteFile(sopsCfgFile, []byte(content), 0644); err != nil {
+			return fmt.Errorf("writing .sops.yaml: %w", err)
+		}
+		fmt.Printf("Wrote %s — commit this file to your repo.\n", sopsCfgFile)
+	} else {
+		fmt.Printf("%s already exists — add the public key manually if needed.\n", sopsCfgFile)
+	}
+
+	fmt.Println("\nBack up your private key:")
+	fmt.Printf("  cat %s\n", keysPath)
 	return nil
 }
 
