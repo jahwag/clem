@@ -1,0 +1,55 @@
+package cmd
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/spf13/cobra"
+	"github.com/jahwag/clem/internal/config"
+)
+
+var configPath string
+var cfg *config.Config
+
+var rootCmd = &cobra.Command{
+	Use:   "clem",
+	Short: "Manage persistent 24/7 multi-agent Claude Code teams",
+	Long:  `clem — docker-compose for Claude agents. Manages OS users, tmux sessions, and systemd services.`,
+}
+
+// Execute runs the root command.
+func Execute() {
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func init() {
+	rootCmd.PersistentFlags().StringVar(&configPath, "config", "clem.yaml", "path to clem.yaml")
+	rootCmd.PersistentPreRunE = loadConfig
+}
+
+func loadConfig(cmd *cobra.Command, args []string) error {
+	// vault subcommands operate on secrets.sops.yaml, not clem.yaml
+	if cmd.Parent() != nil && cmd.Parent().Name() == "vault" {
+		return nil
+	}
+	if cmd.Name() == "vault" {
+		return nil
+	}
+
+	var err error
+	cfg, err = config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	return nil
+}
+
+func requireRoot() error {
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("this command requires root privileges — run with sudo")
+	}
+	return nil
+}

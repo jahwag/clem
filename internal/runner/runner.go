@@ -1,0 +1,156 @@
+package runner
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/jahwag/clem/internal/config"
+)
+
+const runnerTemplate = `#!/bin/bash
+set -m
+BACKOFF=10
+MAX_BACKOFF=900
+RESET_AFTER=300
+CLAUDE="$HOME/.local/bin/claude"
+WORKDIR="$HOME/{{.Project}}"
+LOGFILE="$HOME/.claude/{{.AgentKey}}-runner.log"
+
+cd "$WORKDIR" || exit 1
+
+log() { echo "$(date -Iseconds) $1" | tee -a "$LOGFILE"; }
+
+tail -500 "$LOGFILE" > "$LOGFILE.tmp" 2>/dev/null && mv "$LOGFILE.tmp" "$LOGFILE" 2>/dev/null
+
+# Load secrets (written by clem provision, never committed)
+[ -f "$HOME/.env" ] && source "$HOME/.env"
+
+# Write ephemeral .mcp.json from env
+cat > "$WORKDIR/.mcp.json" << 'MCPEOF'
+{
+  "mcpServers": {
+    "discord-bot": {
+      "command": "{{.HomeDir}}/.local/bin/mcp-discord",
+      "env": { "DISCORD_TOKEN": "$DISCORD_TOKEN" }
+    }
+  }
+}
+MCPEOF
+
+SLEEP_ACTIVE={{.SleepActive}}
+SLEEP_NIGHT={{.SleepNight}}
+
+while true; do
+    START=$(date +%s)
+    PROMPT='{{.Prompt}}'
+
+    log "Starting {{.AgentName}} (fresh session)"
+    (sleep 1 && tmux send-keys -t {{.AgentKey}} "" Enter
+     sleep 25 && tmux send-keys -t {{.AgentKey}} "$PROMPT" Enter) &
+    timeout 7200 $CLAUDE --dangerously-skip-permissions \
+        --model {{.Model}} \
+        --name {{.AgentName}} \
+        --add-dir ~/.claude
+
+    EXIT_CODE=$?
+    ELAPSED=$(( $(date +%s) - START ))
+    log "Exited $EXIT_CODE after ${ELAPSED}s"
+
+    HOUR=$(date +%H)
+    if [ "$HOUR" -ge 7 ] && [ "$HOUR" -lt 22 ]; then
+        SLEEP_BETWEEN=$SLEEP_ACTIVE
+    else
+        SLEEP_BETWEEN=$SLEEP_NIGHT
+    fi
+
+    if [ $EXIT_CODE -eq 143 ] || [ $ELAPSED -gt $RESET_AFTER ]; then
+        BACKOFF=$SLEEP_BETWEEN
+    else
+        BACKOFF=$(( BACKOFF * 2 ))
+        [ $BACKOFF -gt $MAX_BACKOFF ] && BACKOFF=$MAX_BACKOFF
+    fi
+
+    log "Sleeping ${BACKOFF}s"
+    sleep $BACKOFF
+done
+`
+
+const serviceTemplate = `[Unit]
+Description=Clem agent: {{.AgentName}} ({{.Project}})
+After=network.target
+
+[Service]
+Type=forking
+User={{.OSUser}}
+ExecStart=/usr/bin/tmux new-session -d -s {{.AgentKey}} {{.HomeDir}}/.local/bin/clem-runner.sh
+ExecStop=/usr/bin/tmux kill-session -t {{.AgentKey}}
+RemainAfterExit=yes
+Restart=no
+
+[Install]
+WantedBy=multi-user.target
+`
+
+type RunnerParams struct {
+	Project    string
+	AgentKey   string
+	AgentName  string
+	Model      string
+	Prompt     string
+	OSUser     string
+	HomeDir    string
+	SleepActive int
+	SleepNight  int
+}
+
+// Generate renders the runner.sh content for an agent.
+func Generate(cfg *config.Config, agentKey string) string {
+	ac := cfg.Agents[agentKey]
+	iterSec := ac.IterationMinutes * 60
+	if iterSec == 0 {
+		iterSec = 300
+	}
+
+	p := RunnerParams{
+		Project:     cfg.Project,
+		AgentKey:    agentKey,
+		AgentName:   ac.Name,
+		Model:       ac.Model,
+		Prompt:      ac.Prompt,
+		OSUser:      cfg.OSUsername(agentKey),
+		HomeDir:     fmt.Sprintf("/home/%s", cfg.OSUsername(agentKey)),
+		SleepActive: iterSec,
+		SleepNight:  iterSec * 2,
+	}
+	return renderTemplate(runnerTemplate, p)
+}
+
+// GenerateService renders the systemd service unit content for an agent.
+func GenerateService(cfg *config.Config, agentKey string) string {
+	ac := cfg.Agents[agentKey]
+	p := RunnerParams{
+		Project:   cfg.Project,
+		AgentKey:  agentKey,
+		AgentName: ac.Name,
+		OSUser:    cfg.OSUsername(agentKey),
+		HomeDir:   fmt.Sprintf("/home/%s", cfg.OSUsername(agentKey)),
+	}
+	return renderTemplate(serviceTemplate, p)
+}
+
+// renderTemplate does simple {{.Field}} substitution without importing text/template
+// to keep the runner output readable and avoid escaping issues with bash.
+func renderTemplate(tmpl string, p RunnerParams) string {
+	r := strings.NewReplacer(
+		"{{.Project}}", p.Project,
+		"{{.AgentKey}}", p.AgentKey,
+		"{{.AgentName}}", p.AgentName,
+		"{{.Model}}", p.Model,
+		"{{.Prompt}}", p.Prompt,
+		"{{.OSUser}}", p.OSUser,
+		"{{.HomeDir}}", p.HomeDir,
+		"{{.SleepActive}}", fmt.Sprintf("%d", p.SleepActive),
+		"{{.SleepNight}}", fmt.Sprintf("%d", p.SleepNight),
+	)
+	return r.Replace(tmpl)
+}
