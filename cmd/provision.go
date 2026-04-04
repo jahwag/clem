@@ -55,7 +55,7 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		}
 
 		// 2. Decrypt and write .env
-		secrets, err := vault.DecryptAgent(agentKey)
+		secrets, err := vault.DecryptForAgent(agentKey, ac.Vaults)
 		if err != nil {
 			fmt.Printf("  warning: could not decrypt secrets for %s: %v\n", agentKey, err)
 			fmt.Println("  skipping .env — run clem vault init and set secrets first")

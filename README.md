@@ -47,7 +47,7 @@ Steps 1-3 run on your local machine. Steps 4-6 run on the VPS over SSH.
 gh repo create my-team --private --clone && cd my-team
 ```
 
-Create `clem.yaml`:
+Create `clem.yaml` (or run `clem init` to generate a commented template):
 
 ```yaml
 project: myteam
@@ -66,6 +66,7 @@ agents:
     role: "Lead Software Engineer"
     model: "claude-sonnet-4-6"
     iteration_minutes: 10
+    vaults: [github, discord-lead]
     prompt: "Act as Amara per CLAUDE.local.md. Check Discord #tasks for tasks assigned to you. Work on ONE task. When done post results and run: kill $PPID. If no tasks: kill $PPID"
 
   worker:
@@ -74,6 +75,7 @@ agents:
     model: "claude-sonnet-4-6"
     iteration_minutes: 5
     reports_to: lead
+    vaults: [github, discord-worker]
     prompt: "Act as Athena per CLAUDE.local.md. Check Discord #tasks for tasks assigned to you. Work on ONE task. When done post results and run: kill $PPID. If no tasks: kill $PPID"
 ```
 
@@ -86,12 +88,18 @@ clem vault init
 
 `.sops.yaml` contains only the public key — safe to commit. The private key stays in `~/.config/sops/age/keys.txt` and never leaves your machine.
 
+Secrets are stored in named vaults. Define vaults once and assign them to agents — shared tokens (e.g. a GitHub token) only need to be set in one place.
+
 ```bash
-clem vault set lead DISCORD_TOKEN="Bot your-lead-bot-token"
-clem vault set lead GH_TOKEN="ghp_your-github-token"
-clem vault set worker DISCORD_TOKEN="Bot your-worker-bot-token"
-clem vault set worker GH_TOKEN="ghp_your-github-token"
+# shared github token — both agents use the same vault
+clem vault set github GH_TOKEN="ghp_your-github-token"
+
+# separate discord bot tokens per agent
+clem vault set discord-lead   DISCORD_TOKEN="Bot your-lead-bot-token"
+clem vault set discord-worker DISCORD_TOKEN="Bot your-worker-bot-token"
 ```
+
+`clem provision` merges the vaults listed in each agent's `vaults:` field (in order) into a single `.env` file. Later vaults win on key conflicts.
 
 Commit and push everything:
 
@@ -139,38 +147,47 @@ hcloud server create \
   --name my-team
 ```
 
-Locations: `hel1` (Helsinki), `nbg1` (Nuremberg), `fsn1` (Falkenstein, Germany), `ash` (Ashburn, Virginia), `hil` (Hillsboro, Oregon), `sin` (Singapore). Pick the one closest to you.
+See [Hetzner Cloud locations](https://docs.hetzner.com/cloud/general/locations/) and pick the one closest to you.
+
+Add an alias to `~/.ssh/config` on your local machine so you can use `ssh my-team` instead of typing the IP everywhere:
+
+```
+Host my-team
+    HostName <ip>
+    User root
+    IdentityFile ~/.ssh/id_ed25519
+```
 
 Wait ~2 minutes for cloud-init to finish. Check progress:
 
 ```bash
-ssh root@<ip> tail -f /var/log/cloud-init-output.log
+ssh my-team tail -f /var/log/cloud-init-output.log
 ```
 
 ### VPS: provision
 
 ```bash
-clem provision --remote root@<ip> --gh-token ghp_yourtoken
+clem provision --remote my-team --gh-token ghp_yourtoken
 ```
 
 This runs three steps over SSH. If it fails, run them individually to find where:
 
 ```bash
 # 1. copy age key
-ssh root@<ip> "mkdir -p ~/.config/sops/age"
-scp ~/.config/sops/age/keys.txt root@<ip>:~/.config/sops/age/keys.txt
+ssh my-team "mkdir -p ~/.config/sops/age"
+scp ~/.config/sops/age/keys.txt my-team:~/.config/sops/age/keys.txt
 
 # 2. clone repo (agents use their own tokens from .env after provisioning)
-ssh root@<ip> "git clone https://oauth2:ghp_yourtoken@github.com/you/my-team.git"
+ssh my-team "git clone https://oauth2:ghp_yourtoken@github.com/you/my-team.git"
 
 # 3. provision
-ssh root@<ip> "cd my-team && clem provision"
+ssh my-team "cd my-team && clem provision"
 ```
 
 ### VPS: authenticate each agent
 
 ```bash
-clem login --remote root@<ip>
+clem login --remote my-team
 ```
 
 Opens an SSH session and runs `clem login` on the VPS. A URL is printed per agent — open each in your local browser. Each agent's Claude Code OAuth token is cached under its OS user home. One-time step.
@@ -178,7 +195,7 @@ Opens an SSH session and runs `clem login` on the VPS. A URL is printed per agen
 If it fails, run manually:
 
 ```bash
-ssh -t root@<ip> "cd my-team && clem login"
+ssh -t my-team "cd my-team && clem login"
 ```
 
 Agents interact with GitHub via the `GH_TOKEN` already in their `.env` from provisioning — no separate `gh auth login` needed on the VPS.
@@ -186,7 +203,7 @@ Agents interact with GitHub via the `GH_TOKEN` already in their `.env` from prov
 ### VPS: start
 
 ```bash
-ssh root@<ip> "cd my-team && clem up && clem status"
+ssh my-team "cd my-team && clem up && clem status"
 ```
 
 Agents are now running 24/7. The watchdog restarts any dead sessions every 5 minutes.
@@ -212,9 +229,10 @@ agents:
     name: string         # display name (used as --name in Claude Code)
     role: string         # human-readable role description
     model: string        # Claude model ID
-    iteration_minutes: int  # sleep between iterations during active hours (07-22)
+    iteration_minutes: int  # sleep between iterations during active hours (07-22); 2x at night
     reports_to: string   # key of supervising agent (optional)
-    prompt: string       # injected at start of each session
+    vaults: [string]     # vault names from secrets.sops.yaml to merge into .env (optional)
+    prompt: string       # injected at start of each session; must end with kill $PPID
 ```
 
 OS username: `<project>-<agentkey>` (e.g. `myteam-lead`)
@@ -230,9 +248,9 @@ Secrets live in `secrets.sops.yaml`, encrypted with [age](https://github.com/Fil
 
 ```bash
 clem vault init                          # generate age keypair
-clem vault set <agent> KEY=value         # add or update a secret
-clem vault get <agent> KEY               # read a secret
-clem vault list                          # list all secret keys (values hidden)
+clem vault set <vault> KEY=value         # add or update a secret in a vault
+clem vault get <vault> KEY               # read a secret from a vault
+clem vault list                          # list all vaults and their keys (values hidden)
 ```
 
 The age private key (`~/.config/sops/age/keys.txt`) is the only secret that must be kept outside git. Back it up.
@@ -242,9 +260,13 @@ The age private key (`~/.config/sops/age/keys.txt`) is the only secret that must
 ## CLI reference
 
 ```
+clem init
+  Writes a commented clem.yaml template to the current directory.
+  Errors if clem.yaml already exists.
+
 clem provision [--config clem.yaml]
   Creates OS users, writes runner.sh, installs systemd services and watchdog.
-  Decrypts secrets.sops.yaml into per-agent .env files.
+  Decrypts secrets.sops.yaml into per-agent .env files (merges agent vaults in order).
   Requires root.
 
 clem login [agent...]
@@ -269,14 +291,14 @@ clem logs <agent>
 clem vault init
   Generates an age keypair and prints setup instructions.
 
-clem vault set <agent> KEY=value
-  Sets a secret in secrets.sops.yaml.
+clem vault set <vault> KEY=value
+  Sets a secret in a vault in secrets.sops.yaml.
 
-clem vault get <agent> KEY
-  Prints a decrypted secret value.
+clem vault get <vault> KEY
+  Prints a decrypted secret value from a vault.
 
 clem vault list
-  Lists all secret keys (values not shown).
+  Lists all vaults and their keys (values not shown).
 ```
 
 Global flag: `--config <path>` overrides the default `clem.yaml` location.

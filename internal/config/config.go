@@ -20,12 +20,13 @@ type Coordination struct {
 }
 
 type AgentConfig struct {
-	Name              string `yaml:"name"`
-	Role              string `yaml:"role"`
-	Model             string `yaml:"model"`
-	IterationMinutes  int    `yaml:"iteration_minutes"`
-	ReportsTo         string `yaml:"reports_to"`
-	Prompt            string `yaml:"prompt"`
+	Name             string   `yaml:"name"`
+	Role             string   `yaml:"role"`
+	Model            string   `yaml:"model"`
+	IterationMinutes int      `yaml:"iteration_minutes"`
+	ReportsTo        string   `yaml:"reports_to"`
+	Vaults           []string `yaml:"vaults"`
+	Prompt           string   `yaml:"prompt"`
 }
 
 // OSUsername returns the OS username for an agent: <project>-<agentkey>

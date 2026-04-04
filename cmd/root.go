@@ -38,6 +38,10 @@ func loadConfig(cmd *cobra.Command, args []string) error {
 	if cmd.Name() == "vault" {
 		return nil
 	}
+	// init writes clem.yaml — skip loading it
+	if cmd.Name() == "init" {
+		return nil
+	}
 
 	var err error
 	cfg, err = config.Load(configPath)

@@ -22,22 +22,22 @@ var vaultInitCmd = &cobra.Command{
 }
 
 var vaultSetCmd = &cobra.Command{
-	Use:   "set <agent> KEY=value",
-	Short: "Set a secret for an agent in secrets.sops.yaml",
+	Use:   "set <vault> KEY=value",
+	Short: "Set a secret in a vault in secrets.sops.yaml",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		agentKey := args[0]
+		vaultName := args[0]
 		keyval := args[1]
 		if !strings.Contains(keyval, "=") {
 			return fmt.Errorf("invalid format: expected KEY=value, got %q", keyval)
 		}
-		return vault.Set(agentKey, keyval)
+		return vault.Set(vaultName, keyval)
 	},
 }
 
 var vaultGetCmd = &cobra.Command{
-	Use:   "get <agent> KEY",
-	Short: "Get a secret for an agent from secrets.sops.yaml",
+	Use:   "get <vault> KEY",
+	Short: "Get a secret from a vault in secrets.sops.yaml",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return vault.Get(args[0], args[1])
@@ -46,7 +46,7 @@ var vaultGetCmd = &cobra.Command{
 
 var vaultListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List all secrets (keys only) in secrets.sops.yaml",
+	Short: "List all vaults and their keys (values hidden) in secrets.sops.yaml",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return vault.List()
 	},

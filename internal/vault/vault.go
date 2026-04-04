@@ -69,9 +69,9 @@ func Init() error {
 	return nil
 }
 
-// Set sets a secret key for an agent in secrets.sops.yaml using sops --set.
+// Set sets a secret key for a vault in secrets.sops.yaml using sops --set.
 // keyval should be "KEY=value".
-func Set(agentKey, keyval string) error {
+func Set(vaultName, keyval string) error {
 	parts := strings.SplitN(keyval, "=", 2)
 	if len(parts) != 2 {
 		return fmt.Errorf("invalid format, expected KEY=value, got: %s", keyval)
@@ -82,29 +82,28 @@ func Set(agentKey, keyval string) error {
 		return err
 	}
 
-	// sops --set '["agents"]["<agentKey>"]["KEY"] "value"' secrets.sops.yaml
-	setExpr := fmt.Sprintf(`["agents"]["%s"]["%s"] "%s"`, agentKey, key, value)
+	// sops --set '["vaults"]["<vaultName>"]["KEY"] "value"' secrets.sops.yaml
+	setExpr := fmt.Sprintf(`["vaults"]["%s"]["%s"] "%s"`, vaultName, key, value)
 	out, err := exec.Command("sops", "--set", setExpr, secretsFile).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("sops --set: %w\n%s", err, out)
 	}
-	fmt.Printf("Set %s.%s\n", agentKey, key)
+	fmt.Printf("Set %s.%s\n", vaultName, key)
 	return nil
 }
 
-// Get retrieves a secret key for an agent from secrets.sops.yaml.
-func Get(agentKey, key string) error {
+// Get retrieves a secret key for a vault from secrets.sops.yaml.
+func Get(vaultName, key string) error {
 	if err := ensureSops(); err != nil {
 		return err
 	}
 
-	// Decrypt and extract with yq
 	decrypted, err := sopsDecrypt()
 	if err != nil {
 		return err
 	}
 
-	yqExpr := fmt.Sprintf(".agents.%s.%s", agentKey, key)
+	yqExpr := fmt.Sprintf(".vaults.%s.%s", vaultName, key)
 	out, err := runYQ(yqExpr, decrypted)
 	if err != nil {
 		return fmt.Errorf("yq: %w", err)
@@ -113,7 +112,7 @@ func Get(agentKey, key string) error {
 	return nil
 }
 
-// List prints all secrets (keys only, not values) from secrets.sops.yaml.
+// List prints all vaults and their keys (not values) from secrets.sops.yaml.
 func List() error {
 	if err := ensureSops(); err != nil {
 		return err
@@ -124,12 +123,124 @@ func List() error {
 		return err
 	}
 
+	// Detect legacy structure
+	hasVaults, err := yamlKeyExists(".vaults", decrypted)
+	if err != nil {
+		return err
+	}
+	hasAgents, err := yamlKeyExists(".agents", decrypted)
+	if err != nil {
+		return err
+	}
+
+	if !hasVaults && hasAgents {
+		fmt.Fprintln(os.Stderr, "warning: secrets.sops.yaml uses legacy agents: structure — migrate to vaults: for shared secrets")
+		return listLegacy(decrypted)
+	}
+
+	out, err := runYQ(".vaults | keys | .[]", decrypted)
+	if err != nil {
+		return fmt.Errorf("yq: %w", err)
+	}
+
+	fmt.Println("Vaults:")
+	for _, vault := range strings.Split(strings.TrimSpace(out), "\n") {
+		if vault == "" {
+			continue
+		}
+		fmt.Printf("  %s:\n", vault)
+		keysOut, err := runYQ(fmt.Sprintf(".vaults.%s | keys | .[]", vault), decrypted)
+		if err != nil {
+			continue
+		}
+		for _, k := range strings.Split(strings.TrimSpace(keysOut), "\n") {
+			if k != "" {
+				fmt.Printf("    - %s\n", k)
+			}
+		}
+	}
+	return nil
+}
+
+// DecryptForAgent returns the merged secrets for an agent by merging the named vaults in order.
+// Later vaults in the list win on key conflicts.
+// Falls back to legacy agents: structure with a warning if vaults: key is absent.
+func DecryptForAgent(agentKey string, vaultNames []string) (map[string]string, error) {
+	if err := ensureSops(); err != nil {
+		return nil, err
+	}
+
+	decrypted, err := sopsDecrypt()
+	if err != nil {
+		return nil, err
+	}
+
+	// Detect legacy structure
+	hasVaults, err := yamlKeyExists(".vaults", decrypted)
+	if err != nil {
+		return nil, err
+	}
+	hasAgents, err := yamlKeyExists(".agents", decrypted)
+	if err != nil {
+		return nil, err
+	}
+
+	if !hasVaults && hasAgents {
+		fmt.Fprintf(os.Stderr, "warning: secrets.sops.yaml uses legacy agents: structure — migrate to vaults: for shared secrets\n")
+		return decryptLegacyAgent(agentKey, decrypted)
+	}
+
+	if len(vaultNames) == 0 {
+		return map[string]string{}, nil
+	}
+
+	result := make(map[string]string)
+	for _, vaultName := range vaultNames {
+		yqExpr := fmt.Sprintf(".vaults.%s | to_entries | .[] | .key + \"=\" + .value", vaultName)
+		out, err := runYQ(yqExpr, decrypted)
+		if err != nil {
+			return nil, fmt.Errorf("yq for vault %s: %w", vaultName, err)
+		}
+		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+			if line == "" {
+				continue
+			}
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				result[parts[0]] = parts[1]
+			}
+		}
+	}
+	return result, nil
+}
+
+func decryptLegacyAgent(agentKey, decrypted string) (map[string]string, error) {
+	yqExpr := fmt.Sprintf(".agents.%s | to_entries | .[] | .key + \"=\" + .value", agentKey)
+	out, err := runYQ(yqExpr, decrypted)
+	if err != nil {
+		return nil, fmt.Errorf("yq: %w", err)
+	}
+
+	result := make(map[string]string)
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			result[parts[0]] = parts[1]
+		}
+	}
+	return result, nil
+}
+
+func listLegacy(decrypted string) error {
 	out, err := runYQ(".agents | keys | .[]", decrypted)
 	if err != nil {
 		return fmt.Errorf("yq: %w", err)
 	}
 
-	fmt.Println("Agents with secrets:")
+	fmt.Println("Agents with secrets (legacy structure):")
 	for _, agent := range strings.Split(strings.TrimSpace(out), "\n") {
 		if agent == "" {
 			continue
@@ -148,35 +259,13 @@ func List() error {
 	return nil
 }
 
-// DecryptAgent returns the decrypted secrets for a specific agent as a map.
-func DecryptAgent(agentKey string) (map[string]string, error) {
-	if err := ensureSops(); err != nil {
-		return nil, err
-	}
-
-	decrypted, err := sopsDecrypt()
+func yamlKeyExists(key, input string) (bool, error) {
+	out, err := runYQ(fmt.Sprintf("%s | type", key), input)
 	if err != nil {
-		return nil, err
+		return false, nil // yq returns error if key missing
 	}
-
-	// Use yq to get key=value pairs
-	yqExpr := fmt.Sprintf(".agents.%s | to_entries | .[] | .key + \"=\" + .value", agentKey)
-	out, err := runYQ(yqExpr, decrypted)
-	if err != nil {
-		return nil, fmt.Errorf("yq: %w", err)
-	}
-
-	result := make(map[string]string)
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) == 2 {
-			result[parts[0]] = parts[1]
-		}
-	}
-	return result, nil
+	t := strings.TrimSpace(out)
+	return t != "null" && t != "!!null", nil
 }
 
 func sopsDecrypt() (string, error) {
