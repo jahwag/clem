@@ -12,10 +12,10 @@ Tired of Crustaceans? Try Clementine.
 
 **Local machine** (where you run `clem` commands):
 - `clem` binary (see Install below)
-- [`age`](https://github.com/FiloSottile/age) — `brew install age` / `apt install age`
+- [`age`](https://github.com/FiloSottile/age) — `brew install age` / `sudo apt install age`
 - [`sops`](https://github.com/getsops/sops) — `brew install sops` / [download binary](https://github.com/getsops/sops/releases)
-- [`yq`](https://github.com/mikefarah/yq) — `brew install yq` / `snap install yq`
-- [`gh`](https://cli.github.com) CLI — `brew install gh` / `apt install gh`
+- [`yq`](https://github.com/mikefarah/yq) — `brew install yq` / `sudo snap install yq`
+- [`gh`](https://cli.github.com) CLI — `brew install gh` / `sudo apt install gh`
 - [`hcloud`](https://github.com/hetznercloud/cli) CLI — `brew install hcloud` / [download binary](https://github.com/hetznercloud/cli/releases)
 - `ssh`, `scp` (standard on macOS and Linux)
 
