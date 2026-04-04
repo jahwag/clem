@@ -43,11 +43,14 @@ go build -o /usr/local/bin/clem .
 
 ```bash
 hcloud server create \
-  --type cx21 \
+  --type cx33 \
   --image ubuntu-24.04 \
+  --location hel1 \
   --ssh-key ~/.ssh/id_ed25519.pub \
   --name my-team
 ```
+
+`hel1` is Helsinki — the closest Hetzner location to Sweden. Other options: `nbg1` (Nuremberg), `fsn1` (Falkenstein).
 
 ### 2. SSH in and install dependencies
 
