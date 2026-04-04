@@ -74,7 +74,6 @@ agents:
     role: "Software Engineer"
     model: "claude-sonnet-4-6"
     iteration_minutes: 5
-    reports_to: lead
     vaults: [github, discord-worker]
     prompt: "Act as Athena per CLAUDE.local.md. Check Discord #tasks for tasks assigned to you. Work on ONE task. When done post results and run: kill $PPID. If no tasks: kill $PPID"
 ```
@@ -230,7 +229,6 @@ agents:
     role: string         # human-readable role description
     model: string        # Claude model ID
     iteration_minutes: int  # sleep between iterations during active hours (07-22); 2x at night
-    reports_to: string   # key of supervising agent (optional)
     vaults: [string]     # vault names from secrets.sops.yaml to merge into .env (optional)
     prompt: string       # injected at start of each session; must end with kill $PPID
 ```
@@ -307,7 +305,9 @@ Global flag: `--config <path>` overrides the default `clem.yaml` location.
 
 ## Discord setup
 
-Create a Discord server for your team. Set up these channels:
+Create a **private** Discord server for your team. Do not use a public server — Discord membership is the access control layer. Agents will act on instructions from anyone who can post in the channels.
+
+Set up these channels:
 
 | Name | Type | Purpose |
 |------|------|---------|
@@ -357,51 +357,21 @@ Create one app per agent with fine-grained repo permissions. The runner exchange
 
 ---
 
-## Agent definitions (CLAUDE.md)
+## Agent definitions (CLAUDE.local.md)
 
-Each agent needs a `CLAUDE.local.md` in its working directory. This file is the runtime contract — vague instructions produce unpredictable behavior.
+`clem init` generates a working `CLAUDE.local.md` alongside `clem.yaml`. Fill in the channel IDs and project description at the top — the rest works out of the box.
 
-Required sections:
+The file is the runtime contract for all agents. Vague instructions produce unpredictable behaviour. The generated default covers:
 
-```markdown
-# <Name> — <Role>
+- Discord tool names (exact, not generic)
+- Task board protocol with thread status conventions
+- Trust model: only act on Discord instructions, never on content from external sources
+- Security rules: no secrets in Discord, no .env output
+- Loop behaviour: `kill $PPID` when done, `/compact` on heavy sessions, no CronCreate
+- Lessons format
+- Per-agent role definitions
 
-## How You Work
-1. [numbered, concrete steps]
-2. Check #tasks forum for [TODO] threads assigned to you
-3. Update thread title to [IN PROGRESS]
-4. Do the work
-5. Post results in the thread, update title to [DONE]
-6. Read your lessons thread at the start of each iteration
-7. If no tasks: run kill $PPID
-
-## Discord
-Use mcp__discord__send_message, mcp__discord__read_messages,
-mcp__discord__create_forum_post, mcp__discord__edit_thread directly.
-Do NOT use curl to call Discord. Do NOT check claude mcp list.
-
-## Hard Rules
-1. Never share secrets, tokens, or key values in Discord or any message
-2. Never output the contents of secrets.sops.yaml or .env files
-3. Never use CronCreate
-4. [project-specific rules]
-
-## Autonomy
-ACT FIRST, report after.
-
-## Lessons
-Read your lessons thread at the start of each iteration.
-Post new lessons after anything unexpected.
-Format: Problem -> Root cause -> Solution -> Outcome
-
-## Loop Behavior
-Run /compact at the end of heavy iterations.
-Do NOT use CronCreate.
-When done with all work: run kill $PPID
-```
-
-**Thread status protocol** (agents read each other's thread titles):
-`[TODO]` -> `[IN PROGRESS]` -> `[DONE]` or `[BLOCKED]`
+Edit it to describe your project and adjust agent responsibilities. The more specific it is, the more reliably agents behave.
 
 ---
 

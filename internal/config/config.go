@@ -24,7 +24,6 @@ type AgentConfig struct {
 	Role             string   `yaml:"role"`
 	Model            string   `yaml:"model"`
 	IterationMinutes int      `yaml:"iteration_minutes"`
-	ReportsTo        string   `yaml:"reports_to"`
 	Vaults           []string `yaml:"vaults"`
 	Prompt           string   `yaml:"prompt"`
 }
