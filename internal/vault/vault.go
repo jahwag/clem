@@ -78,7 +78,7 @@ func Set(vaultName, keyval string) error {
 	}
 	key, value := parts[0], parts[1]
 
-	if err := ensureSops(); err != nil {
+	if err := ensureSopsBin(); err != nil {
 		return err
 	}
 
@@ -294,7 +294,16 @@ func ensureSops() error {
 		return fmt.Errorf("sops not found — install sops: https://github.com/getsops/sops")
 	}
 	if _, err := os.Stat(secretsFile); os.IsNotExist(err) {
-		return fmt.Errorf("%s not found in current directory", secretsFile)
+		return fmt.Errorf("%s not found — run 'clem vault set' to create it", secretsFile)
+	}
+	return nil
+}
+
+// ensureSopsBin checks only that the sops binary exists, not the secrets file.
+// Used by Set which creates the file on first use.
+func ensureSopsBin() error {
+	if _, err := exec.LookPath("sops"); err != nil {
+		return fmt.Errorf("sops not found — install sops: https://github.com/getsops/sops")
 	}
 	return nil
 }

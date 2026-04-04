@@ -12,9 +12,12 @@ Tired of Crustaceans? Try Clementine.
 
 **Local machine** (where you run `clem` commands):
 - `clem` binary (see Install below)
-- `age`, `sops`, `yq` for secret management
-- `gh` CLI for creating the GitHub repo
-- `ssh`, `scp` for remote provisioning
+- [`age`](https://github.com/FiloSottile/age) — `brew install age` / `apt install age`
+- [`sops`](https://github.com/getsops/sops) — `brew install sops` / [download binary](https://github.com/getsops/sops/releases)
+- [`yq`](https://github.com/mikefarah/yq) — `brew install yq` / `snap install yq`
+- [`gh`](https://cli.github.com) CLI — `brew install gh` / `apt install gh`
+- [`hcloud`](https://github.com/hetznercloud/cli) CLI — `brew install hcloud` / [download binary](https://github.com/hetznercloud/cli/releases)
+- `ssh`, `scp` (standard on macOS and Linux)
 
 **VPS** (Ubuntu 24.04 or later — handled by cloud-init):
 - `tmux`, `git`, `age`, `sops`
@@ -30,18 +33,15 @@ Tired of Crustaceans? Try Clementine.
 
 ## Install
 
-```bash
-curl -sSfL https://github.com/jahwag/clem/releases/latest/download/clem-linux-amd64 -o /usr/local/bin/clem
-chmod +x /usr/local/bin/clem
-```
-
-Or build from source:
+Build from source (requires [Go](https://go.dev/dl/)):
 
 ```bash
 git clone git@github.com:jahwag/clem.git
 cd clem
 go build -o /usr/local/bin/clem .
 ```
+
+Pre-built binaries will be available on the [releases page](https://github.com/jahwag/clem/releases) once published.
 
 ---
 
@@ -116,17 +116,7 @@ clem vault set discord-worker DISCORD_TOKEN="Bot your-worker-bot-token"
 
 `clem provision` merges the vaults listed in each agent's `vaults:` field (in order) into a single `.env` file. Later vaults win on key conflicts.
 
-Commit and push everything:
-
-```bash
-git add clem.yaml CLAUDE.local.md .sops.yaml secrets.sops.yaml
-git commit -m "init team config"
-git push
-```
-
-### Local: create the VPS
-
-Save this as `cloud-init.yaml`:
+Save `cloud-init.yaml` to the repo (useful to commit for reproducibility):
 
 ```yaml
 #cloud-config
@@ -143,6 +133,16 @@ runcmd:
   - "curl -fsSL https://claude.ai/install.sh | sh && ln -sf /root/.local/bin/claude /usr/local/bin/claude"
   - "pip3 install git+https://github.com/Bytelope/mcp-discord.git"
 ```
+
+Commit and push everything:
+
+```bash
+git add clem.yaml CLAUDE.local.md .sops.yaml secrets.sops.yaml cloud-init.yaml
+git commit -m "init team config"
+git push
+```
+
+### Local: create the VPS
 
 ```bash
 hcloud server create \
@@ -196,6 +196,26 @@ ssh my-team "git clone https://oauth2:ghp_yourtoken@github.com/you/my-team.git"
 # 3. provision
 ssh my-team "cd my-team && clem provision"
 ```
+
+### VPS: set git identity per agent
+
+Agents need a named git identity to open PRs. Run once per agent after provision:
+
+```bash
+ssh my-team "
+  sudo -u myteam-lead git config --global user.name 'Amara'
+  sudo -u myteam-lead git config --global user.email 'amara@yourproject.com'
+  sudo -u myteam-lead git config --global credential.helper store
+  echo 'https://amara:ghp_yourtoken@github.com' | sudo -u myteam-lead tee /home/myteam-lead/.git-credentials
+
+  sudo -u myteam-worker git config --global user.name 'Athena'
+  sudo -u myteam-worker git config --global user.email 'athena@yourproject.com'
+  sudo -u myteam-worker git config --global credential.helper store
+  echo 'https://athena:ghp_yourtoken@github.com' | sudo -u myteam-worker tee /home/myteam-worker/.git-credentials
+"
+```
+
+Replace `myteam`, names, emails, and tokens with your own.
 
 ### VPS: authenticate each agent
 
