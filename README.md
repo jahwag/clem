@@ -39,61 +39,12 @@ go build -o /usr/local/bin/clem .
 
 ## Quick start on Hetzner
 
-### 1. Create the VPS
+Steps 1-3 run on your local machine. Steps 4-6 run on the VPS over SSH.
 
-Save this as `cloud-init.yaml`:
-
-```yaml
-#cloud-config
-packages:
-  - tmux
-  - git
-  - curl
-  - age
-  - python3-pip
-
-runcmd:
-  # sops
-  - curl -sSfL https://github.com/getsops/sops/releases/latest/download/sops-v3.9.4.linux.amd64
-      -o /usr/local/bin/sops
-  - chmod +x /usr/local/bin/sops
-  # clem
-  - curl -sSfL https://github.com/jahwag/clem/releases/latest/download/clem-linux-amd64
-      -o /usr/local/bin/clem
-  - chmod +x /usr/local/bin/clem
-  # Claude Code (installs to /root/.local/bin/claude)
-  - curl -fsSL https://claude.ai/install.sh | sh
-  # mcp-discord (Bytelope fork — required for forum channel support)
-  - pip3 install git+https://github.com/Bytelope/mcp-discord.git
-```
-
-Then create the server:
+### Local: create your team repo
 
 ```bash
-hcloud server create \
-  --type cx33 \
-  --image ubuntu-24.04 \
-  --location hel1 \
-  --ssh-key ~/.ssh/id_ed25519.pub \
-  --user-data-from-file cloud-init.yaml \
-  --name my-team
-```
-
-Locations: `hel1` (Helsinki), `nbg1` (Nuremberg), `fsn1` (Falkenstein). Pick the one closest to you.
-
-Wait ~2 minutes for cloud-init to finish before SSHing in. Check progress with:
-
-```bash
-ssh root@<ip> tail -f /var/log/cloud-init-output.log
-```
-
-### 3. Create your team repo
-
-On your local machine:
-
-```bash
-mkdir my-team && cd my-team
-git init
+gh repo create my-team --private --clone && cd my-team
 ```
 
 Create `clem.yaml`:
@@ -126,18 +77,14 @@ agents:
     prompt: "Act as Athena per CLAUDE.local.md. Check Discord #tasks for tasks assigned to you. Work on ONE task. When done post results and run: kill $PPID. If no tasks: kill $PPID"
 ```
 
-### 4. Set up secrets
-
-Generate an age keypair and write `.sops.yaml` (run once, on your local machine):
+### Local: set up secrets
 
 ```bash
 clem vault init
 # generates ~/.config/sops/age/keys.txt and writes .sops.yaml
 ```
 
-`.sops.yaml` contains only the public key — commit it to your repo. The private key stays in `~/.config/sops/age/keys.txt` and never leaves your machine.
-
-Add secrets:
+`.sops.yaml` contains only the public key — safe to commit. The private key stays in `~/.config/sops/age/keys.txt` and never leaves your machine.
 
 ```bash
 clem vault set lead DISCORD_TOKEN="Bot your-lead-bot-token"
@@ -146,7 +93,7 @@ clem vault set worker DISCORD_TOKEN="Bot your-worker-bot-token"
 clem vault set worker GH_TOKEN="ghp_your-github-token"
 ```
 
-This creates `secrets.sops.yaml` encrypted with your age key. Commit it:
+Commit and push everything:
 
 ```bash
 git add clem.yaml .sops.yaml secrets.sops.yaml
@@ -154,31 +101,79 @@ git commit -m "init team config"
 git push
 ```
 
-### 5. Provision on the VPS
+### Local: create the VPS
 
-Copy your age private key to the VPS:
+Save this as `cloud-init.yaml`:
 
-```bash
-ssh root@<ip> "mkdir -p ~/.config/sops/age"
-cat ~/.config/sops/age/keys.txt | ssh root@<ip> "cat > ~/.config/sops/age/keys.txt"
+```yaml
+#cloud-config
+packages:
+  - tmux
+  - git
+  - curl
+  - age
+  - python3-pip
+
+runcmd:
+  # sops
+  - curl -sSfL https://github.com/getsops/sops/releases/latest/download/sops-v3.9.4.linux.amd64
+      -o /usr/local/bin/sops
+  - chmod +x /usr/local/bin/sops
+  # clem
+  - curl -sSfL https://github.com/jahwag/clem/releases/latest/download/clem-linux-amd64
+      -o /usr/local/bin/clem
+  - chmod +x /usr/local/bin/clem
+  # Claude Code
+  - curl -fsSL https://claude.ai/install.sh | sh
+  # mcp-discord (Bytelope fork — required for forum channel support)
+  - pip3 install git+https://github.com/Bytelope/mcp-discord.git
 ```
 
-Clone your team repo on the VPS and provision:
+```bash
+hcloud server create \
+  --type cx33 \
+  --image ubuntu-24.04 \
+  --location hel1 \
+  --ssh-key ~/.ssh/id_ed25519.pub \
+  --user-data-from-file cloud-init.yaml \
+  --name my-team
+```
+
+Locations: `hel1` (Helsinki), `nbg1` (Nuremberg), `fsn1` (Falkenstein). Pick the one closest to you.
+
+Wait ~2 minutes for cloud-init to finish. Check progress:
+
+```bash
+ssh root@<ip> tail -f /var/log/cloud-init-output.log
+```
+
+### VPS: provision
+
+Copy your age private key to the VPS, then clone and provision:
+
+```bash
+# copy age key
+ssh root@<ip> "mkdir -p ~/.config/sops/age"
+cat ~/.config/sops/age/keys.txt | ssh root@<ip> "cat > ~/.config/sops/age/keys.txt"
+
+# clone using a GitHub token (agents use their own tokens from secrets after provisioning)
+ssh root@<ip> "git clone https://oauth2:ghp_yourtoken@github.com/you/my-team.git && cd my-team && clem provision"
+```
+
+### VPS: authenticate each agent
 
 ```bash
 ssh root@<ip>
-git clone git@github.com:you/my-team.git && cd my-team
-clem provision
-```
-
-### 6. Authenticate each agent
-
-```bash
+cd my-team
 clem login
 # prints a URL per agent — open each in your browser
 ```
 
-### 7. Start
+Each agent's Claude Code OAuth token is cached under its OS user home. This is a one-time step.
+
+Agents use `gh` via the `GH_TOKEN` already in their `.env` from provisioning — no separate `gh auth login` needed on the VPS.
+
+### VPS: start
 
 ```bash
 clem up
