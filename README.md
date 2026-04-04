@@ -10,13 +10,21 @@ Tired of Crustaceans? Try Clementine.
 
 ## Prerequisites
 
-- Ubuntu 24.04 or later
-- `tmux`, `systemd`
-- [Claude Code](https://claude.ai/code) installed at `~/.local/bin/claude`
-- [age](https://github.com/FiloSottile/age) and [sops](https://github.com/getsops/sops) for secrets
-- [mcp-discord](https://github.com/Bytelope/mcp-discord) (Bytelope fork — required for forum channel support)
-- A Discord server with a bot token per agent
-- `sudo` access on the target machine
+**Local machine** (where you run `clem` commands):
+- `clem` binary (see Install below)
+- `age`, `sops`, `yq` for secret management
+- `gh` CLI for creating the GitHub repo
+- `ssh`, `scp` for remote provisioning
+
+**VPS** (Ubuntu 24.04 or later — handled by cloud-init):
+- `tmux`, `git`, `age`, `sops`
+- [Claude Code](https://claude.ai/code) at `/usr/local/bin/claude`
+- [mcp-discord](https://github.com/Bytelope/mcp-discord) (Bytelope fork — required for forum channel support) at `/usr/local/bin/mcp-discord`
+- `sudo` / root access
+
+**Accounts:**
+- A private Discord server with a bot token per agent (see [Discord setup](#discord-setup))
+- A GitHub token per agent (see [GitHub bot setup](#github-bot-setup))
 
 ---
 
@@ -39,7 +47,9 @@ go build -o /usr/local/bin/clem .
 
 ## Quick start on Hetzner
 
-Steps 1-3 run on your local machine. Steps 4-6 run on the VPS over SSH.
+Before starting: set up your Discord server and GitHub tokens (see [Discord setup](#discord-setup) and [GitHub bot setup](#github-bot-setup)). You will need them in the secrets step below.
+
+The first three sections run on your local machine. The last three run on the VPS over SSH.
 
 ### Local: create your team repo
 
@@ -47,7 +57,13 @@ Steps 1-3 run on your local machine. Steps 4-6 run on the VPS over SSH.
 gh repo create my-team --private --clone && cd my-team
 ```
 
-Create `clem.yaml` (or run `clem init` to generate a commented template):
+Run `clem init` to generate `clem.yaml` and `CLAUDE.local.md`:
+
+```bash
+clem init
+```
+
+Then fill in the channel IDs and project description. The generated `clem.yaml` looks like this:
 
 ```yaml
 project: myteam
@@ -103,7 +119,7 @@ clem vault set discord-worker DISCORD_TOKEN="Bot your-worker-bot-token"
 Commit and push everything:
 
 ```bash
-git add clem.yaml .sops.yaml secrets.sops.yaml
+git add clem.yaml CLAUDE.local.md .sops.yaml secrets.sops.yaml
 git commit -m "init team config"
 git push
 ```
@@ -122,18 +138,10 @@ packages:
   - python3-pip
 
 runcmd:
-  # sops
-  - curl -sSfL https://github.com/getsops/sops/releases/latest/download/sops-v3.9.4.linux.amd64
-      -o /usr/local/bin/sops
-  - chmod +x /usr/local/bin/sops
-  # clem
-  - curl -sSfL https://github.com/jahwag/clem/releases/latest/download/clem-linux-amd64
-      -o /usr/local/bin/clem
-  - chmod +x /usr/local/bin/clem
-  # Claude Code
-  - curl -fsSL https://claude.ai/install.sh | sh
-  # mcp-discord (Bytelope fork — required for forum channel support)
-  - pip3 install git+https://github.com/Bytelope/mcp-discord.git
+  - "curl -sSfL https://github.com/getsops/sops/releases/latest/download/sops-v3.9.4.linux.amd64 -o /usr/local/bin/sops && chmod +x /usr/local/bin/sops"
+  - "curl -sSfL https://github.com/jahwag/clem/releases/latest/download/clem-linux-amd64 -o /usr/local/bin/clem && chmod +x /usr/local/bin/clem"
+  - "curl -fsSL https://claude.ai/install.sh | sh && ln -sf /root/.local/bin/claude /usr/local/bin/claude"
+  - "pip3 install git+https://github.com/Bytelope/mcp-discord.git"
 ```
 
 ```bash
@@ -147,6 +155,12 @@ hcloud server create \
 ```
 
 See [Hetzner Cloud locations](https://docs.hetzner.com/cloud/general/locations/) and pick the one closest to you.
+
+Get the server IP:
+
+```bash
+hcloud server describe my-team | grep "IPv4"
+```
 
 Add an alias to `~/.ssh/config` on your local machine so you can use `ssh my-team` instead of typing the IP everywhere:
 
@@ -259,8 +273,8 @@ The age private key (`~/.config/sops/age/keys.txt`) is the only secret that must
 
 ```
 clem init
-  Writes a commented clem.yaml template to the current directory.
-  Errors if clem.yaml already exists.
+  Writes clem.yaml and CLAUDE.local.md templates to the current directory.
+  Errors if either file already exists.
 
 clem provision [--config clem.yaml]
   Creates OS users, writes runner.sh, installs systemd services and watchdog.

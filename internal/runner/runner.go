@@ -12,7 +12,7 @@ set -m
 BACKOFF=10
 MAX_BACKOFF=900
 RESET_AFTER=300
-CLAUDE="$HOME/.local/bin/claude"
+CLAUDE="/usr/local/bin/claude"
 WORKDIR="$HOME/{{.Project}}"
 LOGFILE="$HOME/.claude/{{.AgentKey}}-runner.log"
 
@@ -30,7 +30,7 @@ cat > "$WORKDIR/.mcp.json" << MCPEOF
 {
   "mcpServers": {
     "discord-bot": {
-      "command": "{{.HomeDir}}/.local/bin/mcp-discord",
+      "command": "/usr/local/bin/mcp-discord",
       "env": { "DISCORD_TOKEN": "$DISCORD_TOKEN" }
     }
   }
