@@ -7,9 +7,15 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/jahwag/clem/internal/agent"
+	"github.com/jahwag/clem/internal/remote"
 	"github.com/jahwag/clem/internal/runner"
 	"github.com/jahwag/clem/internal/vault"
 	"github.com/jahwag/clem/internal/watchdog"
+)
+
+var (
+	provisionRemote  string
+	provisionGHToken string
 )
 
 var provisionCmd = &cobra.Command{
@@ -20,9 +26,19 @@ var provisionCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(provisionCmd)
+	provisionCmd.Flags().StringVar(&provisionRemote, "remote", "", "provision on a remote host via SSH (e.g. root@1.2.3.4)")
+	provisionCmd.Flags().StringVar(&provisionGHToken, "gh-token", "", "GitHub token for cloning the repo on the remote (falls back to GH_TOKEN env)")
 }
 
 func runProvision(cmd *cobra.Command, args []string) error {
+	if provisionRemote != "" {
+		token := provisionGHToken
+		if token == "" {
+			token = os.Getenv("GH_TOKEN")
+		}
+		return remote.Provision(provisionRemote, token)
+	}
+
 	if err := requireRoot(); err != nil {
 		return err
 	}

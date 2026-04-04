@@ -149,35 +149,44 @@ ssh root@<ip> tail -f /var/log/cloud-init-output.log
 
 ### VPS: provision
 
-Copy your age private key to the VPS, then clone and provision:
+```bash
+clem provision --remote root@<ip> --gh-token ghp_yourtoken
+```
+
+This runs three steps over SSH. If it fails, run them individually to find where:
 
 ```bash
-# copy age key
+# 1. copy age key
 ssh root@<ip> "mkdir -p ~/.config/sops/age"
-cat ~/.config/sops/age/keys.txt | ssh root@<ip> "cat > ~/.config/sops/age/keys.txt"
+scp ~/.config/sops/age/keys.txt root@<ip>:~/.config/sops/age/keys.txt
 
-# clone using a GitHub token (agents use their own tokens from secrets after provisioning)
-ssh root@<ip> "git clone https://oauth2:ghp_yourtoken@github.com/you/my-team.git && cd my-team && clem provision"
+# 2. clone repo (agents use their own tokens from .env after provisioning)
+ssh root@<ip> "git clone https://oauth2:ghp_yourtoken@github.com/you/my-team.git"
+
+# 3. provision
+ssh root@<ip> "cd my-team && clem provision"
 ```
 
 ### VPS: authenticate each agent
 
 ```bash
-ssh root@<ip>
-cd my-team
-clem login
-# prints a URL per agent — open each in your browser
+clem login --remote root@<ip>
 ```
 
-Each agent's Claude Code OAuth token is cached under its OS user home. This is a one-time step.
+Opens an SSH session and runs `clem login` on the VPS. A URL is printed per agent — open each in your local browser. Each agent's Claude Code OAuth token is cached under its OS user home. One-time step.
 
-Agents use `gh` via the `GH_TOKEN` already in their `.env` from provisioning — no separate `gh auth login` needed on the VPS.
+If it fails, run manually:
+
+```bash
+ssh -t root@<ip> "cd my-team && clem login"
+```
+
+Agents interact with GitHub via the `GH_TOKEN` already in their `.env` from provisioning — no separate `gh auth login` needed on the VPS.
 
 ### VPS: start
 
 ```bash
-clem up
-clem status
+ssh root@<ip> "cd my-team && clem up && clem status"
 ```
 
 Agents are now running 24/7. The watchdog restarts any dead sessions every 5 minutes.

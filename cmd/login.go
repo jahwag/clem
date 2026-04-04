@@ -7,19 +7,27 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/jahwag/clem/internal/agent"
+	"github.com/jahwag/clem/internal/remote"
 )
 
+var loginRemote string
+
 var loginCmd = &cobra.Command{
-	Use:   "login",
+	Use:   "login [agent...]",
 	Short: "Authenticate each agent with Claude (sudo -u <user> claude /login)",
 	RunE:  runLogin,
 }
 
 func init() {
 	rootCmd.AddCommand(loginCmd)
+	loginCmd.Flags().StringVar(&loginRemote, "remote", "", "run login on a remote host via SSH (e.g. root@1.2.3.4)")
 }
 
 func runLogin(cmd *cobra.Command, args []string) error {
+	if loginRemote != "" {
+		return remote.Login(loginRemote)
+	}
+
 	for agentKey, ac := range cfg.Agents {
 		osUser := cfg.OSUsername(agentKey)
 		fmt.Printf("[%s] %s (%s)\n", agentKey, ac.Name, osUser)
