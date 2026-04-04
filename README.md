@@ -139,7 +139,7 @@ hcloud server create \
   --name my-team
 ```
 
-Locations: `hel1` (Helsinki), `nbg1` (Nuremberg), `fsn1` (Falkenstein). Pick the one closest to you.
+Locations: `hel1` (Helsinki), `nbg1` (Nuremberg), `fsn1` (Falkenstein, Germany), `ash` (Ashburn, Virginia), `hil` (Hillsboro, Oregon), `sin` (Singapore). Pick the one closest to you.
 
 Wait ~2 minutes for cloud-init to finish. Check progress:
 
