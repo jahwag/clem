@@ -25,17 +25,12 @@ tail -500 "$LOGFILE" > "$LOGFILE.tmp" 2>/dev/null && mv "$LOGFILE.tmp" "$LOGFILE
 # Load secrets (written by clem provision, never committed)
 [ -f "$HOME/.env" ] && source "$HOME/.env"
 
-# Write ephemeral .mcp.json from env
-cat > "$WORKDIR/.mcp.json" << MCPEOF
-{
-  "mcpServers": {
-    "discord-bot": {
-      "command": "/usr/local/bin/mcp-discord",
-      "env": { "DISCORD_TOKEN": "$DISCORD_TOKEN" }
-    }
-  }
-}
-MCPEOF
+# Write ephemeral .mcp.json from env (python3 ensures correct JSON encoding)
+python3 -c "
+import json, os
+cfg = {'mcpServers': {'discord-bot': {'command': '/usr/local/bin/mcp-discord', 'env': {'DISCORD_TOKEN': os.environ.get('DISCORD_TOKEN', '')}}}}
+print(json.dumps(cfg, indent=2))
+" > "$WORKDIR/.mcp.json"
 
 SLEEP_ACTIVE={{.SleepActive}}
 SLEEP_NIGHT={{.SleepNight}}
@@ -48,8 +43,8 @@ while true; do
     (sleep 1 && tmux send-keys -t {{.AgentKey}} "" Enter
      sleep 25 && tmux send-keys -t {{.AgentKey}} "$PROMPT" Enter) &
     timeout 7200 $CLAUDE --dangerously-skip-permissions \
-        --model {{.Model}} \
-        --name {{.AgentName}} \
+        --model '{{.Model}}' \
+        --name '{{.AgentName}}' \
         --add-dir ~/.claude
 
     EXIT_CODE=$?
@@ -116,7 +111,7 @@ func Generate(cfg *config.Config, agentKey string) string {
 		AgentKey:    agentKey,
 		AgentName:   ac.Name,
 		Model:       ac.Model,
-		Prompt:      ac.Prompt,
+		Prompt:      strings.ReplaceAll(ac.Prompt, "'", `'\''`),
 		OSUser:      cfg.OSUsername(agentKey),
 		HomeDir:     fmt.Sprintf("/home/%s", cfg.OSUsername(agentKey)),
 		SleepActive: iterSec,

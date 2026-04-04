@@ -83,7 +83,11 @@ func Set(vaultName, keyval string) error {
 	}
 
 	// sops --set '["vaults"]["<vaultName>"]["KEY"] "value"' secrets.sops.yaml
-	setExpr := fmt.Sprintf(`["vaults"]["%s"]["%s"] "%s"`, vaultName, key, value)
+	setExpr := fmt.Sprintf(`["vaults"]["%s"]["%s"] "%s"`,
+		strings.ReplaceAll(vaultName, `"`, `\"`),
+		strings.ReplaceAll(key, `"`, `\"`),
+		strings.ReplaceAll(value, `"`, `\"`),
+	)
 	out, err := exec.Command("sops", "--set", setExpr, secretsFile).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("sops --set: %w\n%s", err, out)

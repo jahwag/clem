@@ -123,9 +123,15 @@ func Provision(host, ghToken string) error {
 	}
 
 	fmt.Println("\n--- step 2/3: clone repo")
+	cleanURL, _ := CloneURL("") // URL without embedded token (for fixing remote after clone)
 	cloneCmd := fmt.Sprintf("git clone %s ~/%s 2>/dev/null || (cd ~/%s && git pull)", cloneURL, repoName, repoName)
 	if err := SSH(host, cloneCmd); err != nil {
-		return fmt.Errorf("cloning repo: %w\nManual: ssh %s 'git clone %s ~/%s'", err, host, cloneURL, repoName)
+		return fmt.Errorf("cloning repo: %w\nManual: ssh %s 'git clone https://oauth2:<token>@github.com/... ~/%s'", err, host, repoName)
+	}
+	// Strip token from saved remote URL so it doesn't persist in .git/config
+	if cleanURL != "" {
+		fixRemote := fmt.Sprintf("cd ~/%s && git remote set-url origin %s", repoName, cleanURL)
+		_ = SSH(host, fixRemote) // best-effort
 	}
 
 	fmt.Println("\n--- step 3/3: clem provision")

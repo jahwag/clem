@@ -3,9 +3,12 @@ package config
 import (
 	"fmt"
 	"os"
+	"regexp"
 
 	"gopkg.in/yaml.v3"
 )
+
+var validName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
 
 type Config struct {
 	Project       string                 `yaml:"project"`
@@ -61,8 +64,16 @@ func Load(path string) (*Config, error) {
 	if cfg.Project == "" {
 		return nil, fmt.Errorf("config missing required field: project")
 	}
+	if !validName.MatchString(cfg.Project) {
+		return nil, fmt.Errorf("project name must match ^[a-z][a-z0-9-]{0,30}$, got: %q", cfg.Project)
+	}
 	if len(cfg.Agents) == 0 {
 		return nil, fmt.Errorf("config has no agents defined")
+	}
+	for key := range cfg.Agents {
+		if !validName.MatchString(key) {
+			return nil, fmt.Errorf("agent key must match ^[a-z][a-z0-9-]{0,30}$, got: %q", key)
+		}
 	}
 	return &cfg, nil
 }

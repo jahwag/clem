@@ -2,6 +2,7 @@ package watchdog
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/jahwag/clem/internal/config"
@@ -24,11 +25,13 @@ DISCORD_WEBHOOK=""
 send_alert() {
     local msg="$1"
     if [ -n "$DISCORD_TOKEN" ] && [ -n "{{.AlertChannel}}" ]; then
+        local body
+        body=$(python3 -c "import json,sys; print(json.dumps({'content':sys.argv[1]}))" "$msg")
         curl -s -X POST \
             "https://discord.com/api/v10/channels/{{.AlertChannel}}/messages" \
             -H "Authorization: Bot $DISCORD_TOKEN" \
             -H "Content-Type: application/json" \
-            -d "{\"content\": \"$msg\"}" > /dev/null 2>&1
+            -d "$body" > /dev/null 2>&1
     fi
     echo "$(date -Iseconds) ALERT: $msg"
 }
@@ -99,20 +102,23 @@ type watchdogParams struct {
 
 // GenerateScript renders the watchdog shell script for the project.
 func GenerateScript(cfg *config.Config) string {
-	// Find orchestrator (lead or first agent) for env source
-	orchestratorUser := ""
+	// Collect and sort agent keys for deterministic output
+	keys := make([]string, 0, len(cfg.Agents))
 	for key := range cfg.Agents {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	// Find orchestrator: prefer "lead", otherwise first alphabetically
+	orchestratorUser := ""
+	for _, key := range keys {
 		if key == "lead" {
 			orchestratorUser = cfg.OSUsername("lead")
 			break
 		}
 	}
 	if orchestratorUser == "" {
-		// pick first alphabetically
-		for key := range cfg.Agents {
-			orchestratorUser = cfg.OSUsername(key)
-			break
-		}
+		orchestratorUser = cfg.OSUsername(keys[0])
 	}
 
 	envSource := fmt.Sprintf(`[ -f "/home/%s/.env" ] && source "/home/%s/.env"`, orchestratorUser, orchestratorUser)
@@ -120,7 +126,7 @@ func GenerateScript(cfg *config.Config) string {
 	alertChannel := cfg.Coordination.Channels["alerts"]
 
 	var checks strings.Builder
-	for key := range cfg.Agents {
+	for _, key := range keys {
 		osUser := cfg.OSUsername(key)
 		svc := cfg.ServiceName(key)
 		checks.WriteString(fmt.Sprintf(`check_agent "%s" "%s" "%s"`+"\n", key, osUser, svc))
