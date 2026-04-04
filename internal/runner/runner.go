@@ -26,7 +26,7 @@ tail -500 "$LOGFILE" > "$LOGFILE.tmp" 2>/dev/null && mv "$LOGFILE.tmp" "$LOGFILE
 [ -f "$HOME/.env" ] && source "$HOME/.env"
 
 # Write ephemeral .mcp.json from env
-cat > "$WORKDIR/.mcp.json" << 'MCPEOF'
+cat > "$WORKDIR/.mcp.json" << MCPEOF
 {
   "mcpServers": {
     "discord-bot": {
