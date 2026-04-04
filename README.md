@@ -41,35 +41,50 @@ go build -o /usr/local/bin/clem .
 
 ### 1. Create the VPS
 
+Save this as `cloud-init.yaml`:
+
+```yaml
+#cloud-config
+packages:
+  - tmux
+  - git
+  - curl
+  - age
+  - python3-pip
+
+runcmd:
+  # sops
+  - curl -sSfL https://github.com/getsops/sops/releases/latest/download/sops-v3.9.4.linux.amd64
+      -o /usr/local/bin/sops
+  - chmod +x /usr/local/bin/sops
+  # clem
+  - curl -sSfL https://github.com/jahwag/clem/releases/latest/download/clem-linux-amd64
+      -o /usr/local/bin/clem
+  - chmod +x /usr/local/bin/clem
+  # Claude Code (installs to /root/.local/bin/claude)
+  - curl -fsSL https://claude.ai/install.sh | sh
+  # mcp-discord
+  - pip3 install mcp-discord
+```
+
+Then create the server:
+
 ```bash
 hcloud server create \
   --type cx33 \
   --image ubuntu-24.04 \
   --location hel1 \
   --ssh-key ~/.ssh/id_ed25519.pub \
+  --user-data-from-file cloud-init.yaml \
   --name my-team
 ```
 
 `hel1` is Helsinki — the closest Hetzner location to Sweden. Other options: `nbg1` (Nuremberg), `fsn1` (Falkenstein).
 
-### 2. SSH in and install dependencies
+Wait ~2 minutes for cloud-init to finish before SSHing in. Check progress with:
 
 ```bash
-ssh root@<ip>
-
-apt-get update && apt-get install -y tmux git curl
-
-# Claude Code
-curl -fsSL https://claude.ai/install.sh | sh
-
-# age + sops
-apt-get install -y age
-curl -sSfL https://github.com/getsops/sops/releases/latest/download/sops-v3.9.4.linux.amd64 \
-  -o /usr/local/bin/sops && chmod +x /usr/local/bin/sops
-
-# mcp-discord (Bytelope fork with forum support)
-pip3 install mcp-discord
-# or follow https://github.com/Bytelope/mcp-discord
+ssh root@<ip> tail -f /var/log/cloud-init-output.log
 ```
 
 ### 3. Create your team repo
