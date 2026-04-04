@@ -14,7 +14,7 @@ Tired of Crustaceans? Try Clementine.
 - `tmux`, `systemd`
 - [Claude Code](https://claude.ai/code) installed at `~/.local/bin/claude`
 - [age](https://github.com/FiloSottile/age) and [sops](https://github.com/getsops/sops) for secrets
-- [mcp-discord](https://github.com/Bytelope/mcp-discord) at `~/.local/bin/mcp-discord`
+- [mcp-discord](https://github.com/Bytelope/mcp-discord) (Bytelope fork — required for forum channel support)
 - A Discord server with a bot token per agent
 - `sudo` access on the target machine
 
@@ -63,8 +63,8 @@ runcmd:
   - chmod +x /usr/local/bin/clem
   # Claude Code (installs to /root/.local/bin/claude)
   - curl -fsSL https://claude.ai/install.sh | sh
-  # mcp-discord
-  - pip3 install mcp-discord
+  # mcp-discord (Bytelope fork — required for forum channel support)
+  - pip3 install git+https://github.com/Bytelope/mcp-discord.git
 ```
 
 Then create the server:
