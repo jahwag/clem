@@ -23,6 +23,16 @@ func runDown(cmd *cobra.Command, args []string) error {
 	}
 
 	for agentKey, ac := range cfg.Agents {
+		if ac.WebTerminalPort > 0 {
+			ttydSvc := cfg.TtydServiceName(agentKey)
+			fmt.Printf("stopping %s... ", ttydSvc)
+			if err := agent.StopService(ttydSvc); err != nil {
+				fmt.Println("FAILED")
+				return err
+			}
+			fmt.Println("ok")
+		}
+
 		svcName := cfg.ServiceName(agentKey)
 		fmt.Printf("stopping %s (%s)... ", ac.Name, svcName)
 		if err := agent.StopService(svcName); err != nil {

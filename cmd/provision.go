@@ -92,6 +92,16 @@ func runProvision(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("installing service for %s: %w", agentKey, err)
 		}
 		fmt.Printf("  installed %s\n", cfg.ServiceName(agentKey))
+
+		// 6. Install ttyd web terminal service (if configured)
+		if ac.WebTerminalPort > 0 {
+			ttydContent := runner.GenerateTtydService(cfg, agentKey)
+			ttydSvcName := cfg.TtydServiceName(agentKey)
+			if err := agent.InstallServiceByName(ttydSvcName, ttydContent); err != nil {
+				return fmt.Errorf("installing ttyd service for %s: %w", agentKey, err)
+			}
+			fmt.Printf("  installed %s (port %d)\n", ttydSvcName, ac.WebTerminalPort)
+		}
 	}
 
 	// 6. Install watchdog

@@ -74,6 +74,24 @@ func InstallService(cfg *config.Config, agentKey string, serviceContent string) 
 	return nil
 }
 
+// InstallServiceByName writes and enables a systemd service by explicit name.
+func InstallServiceByName(serviceName string, serviceContent string) error {
+	servicePath := filepath.Join("/etc/systemd/system", serviceName)
+
+	if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
+		return fmt.Errorf("writing service file %s: %w", servicePath, err)
+	}
+
+	if out, err := exec.Command("systemctl", "daemon-reload").CombinedOutput(); err != nil {
+		return fmt.Errorf("systemctl daemon-reload: %w\n%s", err, out)
+	}
+
+	if out, err := exec.Command("systemctl", "enable", serviceName).CombinedOutput(); err != nil {
+		return fmt.Errorf("systemctl enable %s: %w\n%s", serviceName, err, out)
+	}
+	return nil
+}
+
 // InstallWatchdogTimer writes and enables the watchdog service + timer.
 func InstallWatchdogTimer(cfg *config.Config, serviceContent, timerContent string) error {
 	svcName := cfg.WatchdogServiceName()

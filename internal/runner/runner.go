@@ -86,16 +86,33 @@ Restart=no
 WantedBy=multi-user.target
 `
 
+const ttydServiceTemplate = `[Unit]
+Description=Clem web terminal: {{.AgentName}} ({{.Project}})
+After=clem-{{.Project}}-{{.AgentKey}}.service
+BindsTo=clem-{{.Project}}-{{.AgentKey}}.service
+
+[Service]
+Type=simple
+User={{.OSUser}}
+ExecStart=/usr/local/bin/ttyd -R -p {{.TtydPort}} tmux attach-session -t {{.AgentKey}}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+`
+
 type RunnerParams struct {
-	Project    string
-	AgentKey   string
-	AgentName  string
-	Model      string
-	Prompt     string
-	OSUser     string
-	HomeDir    string
+	Project     string
+	AgentKey    string
+	AgentName   string
+	Model       string
+	Prompt      string
+	OSUser      string
+	HomeDir     string
 	SleepActive int
 	SleepNight  int
+	TtydPort    int
 }
 
 // Generate renders the runner.sh content for an agent.
@@ -133,6 +150,19 @@ func GenerateService(cfg *config.Config, agentKey string) string {
 	return renderTemplate(serviceTemplate, p)
 }
 
+// GenerateTtydService renders the systemd service unit for the agent's web terminal.
+func GenerateTtydService(cfg *config.Config, agentKey string) string {
+	ac := cfg.Agents[agentKey]
+	p := RunnerParams{
+		Project:   cfg.Project,
+		AgentKey:  agentKey,
+		AgentName: ac.Name,
+		OSUser:    cfg.OSUsername(agentKey),
+		TtydPort:  ac.WebTerminalPort,
+	}
+	return renderTemplate(ttydServiceTemplate, p)
+}
+
 // renderTemplate does simple {{.Field}} substitution without importing text/template
 // to keep the runner output readable and avoid escaping issues with bash.
 func renderTemplate(tmpl string, p RunnerParams) string {
@@ -146,6 +176,7 @@ func renderTemplate(tmpl string, p RunnerParams) string {
 		"{{.HomeDir}}", p.HomeDir,
 		"{{.SleepActive}}", fmt.Sprintf("%d", p.SleepActive),
 		"{{.SleepNight}}", fmt.Sprintf("%d", p.SleepNight),
+		"{{.TtydPort}}", fmt.Sprintf("%d", p.TtydPort),
 	)
 	return r.Replace(tmpl)
 }

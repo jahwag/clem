@@ -28,9 +28,9 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	sort.Strings(keys)
 
 	// Header
-	fmt.Printf("%-10s %-20s %-20s %-8s %-8s %-20s %s\n",
-		"AGENT", "NAME", "USER", "SYSTEMD", "TMUX", "TOKEN EXPIRES", "LAST LOG")
-	fmt.Println(repeatStr("-", 110))
+	fmt.Printf("%-10s %-20s %-20s %-8s %-8s %-8s %-20s %s\n",
+		"AGENT", "NAME", "USER", "SYSTEMD", "TMUX", "TTYD", "TOKEN EXPIRES", "LAST LOG")
+	fmt.Println(repeatStr("-", 120))
 
 	for _, agentKey := range keys {
 		ac := cfg.Agents[agentKey]
@@ -41,6 +41,16 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		tmuxAlive := "no"
 		if agent.TmuxAlive(agentKey) {
 			tmuxAlive = "yes"
+		}
+
+		ttydStr := "-"
+		if ac.WebTerminalPort > 0 {
+			ttydState := agent.SystemdState(cfg.TtydServiceName(agentKey))
+			if ttydState == "active" {
+				ttydStr = fmt.Sprintf(":%d", ac.WebTerminalPort)
+			} else {
+				ttydStr = "off"
+			}
 		}
 
 		expiry := agent.TokenExpiry(osUser)
@@ -57,8 +67,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		logPath := fmt.Sprintf("/home/%s/.claude/%s-runner.log", osUser, agentKey)
 		lastLog := agent.LastLogLine(logPath)
 
-		fmt.Printf("%-10s %-20s %-20s %-8s %-8s %-20s %s\n",
-			agentKey, ac.Name, osUser, systemdState, tmuxAlive, expiryStr, lastLog)
+		fmt.Printf("%-10s %-20s %-20s %-8s %-8s %-8s %-20s %s\n",
+			agentKey, ac.Name, osUser, systemdState, tmuxAlive, ttydStr, expiryStr, lastLog)
 	}
 	return nil
 }

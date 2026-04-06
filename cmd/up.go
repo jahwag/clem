@@ -30,6 +30,16 @@ func runUp(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		fmt.Println("ok")
+
+		if ac.WebTerminalPort > 0 {
+			ttydSvc := cfg.TtydServiceName(agentKey)
+			fmt.Printf("starting %s (port %d)... ", ttydSvc, ac.WebTerminalPort)
+			if err := agent.StartService(ttydSvc); err != nil {
+				fmt.Println("FAILED")
+				return err
+			}
+			fmt.Println("ok")
+		}
 	}
 	return nil
 }

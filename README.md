@@ -23,6 +23,7 @@ Tired of Crustaceans? Try Clementine.
 - `tmux`, `git`, `age`, `sops`
 - [Claude Code](https://claude.ai/code) at `/usr/local/bin/claude`
 - [mcp-discord](https://github.com/Bytelope/mcp-discord) (Bytelope fork — required for forum channel support) at `/usr/local/bin/mcp-discord`
+- [`ttyd`](https://github.com/tsl0922/ttyd) (optional — for web-based terminal viewing)
 - `sudo` / root access
 
 **Accounts:**
@@ -126,12 +127,15 @@ packages:
   - curl
   - age
   - python3-pip
+  - golang-go
 
 runcmd:
-  - "curl -sSfL https://github.com/getsops/sops/releases/latest/download/sops-v3.9.4.linux.amd64 -o /usr/local/bin/sops && chmod +x /usr/local/bin/sops"
-  - "curl -sSfL https://github.com/jahwag/clem/releases/latest/download/clem-linux-amd64 -o /usr/local/bin/clem && chmod +x /usr/local/bin/clem"
-  - "curl -fsSL https://claude.ai/install.sh | sh && ln -sf /root/.local/bin/claude /usr/local/bin/claude"
-  - "pip3 install git+https://github.com/Bytelope/mcp-discord.git"
+  - "curl -sSfL https://github.com/getsops/sops/releases/download/v3.12.2/sops-v3.12.2.linux.amd64 -o /usr/local/bin/sops && chmod +x /usr/local/bin/sops"
+  - "curl -sSfL https://github.com/mikefarah/yq/releases/download/v4.52.5/yq_linux_amd64 -o /usr/local/bin/yq && chmod +x /usr/local/bin/yq"
+  - "git clone https://github.com/jahwag/clem.git /tmp/clem && cd /tmp/clem && go build -o /usr/local/bin/clem . && rm -rf /tmp/clem"
+  - "bash -c 'curl -fsSL https://claude.ai/install.sh | bash' && ln -sf /root/.local/bin/claude /usr/local/bin/claude"
+  - "pip3 install --break-system-packages --ignore-installed git+https://github.com/Bytelope/mcp-discord.git"
+  - "curl -sL https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -o /usr/local/bin/ttyd && chmod +x /usr/local/bin/ttyd"
 ```
 
 Commit and push everything:
@@ -271,11 +275,13 @@ agents:
     model: string        # Claude model ID
     iteration_minutes: int  # sleep between iterations during active hours (07-22); 2x at night
     vaults: [string]     # vault names from secrets.sops.yaml to merge into .env (optional)
+    web_terminal_port: int  # ttyd port for read-only web terminal (optional, 1024-65535)
     prompt: string       # injected at start of each session; must end with kill $PPID
 ```
 
 OS username: `<project>-<agentkey>` (e.g. `myteam-lead`)
 Systemd service: `clem-<project>-<agentkey>.service`
+Web terminal service: `clem-ttyd-<project>-<agentkey>.service` (if `web_terminal_port` is set)
 
 ---
 
