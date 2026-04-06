@@ -64,7 +64,8 @@ func WriteSettings(username string) error {
 
 	settings := `{
   "hasTrustDialogAccepted": true,
-  "hasCompletedProjectOnboarding": true
+  "hasCompletedProjectOnboarding": true,
+  "skipDangerousModePermissionPrompt": true
 }
 `
 	settingsPath := filepath.Join(claudeDir, "settings.json")
