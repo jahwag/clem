@@ -94,7 +94,7 @@ BindsTo=clem-{{.Project}}-{{.AgentKey}}.service
 [Service]
 Type=simple
 User={{.OSUser}}
-ExecStart=/usr/local/bin/ttyd -R -p {{.TtydPort}} tmux attach-session -t {{.AgentKey}}
+ExecStart=/usr/local/bin/ttyd -R -i 127.0.0.1 -p {{.TtydPort}} tmux attach-session -t {{.AgentKey}}
 Restart=on-failure
 RestartSec=5
 
