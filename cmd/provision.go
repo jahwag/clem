@@ -72,11 +72,16 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("  wrote /home/%s/.claude/settings.json\n", osUser)
 
-		// 4. Create working directory
+		// 4. Create working directory and copy CLAUDE.local.md
 		homeDir := fmt.Sprintf("/home/%s", osUser)
 		workDir := filepath.Join(homeDir, cfg.Project)
 		if err := os.MkdirAll(workDir, 0755); err != nil {
 			return fmt.Errorf("creating workdir %s: %w", workDir, err)
+		}
+		if src, err := os.ReadFile("CLAUDE.local.md"); err == nil {
+			dst := filepath.Join(workDir, "CLAUDE.local.md")
+			os.WriteFile(dst, src, 0644)
+			fmt.Printf("  copied CLAUDE.local.md to %s\n", workDir)
 		}
 		chownDir(workDir, osUser)
 
