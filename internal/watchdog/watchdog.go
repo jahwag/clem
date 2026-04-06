@@ -59,11 +59,13 @@ check_agent() {
     local tmux_alive="no"
     tmux has-session -t "$agent_key" 2>/dev/null && tmux_alive="yes"
 
-    if [ "$systemd_state" != "active" ] || [ "$tmux_alive" = "no" ]; then
-        echo "$(date -Iseconds) $agent_key: systemd=$systemd_state tmux=$tmux_alive — restarting"
+    # Only alert+restart if the systemd service itself is dead/failed.
+    # tmux being absent is normal between iterations (agent sleeps, tmux exits).
+    if [ "$systemd_state" != "active" ]; then
+        echo "$(date -Iseconds) $agent_key: systemd=$systemd_state — restarting"
         systemctl restart "$service"
         date +%s > "$cooldown_file"
-        send_alert "⚠️ clem/$PROJECT: $agent_key restarted (systemd=$systemd_state tmux=$tmux_alive)"
+        send_alert "⚠️ clem/$PROJECT: $agent_key service dead (systemd=$systemd_state) — restarted"
     fi
 }
 
