@@ -133,7 +133,7 @@ runcmd:
   - "curl -sSfL https://github.com/getsops/sops/releases/download/v3.12.2/sops-v3.12.2.linux.amd64 -o /usr/local/bin/sops && chmod +x /usr/local/bin/sops"
   - "curl -sSfL https://github.com/mikefarah/yq/releases/download/v4.52.5/yq_linux_amd64 -o /usr/local/bin/yq && chmod +x /usr/local/bin/yq"
   - "git clone https://github.com/jahwag/clem.git /tmp/clem && cd /tmp/clem && go build -o /usr/local/bin/clem . && rm -rf /tmp/clem"
-  - "bash -c 'curl -fsSL https://claude.ai/install.sh | bash' && ln -sf /root/.local/bin/claude /usr/local/bin/claude"
+  - "bash -c 'curl -fsSL https://claude.ai/install.sh | bash' && cp /root/.local/bin/claude /usr/local/bin/claude && chmod 755 /usr/local/bin/claude"
   - "pip3 install --break-system-packages --ignore-installed git+https://github.com/Bytelope/mcp-discord.git"
   - "curl -sL https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -o /usr/local/bin/ttyd && chmod +x /usr/local/bin/ttyd"
 ```
