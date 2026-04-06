@@ -225,10 +225,17 @@ clem login --remote my-team
 
 Opens an SSH session and runs `clem login` on the VPS. A URL is printed per agent — open each in your local browser. Each agent's Claude Code OAuth token is cached under its OS user home. One-time step.
 
-If it fails, run manually:
+If it fails, SSH in and run manually per agent:
 
 ```bash
-ssh -t my-team "cd my-team && clem login"
+ssh my-team
+su - myteam-lead
+claude /login
+# open the printed URL in your local browser, then exit
+exit
+su - myteam-worker
+claude /login
+exit
 ```
 
 Agents interact with GitHub via the `GH_TOKEN` already in their `.env` from provisioning — no separate `gh auth login` needed on the VPS.

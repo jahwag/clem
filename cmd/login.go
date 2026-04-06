@@ -14,7 +14,7 @@ var loginRemote string
 
 var loginCmd = &cobra.Command{
 	Use:   "login [agent...]",
-	Short: "Authenticate each agent with Claude (sudo -u <user> claude /login)",
+	Short: "Authenticate each agent with Claude (su - <user> -c 'claude /login')",
 	RunE:  runLogin,
 }
 
@@ -39,7 +39,7 @@ func runLogin(cmd *cobra.Command, args []string) error {
 		}
 
 		fmt.Printf("  running claude /login as %s\n", osUser)
-		loginCmd := exec.Command("sudo", "-u", osUser, "claude", "/login")
+		loginCmd := exec.Command("su", "-", osUser, "-c", "claude /login")
 		loginCmd.Stdin = os.Stdin
 		loginCmd.Stdout = os.Stdout
 		loginCmd.Stderr = os.Stderr
