@@ -55,6 +55,26 @@ func WriteEnvFile(username string, secrets map[string]string) error {
 	return nil
 }
 
+// WriteSettings writes Claude Code settings to skip MCP trust dialog and onboarding.
+func WriteSettings(username string) error {
+	claudeDir := fmt.Sprintf("/home/%s/.claude", username)
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		return fmt.Errorf("creating .claude dir: %w", err)
+	}
+
+	settings := `{
+  "hasTrustDialogAccepted": true,
+  "hasCompletedProjectOnboarding": true
+}
+`
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+	if err := os.WriteFile(settingsPath, []byte(settings), 0644); err != nil {
+		return fmt.Errorf("writing settings.json: %w", err)
+	}
+	ChownPath(claudeDir, username)
+	return nil
+}
+
 // InstallService writes and enables a systemd service for an agent.
 func InstallService(cfg *config.Config, agentKey string, serviceContent string) error {
 	serviceName := cfg.ServiceName(agentKey)

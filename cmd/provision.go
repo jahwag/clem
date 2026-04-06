@@ -66,7 +66,13 @@ func runProvision(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  wrote /home/%s/.env (%d secrets)\n", osUser, len(secrets))
 		}
 
-		// 3. Create working directory
+		// 3. Write Claude Code settings (skip MCP trust dialog, onboarding)
+		if err := agent.WriteSettings(osUser); err != nil {
+			return fmt.Errorf("writing settings for %s: %w", agentKey, err)
+		}
+		fmt.Printf("  wrote /home/%s/.claude/settings.json\n", osUser)
+
+		// 4. Create working directory
 		homeDir := fmt.Sprintf("/home/%s", osUser)
 		workDir := filepath.Join(homeDir, cfg.Project)
 		if err := os.MkdirAll(workDir, 0755); err != nil {
