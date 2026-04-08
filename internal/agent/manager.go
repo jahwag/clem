@@ -69,7 +69,15 @@ id_rsa
 		return fmt.Errorf("writing gitignore_global: %w", err)
 	}
 	exec.Command("chown", fmt.Sprintf("%s:%s", username, username), globalIgnore).Run()
-	exec.Command("sudo", "-u", username, "git", "config", "--global", "core.excludesfile", globalIgnore).Run()
+
+	// Write/update ~/.gitconfig directly to avoid sudo subshell quoting issues
+	gitConfigPath := filepath.Join(homeDir, ".gitconfig")
+	existing, _ := os.ReadFile(gitConfigPath)
+	if !strings.Contains(string(existing), "excludesfile") {
+		appended := string(existing) + fmt.Sprintf("\n[core]\n\texcludesfile = %s\n", globalIgnore)
+		os.WriteFile(gitConfigPath, []byte(appended), 0644)
+		exec.Command("chown", fmt.Sprintf("%s:%s", username, username), gitConfigPath).Run()
+	}
 
 	return nil
 }
