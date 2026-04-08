@@ -55,6 +55,45 @@ func WriteEnvFile(username string, secrets map[string]string) error {
 	return nil
 }
 
+// EnsureSSHKey generates an ed25519 SSH keypair for the agent if one doesn't exist.
+// The public key is returned so it can be displayed/distributed.
+func EnsureSSHKey(username string) (string, error) {
+	sshDir := fmt.Sprintf("/home/%s/.ssh", username)
+	keyPath := filepath.Join(sshDir, "id_ed25519")
+	pubPath := keyPath + ".pub"
+
+	if err := os.MkdirAll(sshDir, 0700); err != nil {
+		return "", fmt.Errorf("creating .ssh dir: %w", err)
+	}
+	exec.Command("chown", username+":"+username, sshDir).Run()
+	exec.Command("chmod", "700", sshDir).Run()
+
+	if _, err := os.Stat(keyPath); err == nil {
+		// Already exists; return the existing public key
+		data, err := os.ReadFile(pubPath)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(data)), nil
+	}
+
+	out, err := exec.Command("sudo", "-u", username, "ssh-keygen",
+		"-t", "ed25519",
+		"-N", "",
+		"-f", keyPath,
+		"-C", username+"@clem",
+	).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("ssh-keygen: %w\n%s", err, out)
+	}
+
+	data, err := os.ReadFile(pubPath)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
 // WriteSettings writes Claude Code settings to skip MCP trust dialog and onboarding.
 func WriteSettings(username string) error {
 	claudeDir := fmt.Sprintf("/home/%s/.claude", username)

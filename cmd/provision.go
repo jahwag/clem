@@ -72,6 +72,14 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("  wrote /home/%s/.claude/settings.json\n", osUser)
 
+		// 3a. Generate SSH keypair (idempotent)
+		pubKey, err := agent.EnsureSSHKey(osUser)
+		if err != nil {
+			fmt.Printf("  warning: ssh key for %s: %v\n", osUser, err)
+		} else {
+			fmt.Printf("  ssh pubkey: %s\n", pubKey)
+		}
+
 		// 4. Create working directory and copy CLAUDE.local.md
 		homeDir := fmt.Sprintf("/home/%s", osUser)
 		workDir := filepath.Join(homeDir, cfg.Project)
