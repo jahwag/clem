@@ -64,6 +64,13 @@ func runProvision(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("writing .env for %s: %w", agentKey, err)
 			}
 			fmt.Printf("  wrote /home/%s/.env (%d secrets)\n", osUser, len(secrets))
+
+			// If wrangler credentials are present, write the wrangler config file
+			if err := agent.WriteWranglerConfig(osUser, secrets); err != nil {
+				fmt.Printf("  warning: writing wrangler config: %v\n", err)
+			} else if secrets["WRANGLER_OAUTH_TOKEN"] != "" {
+				fmt.Printf("  wrote wrangler config for %s\n", osUser)
+			}
 		}
 
 		// 3. Write Claude Code settings (skip MCP trust dialog, onboarding)

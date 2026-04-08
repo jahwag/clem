@@ -82,6 +82,37 @@ id_rsa
 	return nil
 }
 
+// WriteWranglerConfig writes a wrangler OAuth config for the agent if the
+// matching env vars are present in the secrets map. Idempotent — safe to call
+// every provision. The wrangler binary auto-refreshes the OAuth token using
+// the refresh token, so this stays valid as long as the refresh token does.
+func WriteWranglerConfig(username string, secrets map[string]string) error {
+	oauth := secrets["WRANGLER_OAUTH_TOKEN"]
+	refresh := secrets["WRANGLER_REFRESH_TOKEN"]
+	expiration := secrets["WRANGLER_EXPIRATION"]
+	if oauth == "" || refresh == "" {
+		return nil // not configured for this agent
+	}
+
+	configDir := fmt.Sprintf("/home/%s/.config/.wrangler/config", username)
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("creating wrangler config dir: %w", err)
+	}
+
+	configContent := fmt.Sprintf(`oauth_token = "%s"
+expiration_time = "%s"
+refresh_token = "%s"
+scopes = [ "account:read", "user:read", "workers:write", "workers_kv:write", "workers_routes:write", "workers_scripts:write", "workers_tail:read", "d1:write", "pages:write", "zone:read", "ssl_certs:write", "ai:write", "queues:write", "pipelines:write", "secrets_store:write", "containers:write", "cloudchamber:write", "connectivity:admin", "offline_access" ]
+`, oauth, expiration, refresh)
+
+	configPath := filepath.Join(configDir, "default.toml")
+	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
+		return fmt.Errorf("writing wrangler config: %w", err)
+	}
+	ChownPath(fmt.Sprintf("/home/%s/.config", username), username)
+	return nil
+}
+
 // EnsureSSHKey generates an ed25519 SSH keypair for the agent if one doesn't exist.
 // The public key is returned so it can be displayed/distributed.
 func EnsureSSHKey(username string) (string, error) {
