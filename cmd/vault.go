@@ -52,7 +52,20 @@ var vaultListCmd = &cobra.Command{
 	},
 }
 
+var vaultDeleteCmd = &cobra.Command{
+	Use:   "delete <vault> [KEY]",
+	Short: "Delete a secret key (or entire vault if no key) from secrets.sops.yaml",
+	Args:  cobra.RangeArgs(1, 2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		key := ""
+		if len(args) == 2 {
+			key = args[1]
+		}
+		return vault.Delete(args[0], key)
+	},
+}
+
 func init() {
-	vaultCmd.AddCommand(vaultInitCmd, vaultSetCmd, vaultGetCmd, vaultListCmd)
+	vaultCmd.AddCommand(vaultInitCmd, vaultSetCmd, vaultGetCmd, vaultListCmd, vaultDeleteCmd)
 	rootCmd.AddCommand(vaultCmd)
 }

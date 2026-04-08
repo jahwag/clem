@@ -96,6 +96,35 @@ func Set(vaultName, keyval string) error {
 	return nil
 }
 
+// Delete removes a secret key (or whole vault if key is empty) from secrets.sops.yaml.
+func Delete(vaultName, key string) error {
+	if err := ensureSops(); err != nil {
+		return err
+	}
+
+	var unsetExpr string
+	if key == "" {
+		unsetExpr = fmt.Sprintf(`["vaults"]["%s"]`, strings.ReplaceAll(vaultName, `"`, `\"`))
+	} else {
+		unsetExpr = fmt.Sprintf(`["vaults"]["%s"]["%s"]`,
+			strings.ReplaceAll(vaultName, `"`, `\"`),
+			strings.ReplaceAll(key, `"`, `\"`),
+		)
+	}
+
+	// sops unset takes "file index" — file before index
+	out, err := exec.Command("sops", "unset", secretsFile, unsetExpr).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("sops unset: %w\n%s", err, out)
+	}
+	if key == "" {
+		fmt.Printf("Deleted vault %s\n", vaultName)
+	} else {
+		fmt.Printf("Deleted %s.%s\n", vaultName, key)
+	}
+	return nil
+}
+
 // Get retrieves a secret key for a vault from secrets.sops.yaml.
 func Get(vaultName, key string) error {
 	if err := ensureSops(); err != nil {
