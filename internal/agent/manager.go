@@ -34,6 +34,8 @@ func EnsureUser(username string) error {
 }
 
 // WriteEnvFile writes decrypted secrets to /home/<user>/.env with mode 0600.
+// Also writes a global gitignore that blocks .env, .git-credentials, and
+// secrets.sops.yaml from accidental commits.
 func WriteEnvFile(username string, secrets map[string]string) error {
 	homeDir := fmt.Sprintf("/home/%s", username)
 	envPath := filepath.Join(homeDir, ".env")
@@ -47,11 +49,28 @@ func WriteEnvFile(username string, secrets map[string]string) error {
 		return fmt.Errorf("writing .env for %s: %w", username, err)
 	}
 
-	// chown to the agent user
-	out, err := exec.Command("chown", fmt.Sprintf("%s:%s", username, username), envPath).CombinedOutput()
-	if err != nil {
+	if out, err := exec.Command("chown", fmt.Sprintf("%s:%s", username, username), envPath).CombinedOutput(); err != nil {
 		return fmt.Errorf("chown .env for %s: %w\n%s", username, err, out)
 	}
+
+	// Defense: write a global gitignore that blocks secret-bearing files.
+	// Even if the agent runs `git add .env` from any directory, this prevents staging.
+	globalIgnore := filepath.Join(homeDir, ".gitignore_global")
+	ignoreContent := `.env
+.env.*
+.git-credentials
+secrets.sops.yaml
+id_ed25519
+id_rsa
+*.pem
+*.key
+`
+	if err := os.WriteFile(globalIgnore, []byte(ignoreContent), 0644); err != nil {
+		return fmt.Errorf("writing gitignore_global: %w", err)
+	}
+	exec.Command("chown", fmt.Sprintf("%s:%s", username, username), globalIgnore).Run()
+	exec.Command("sudo", "-u", username, "git", "config", "--global", "core.excludesfile", globalIgnore).Run()
+
 	return nil
 }
 
