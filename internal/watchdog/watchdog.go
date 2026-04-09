@@ -59,13 +59,30 @@ check_agent() {
     local tmux_alive="no"
     tmux has-session -t "$agent_key" 2>/dev/null && tmux_alive="yes"
 
-    # Only alert+restart if the systemd service itself is dead/failed.
-    # tmux being absent is normal between iterations (agent sleeps, tmux exits).
+    # Case 1: systemd service dead — restart immediately
     if [ "$systemd_state" != "active" ]; then
         echo "$(date -Iseconds) $agent_key: systemd=$systemd_state — restarting"
         systemctl restart "$service"
         date +%s > "$cooldown_file"
         send_alert "⚠️ clem/$PROJECT: $agent_key service dead (systemd=$systemd_state) — restarted"
+        return
+    fi
+
+    # Case 2: stale agent — runner log hasn't been updated in 30+ minutes
+    # This catches agents stuck in long API calls, rate limits, or hung tools
+    local logfile="/home/${os_user}/.claude/${agent_key}-runner.log"
+    if [ -f "$logfile" ]; then
+        local log_age
+        log_age=$(( $(date +%s) - $(stat -c %Y "$logfile") ))
+        if (( log_age > 1800 )); then
+            echo "$(date -Iseconds) $agent_key: stale for $((log_age/60))min — hard restarting"
+            # Kill any claude processes for this user
+            pkill -u "$os_user" -f claude || true
+            sleep 2
+            systemctl restart "$service"
+            date +%s > "$cooldown_file"
+            send_alert "⚠️ clem/$PROJECT: $agent_key stale for $((log_age/60))min — hard restarted"
+        fi
     fi
 }
 
