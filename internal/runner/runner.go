@@ -28,7 +28,23 @@ tail -500 "$LOGFILE" > "$LOGFILE.tmp" 2>/dev/null && mv "$LOGFILE.tmp" "$LOGFILE
 # Write ephemeral .mcp.json from env (python3 ensures correct JSON encoding)
 python3 -c "
 import json, os
-cfg = {'mcpServers': {'discord-bot': {'command': '/usr/local/bin/mcp-discord', 'env': {'DISCORD_TOKEN': os.environ.get('DISCORD_TOKEN', '')}}}}
+cfg = {'mcpServers': {}}
+# Discord bot
+if os.environ.get('DISCORD_TOKEN'):
+    cfg['mcpServers']['discord-bot'] = {'command': '/usr/local/bin/mcp-discord', 'env': {'DISCORD_TOKEN': os.environ['DISCORD_TOKEN']}}
+# Prefect MCP (needs SSH_HOST + ES_PASSWORD)
+if os.environ.get('SSH_HOST') and os.environ.get('ES_PASSWORD'):
+    cfg['mcpServers']['prefect'] = {
+        'command': '/usr/local/bin/prefect-mcp',
+        'env': {
+            'SSH_HOST': os.environ['SSH_HOST'],
+            'SSH_USER': os.environ.get('SSH_USER', 'ubuntu'),
+            'SSH_KEY_PATH': os.path.expanduser('~/.ssh/id_ed25519'),
+            'PREFECT_API_PORT': os.environ.get('PREFECT_API_PORT', '4200'),
+            'ES_USER': os.environ.get('ES_USER', 'elastic'),
+            'ES_PASSWORD': os.environ['ES_PASSWORD'],
+        }
+    }
 print(json.dumps(cfg, indent=2))
 " > "$WORKDIR/.mcp.json"
 
