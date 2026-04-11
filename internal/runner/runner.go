@@ -45,6 +45,18 @@ if os.environ.get('SSH_HOST') and os.environ.get('ES_PASSWORD'):
             'ES_PASSWORD': os.environ['ES_PASSWORD'],
         }
     }
+# GitHub MCP (needs GH_TOKEN)
+if os.environ.get('GH_TOKEN'):
+    cfg['mcpServers']['github'] = {
+        'command': '/usr/local/bin/github-mcp-server',
+        'args': ['stdio'],
+        'env': {'GITHUB_PERSONAL_ACCESS_TOKEN': os.environ['GH_TOKEN']}
+    }
+# Context7 (library docs lookup — no auth required)
+cfg['mcpServers']['context7'] = {
+    'command': 'npx',
+    'args': ['-y', '@upstash/context7-mcp']
+}
 print(json.dumps(cfg, indent=2))
 " > "$WORKDIR/.mcp.json"
 
