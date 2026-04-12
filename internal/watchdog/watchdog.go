@@ -59,31 +59,45 @@ check_agent() {
     local tmux_alive="no"
     tmux has-session -t "$agent_key" 2>/dev/null && tmux_alive="yes"
 
-    # Case 1: systemd service dead — restart immediately
+    local fail_count_file="$COOLDOWN_DIR/${agent_key}.fails"
+
+    # Case 1: systemd service dead — restart, only alert after 3 consecutive failures
     if [ "$systemd_state" != "active" ]; then
         echo "$(date -Iseconds) $agent_key: systemd=$systemd_state — restarting"
         systemctl restart "$service"
+        local fails=$(( $(cat "$fail_count_file" 2>/dev/null || echo 0) + 1 ))
+        echo "$fails" > "$fail_count_file"
+        if (( fails >= 3 )); then
+            send_alert "🔴 clem/$PROJECT: $agent_key failed $fails times consecutively (systemd=$systemd_state)"
+            echo 0 > "$fail_count_file"
+        fi
         date +%s > "$cooldown_file"
-        send_alert "⚠️ clem/$PROJECT: $agent_key service dead (systemd=$systemd_state) — restarted"
         return
     fi
 
     # Case 2: stale agent — runner log hasn't been updated in 30+ minutes
-    # This catches agents stuck in long API calls, rate limits, or hung tools
     local logfile="/home/${os_user}/.claude/${agent_key}-runner.log"
     if [ -f "$logfile" ]; then
         local log_age
         log_age=$(( $(date +%s) - $(stat -c %Y "$logfile") ))
         if (( log_age > 1800 )); then
             echo "$(date -Iseconds) $agent_key: stale for $((log_age/60))min — hard restarting"
-            # Kill any claude processes for this user
             pkill -u "$os_user" -f claude || true
             sleep 2
             systemctl restart "$service"
+            local fails=$(( $(cat "$fail_count_file" 2>/dev/null || echo 0) + 1 ))
+            echo "$fails" > "$fail_count_file"
+            if (( fails >= 3 )); then
+                send_alert "🔴 clem/$PROJECT: $agent_key stale $fails times consecutively — may be rate-limited or broken"
+                echo 0 > "$fail_count_file"
+            fi
             date +%s > "$cooldown_file"
-            send_alert "⚠️ clem/$PROJECT: $agent_key stale for $((log_age/60))min — hard restarted"
+            return
         fi
     fi
+
+    # Agent is healthy — reset fail counter
+    [ -f "$fail_count_file" ] && echo 0 > "$fail_count_file"
 }
 
 {{.AgentChecks}}
