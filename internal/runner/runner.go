@@ -68,10 +68,24 @@ print(json.dumps(cfg, indent=2))
 
 SLEEP_ACTIVE={{.SleepActive}}
 SLEEP_NIGHT={{.SleepNight}}
+MAX_CLAUDE_MD_BYTES=10000
+MAX_LESSONS_MESSAGES=25
 
 while true; do
     START=$(date +%s)
     PROMPT='{{.Prompt}}'
+
+    # Guard: CLAUDE.local.md too large (token waste)
+    if [ -f "$WORKDIR/CLAUDE.local.md" ]; then
+        SIZE=$(stat -c %s "$WORKDIR/CLAUDE.local.md" 2>/dev/null || echo 0)
+        if (( SIZE > MAX_CLAUDE_MD_BYTES )); then
+            log "WARNING: CLAUDE.local.md is ${SIZE} bytes (max ${MAX_CLAUDE_MD_BYTES}) — alerting"
+            source "$HOME/.env" 2>/dev/null
+            [ -n "$DISCORD_TOKEN" ] && curl -s -X POST "https://discord.com/api/v10/channels/{{.AlertChannel}}/messages" \
+                -H "Authorization: Bot $DISCORD_TOKEN" -H "Content-Type: application/json" \
+                -d "{\"content\":\"⚠️ {{.AgentName}}: CLAUDE.local.md is ${SIZE} bytes (>${MAX_CLAUDE_MD_BYTES}). Trim it to reduce token waste.\"}" > /dev/null 2>&1
+        fi
+    fi
 
     log "Starting {{.AgentName}} (fresh session)"
     (sleep 1 && tmux send-keys -t {{.AgentKey}} "" Enter
@@ -137,16 +151,17 @@ WantedBy=multi-user.target
 `
 
 type RunnerParams struct {
-	Project     string
-	AgentKey    string
-	AgentName   string
-	Model       string
-	Prompt      string
-	OSUser      string
-	HomeDir     string
-	SleepActive int
-	SleepNight  int
-	TtydPort    int
+	Project      string
+	AgentKey     string
+	AgentName    string
+	Model        string
+	Prompt       string
+	OSUser       string
+	HomeDir      string
+	SleepActive  int
+	SleepNight   int
+	TtydPort     int
+	AlertChannel string
 }
 
 // Generate renders the runner.sh content for an agent.
@@ -158,15 +173,16 @@ func Generate(cfg *config.Config, agentKey string) string {
 	}
 
 	p := RunnerParams{
-		Project:     cfg.Project,
-		AgentKey:    agentKey,
-		AgentName:   ac.Name,
-		Model:       ac.Model,
-		Prompt:      strings.ReplaceAll(ac.Prompt, "'", `'\''`),
-		OSUser:      cfg.OSUsername(agentKey),
-		HomeDir:     fmt.Sprintf("/home/%s", cfg.OSUsername(agentKey)),
-		SleepActive: iterSec,
-		SleepNight:  iterSec * 2,
+		Project:      cfg.Project,
+		AgentKey:     agentKey,
+		AgentName:    ac.Name,
+		Model:        ac.Model,
+		Prompt:       strings.ReplaceAll(ac.Prompt, "'", `'\''`),
+		OSUser:       cfg.OSUsername(agentKey),
+		HomeDir:      fmt.Sprintf("/home/%s", cfg.OSUsername(agentKey)),
+		SleepActive:  iterSec,
+		SleepNight:   iterSec * 2,
+		AlertChannel: cfg.Coordination.Channels["alerts"],
 	}
 	return renderTemplate(runnerTemplate, p)
 }
@@ -211,6 +227,7 @@ func renderTemplate(tmpl string, p RunnerParams) string {
 		"{{.SleepActive}}", fmt.Sprintf("%d", p.SleepActive),
 		"{{.SleepNight}}", fmt.Sprintf("%d", p.SleepNight),
 		"{{.TtydPort}}", fmt.Sprintf("%d", p.TtydPort),
+		"{{.AlertChannel}}", p.AlertChannel,
 	)
 	return r.Replace(tmpl)
 }
