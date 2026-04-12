@@ -57,6 +57,12 @@ cfg['mcpServers']['context7'] = {
     'command': 'npx',
     'args': ['-y', '@upstash/context7-mcp']
 }
+# Typefully (social media scheduling — remote MCP server)
+if os.environ.get('TYPEFULLY_API_KEY'):
+    cfg['mcpServers']['typefully'] = {
+        'type': 'http',
+        'url': 'https://mcp.typefully.com/mcp?TYPEFULLY_API_KEY=' + os.environ['TYPEFULLY_API_KEY']
+    }
 print(json.dumps(cfg, indent=2))
 " > "$WORKDIR/.mcp.json"
 
