@@ -92,7 +92,8 @@ while true; do
 
     log "Starting {{.AgentName}} (fresh session)"
     (sleep 1 && tmux send-keys -t {{.AgentKey}} "" Enter
-     sleep 25 && tmux send-keys -t {{.AgentKey}} "$PROMPT" Enter) &
+     sleep 25 && tmux send-keys -l -t {{.AgentKey}} "$PROMPT"
+     sleep 2 && tmux send-keys -t {{.AgentKey}} Enter) &
     timeout 7200 $CLAUDE --dangerously-skip-permissions \
         --model '{{.Model}}' \
         --name '{{.AgentName}}' \
