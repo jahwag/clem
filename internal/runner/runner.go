@@ -141,6 +141,7 @@ const ttydServiceTemplate = `[Unit]
 Description=Clem web terminal: {{.AgentName}} ({{.Project}})
 After=clem-{{.Project}}-{{.AgentKey}}.service
 BindsTo=clem-{{.Project}}-{{.AgentKey}}.service
+PartOf=clem-{{.Project}}-{{.AgentKey}}.service
 
 [Service]
 Type=simple
