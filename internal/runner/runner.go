@@ -12,7 +12,7 @@ set -m
 BACKOFF=10
 MAX_BACKOFF=900
 RESET_AFTER=300
-CLAUDE="/usr/local/bin/claude"
+CLAUDE="$HOME/.local/bin/claude"
 WORKDIR="$HOME/{{.Project}}"
 LOGFILE="$HOME/.claude/{{.AgentKey}}-runner.log"
 
@@ -86,6 +86,9 @@ while true; do
                 -d "{\"content\":\"⚠️ {{.AgentName}}: CLAUDE.local.md is ${SIZE} bytes (>${MAX_CLAUDE_MD_BYTES}). Trim it to reduce token waste.\"}" > /dev/null 2>&1
         fi
     fi
+
+    log "Updating claude"
+    "$CLAUDE" install 2>&1 | tail -5 | tee -a "$LOGFILE" || log "claude install failed, continuing with current version"
 
     log "Starting {{.AgentName}} (fresh session)"
     (sleep 1 && tmux send-keys -t {{.AgentKey}} "" Enter

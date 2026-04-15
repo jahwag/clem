@@ -302,6 +302,41 @@ func ChownPath(path, username string) {
 	exec.Command("chown", "-R", fmt.Sprintf("%s:%s", username, username), path).Run()
 }
 
+// EnsureOwnedDir creates path (and any missing parents) and chowns the full
+// tree to username. Use this instead of os.MkdirAll when the caller is root
+// but the resulting directory must belong to an agent user.
+func EnsureOwnedDir(path, username string) error {
+	if err := os.MkdirAll(path, 0755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", path, err)
+	}
+	out, err := exec.Command("chown", "-R", fmt.Sprintf("%s:%s", username, username), path).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("chown %s to %s: %w\n%s", path, username, err, out)
+	}
+	return nil
+}
+
+// InstallClaude runs the official Claude install script as the given user so
+// the binary lands in ~/.local/bin/claude owned by that user. Idempotent —
+// the install script handles re-runs and applies the latest version.
+func InstallClaude(username string) error {
+	cmd := exec.Command("sudo", "-iu", username, "bash", "-c",
+		"curl -fsSL https://claude.ai/install.sh | bash")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("installing claude for %s: %w\n%s", username, err, out)
+	}
+	claudePath := fmt.Sprintf("/home/%s/.local/bin/claude", username)
+	info, err := os.Stat(claudePath)
+	if err != nil {
+		return fmt.Errorf("claude not found at %s after install: %w", claudePath, err)
+	}
+	if info.Mode()&0111 == 0 {
+		return fmt.Errorf("claude at %s is not executable", claudePath)
+	}
+	return nil
+}
+
 // LastLogLine returns the last non-empty line of a log file.
 func LastLogLine(logPath string) string {
 	out, err := exec.Command("tail", "-n", "1", logPath).Output()

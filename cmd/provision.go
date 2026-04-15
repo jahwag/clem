@@ -54,6 +54,13 @@ func runProvision(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("agent %s: %w", agentKey, err)
 		}
 
+		// 1a. Install claude into the agent user's home so self-update works
+		// and the runner always invokes a binary owned by the agent user.
+		fmt.Printf("  installing claude for %s\n", osUser)
+		if err := agent.InstallClaude(osUser); err != nil {
+			return fmt.Errorf("installing claude for %s: %w", osUser, err)
+		}
+
 		// 2. Decrypt and write .env
 		secrets, err := vault.DecryptForAgent(agentKey, ac.Vaults)
 		if err != nil {
@@ -87,11 +94,18 @@ func runProvision(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  ssh pubkey: %s\n", pubKey)
 		}
 
-		// 4. Create working directory and copy CLAUDE.local.md
+		// 4. Ensure agent-owned directories (workdir, ~/.local/bin, ~/.claude).
+		// MkdirAll as root would leave intermediate parents (.local, .claude)
+		// root-owned, which breaks the runner's log writes and claude's
+		// credential reads. EnsureOwnedDir chowns the full tree.
 		homeDir := fmt.Sprintf("/home/%s", osUser)
 		workDir := filepath.Join(homeDir, cfg.Project)
-		if err := os.MkdirAll(workDir, 0755); err != nil {
-			return fmt.Errorf("creating workdir %s: %w", workDir, err)
+		binDir := filepath.Join(homeDir, ".local", "bin")
+		claudeDir := filepath.Join(homeDir, ".claude")
+		for _, d := range []string{workDir, binDir, claudeDir} {
+			if err := agent.EnsureOwnedDir(d, osUser); err != nil {
+				return fmt.Errorf("ensuring %s: %w", d, err)
+			}
 		}
 		if src, err := os.ReadFile("CLAUDE.local.md"); err == nil {
 			dst := filepath.Join(workDir, "CLAUDE.local.md")
@@ -102,10 +116,7 @@ func runProvision(cmd *cobra.Command, args []string) error {
 
 		// 4. Write runner.sh
 		runnerContent := runner.Generate(cfg, agentKey)
-		runnerPath := filepath.Join(homeDir, ".local", "bin", "clem-runner.sh")
-		if err := os.MkdirAll(filepath.Dir(runnerPath), 0755); err != nil {
-			return fmt.Errorf("creating bin dir: %w", err)
-		}
+		runnerPath := filepath.Join(binDir, "clem-runner.sh")
 		if err := os.WriteFile(runnerPath, []byte(runnerContent), 0755); err != nil {
 			return fmt.Errorf("writing runner.sh for %s: %w", agentKey, err)
 		}
