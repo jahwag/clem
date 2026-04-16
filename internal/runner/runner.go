@@ -68,7 +68,7 @@ print(json.dumps(cfg, indent=2))
 
 SLEEP_ACTIVE={{.SleepActive}}
 SLEEP_NIGHT={{.SleepNight}}
-MAX_CLAUDE_MD_BYTES=10000
+MAX_CLAUDE_MD_BYTES=12288
 MAX_LESSONS_MESSAGES=25
 
 while true; do
