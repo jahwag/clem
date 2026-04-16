@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/jahwag/clem/internal/agent"
+	"github.com/jahwag/clem/internal/agentdoc"
 	"github.com/jahwag/clem/internal/remote"
 	"github.com/jahwag/clem/internal/runner"
 	"github.com/jahwag/clem/internal/vault"
@@ -107,10 +108,16 @@ func runProvision(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("ensuring %s: %w", d, err)
 			}
 		}
-		if src, err := os.ReadFile("CLAUDE.local.md"); err == nil {
+		content, mode, err := agentdoc.Render(cfg, agentKey, ".")
+		if err != nil {
+			return fmt.Errorf("rendering CLAUDE.local.md for %s: %w", agentKey, err)
+		}
+		if content != nil {
 			dst := filepath.Join(workDir, "CLAUDE.local.md")
-			os.WriteFile(dst, src, 0644)
-			fmt.Printf("  copied CLAUDE.local.md to %s\n", workDir)
+			if err := os.WriteFile(dst, content, 0644); err != nil {
+				return fmt.Errorf("writing %s: %w", dst, err)
+			}
+			fmt.Printf("  wrote %s (%s, %d bytes)\n", dst, mode, len(content))
 		}
 		chownDir(workDir, osUser)
 

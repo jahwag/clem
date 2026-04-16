@@ -11,9 +11,10 @@ import (
 var validName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
 
 type Config struct {
-	Project       string                 `yaml:"project"`
-	Coordination  Coordination           `yaml:"coordination"`
-	Agents        map[string]AgentConfig `yaml:"agents"`
+	Project          string                 `yaml:"project"`
+	PrimaryMilestone string                 `yaml:"primary_milestone"`
+	Coordination     Coordination           `yaml:"coordination"`
+	Agents           map[string]AgentConfig `yaml:"agents"`
 }
 
 type Coordination struct {
