@@ -1,0 +1,25 @@
+project: myproject
+coordination:
+  backend: discord
+  server_id: "${DISCORD_SERVER_ID}"
+  channels:
+    general: "${DISCORD_GENERAL_CHANNEL}"
+    tasks:   "${DISCORD_TASKS_CHANNEL}"
+    alerts:  "${DISCORD_ALERTS_CHANNEL}"
+    lessons: "${DISCORD_LESSONS_CHANNEL}"
+
+agents:
+  lead:
+    name: "Amara"
+    role: "Lead Software Engineer"
+    model: "claude-sonnet-4-6"
+    iteration: 10m
+    prompt: "Act as Amara per CLAUDE.local.md. Check Discord #tasks for tasks assigned to you. Work on ONE task. When done post results and run: kill $PPID. If no tasks: kill $PPID"
+
+  worker:
+    name: "Athena"
+    role: "Software Engineer"
+    model: "claude-sonnet-4-6"
+    iteration: 5m
+    reports_to: lead
+    prompt: "Act as Athena per CLAUDE.local.md. Check Discord #tasks for tasks assigned to you. Work on ONE task. When done post results and run: kill $PPID. If no tasks: kill $PPID"

@@ -1,0 +1,43 @@
+# Sample clem.yaml — points agents at an Ollama server on the host.
+# Start Ollama on the host first and pull the NVIDIA Nemotron 3 Nano 4B:
+#   ollama serve
+#   ollama pull nemotron-3-nano:4b   # ~2.8 GB — fits 8 GB MacBook Air
+#
+# Why this model: NVIDIA-trained for agentic use. At 4B it still emits proper
+# tool_use blocks, which is rare at this size. Works with both claude-code
+# and opencode runtimes.
+#
+# From inside a podman/docker container, the host is reachable via
+# host.containers.internal (podman) or host.docker.internal (docker).
+# Adjust provider_url if you are running clem directly on the host
+# (use http://127.0.0.1:11434 in that case).
+
+project: sample
+
+coordination:
+  backend: discord
+  server_id: "${DISCORD_SERVER_ID}"
+  channels:
+    general: "${DISCORD_GENERAL_CHANNEL}"
+    tasks:   "${DISCORD_TASKS_CHANNEL}"
+    alerts:  "${DISCORD_ALERTS_CHANNEL}"
+    lessons: "${DISCORD_LESSONS_CHANNEL}"
+
+agents:
+  lead:
+    name: "Clementine"
+    role: "Lead Software Engineer"
+    runtime: claude-code
+    model: "nemotron-3-nano:4b"  # NVIDIA, proven tool_use at 4B, 2.8 GB
+    provider: ollama
+    provider_url: "http://host.containers.internal:11434"
+    iteration: 30s
+    web_terminal_port: 7681
+    web_terminal_bind: 0.0.0.0       # safe inside container; host firewall / podman port map is the guard
+    vaults: [github, discord-lead]
+    prompt: >-
+      You are the {{agent.name}} Discord bot. Messages authored by {{agent.name}} in
+      #general are your own previous posts — do not respond to yourself.
+      Every iteration: read the last 5 messages in #general via mcp__discord-bot__read_messages.
+      If a message from a different user addresses you or mentions {{agent.name}}, reply via
+      mcp__discord-bot__send_message. Otherwise do nothing. Then run bash: kill $PPID

@@ -1,0 +1,41 @@
+# Sample clem.yaml — Slack coordination + local Nemotron via Ollama.
+# Start Ollama on the host first and pull the model:
+#   ollama serve
+#   ollama pull nemotron-3-nano:4b
+#
+# Slack channel IDs come from environment variables (expanded at load time):
+#   export SLACK_WORKSPACE_ID=T0123...
+#   export SLACK_GENERAL_CHANNEL=C0123...
+#   export SLACK_TASKS_CHANNEL=C0456...
+#   export SLACK_ALERTS_CHANNEL=C0789...
+#   export SLACK_LESSONS_CHANNEL=C0abc...
+
+project: sample
+
+coordination:
+  backend: slack
+  server_id: "${SLACK_WORKSPACE_ID}"
+  channels:
+    general: "${SLACK_GENERAL_CHANNEL}"
+    tasks:   "${SLACK_TASKS_CHANNEL}"
+    alerts:  "${SLACK_ALERTS_CHANNEL}"
+    lessons: "${SLACK_LESSONS_CHANNEL}"
+
+agents:
+  lead:
+    name: "Clementine"
+    role: "Lead Software Engineer"
+    runtime: claude-code
+    model: "nemotron-3-nano:4b"
+    provider: ollama
+    provider_url: "http://host.containers.internal:11434"
+    iteration: 30s
+    web_terminal_port: 7681
+    web_terminal_bind: 0.0.0.0       # safe inside container; host firewall / podman port map is the guard
+    vaults: [github, slack-lead]
+    prompt: >-
+      You are the {{agent.name}} Slack bot. Messages authored by {{agent.name}} in
+      #general are your own previous posts — do not respond to yourself.
+      Every iteration: read the last 5 messages in #general via mcp__slack-mcp__conversations_history.
+      If a message from a different user addresses you or mentions {{agent.name}}, reply via
+      mcp__slack-mcp__conversations_add_message. Otherwise do nothing. Then run bash: kill $PPID
