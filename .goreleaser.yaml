@@ -16,9 +16,12 @@ builds:
       - -trimpath
     ldflags:
       - -s -w -X github.com/jahwag/clem/cmd.Version={{ .Version }}
+    # Linux-only: provisioning uses systemd, useradd, and /home/<user> paths.
+    # A darwin build would compile but `sudo clem provision` fails on the
+    # first useradd call. Re-enable once the host layer is abstracted
+    # (see the macOS-port roadmap issue).
     goos:
       - linux
-      - darwin
     goarch:
       - amd64
       - arm64
