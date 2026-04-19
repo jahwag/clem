@@ -137,6 +137,17 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("  installed pre-push secret-scan hook\n")
 
+		// 3c. Turn on SSH commit signing using the agent's own keypair.
+		// Branch protection's required_signatures rule rejects unsigned
+		// commits; without this, agent PRs can't merge. Operator must
+		// upload the same pubkey to the agent's GitHub account as a
+		// Signing Key for the signature to show Verified on github.com.
+		if err := agent.ConfigureGitSigning(osUser); err != nil {
+			fmt.Printf("  warning: commit signing config for %s: %v\n", osUser, err)
+		} else {
+			fmt.Printf("  configured ssh commit signing\n")
+		}
+
 		// 4. Ensure agent-owned directories (workdir, ~/.local/bin, ~/.claude).
 		// MkdirAll as root would leave intermediate parents (.local, .claude)
 		// root-owned, which breaks the runner's log writes and claude's

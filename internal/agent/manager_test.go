@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/base64"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -87,6 +88,63 @@ func TestPrePushHookContent_IsExecutableBash(t *testing.T) {
 	if !strings.Contains(prePushHookContent, SecretPatternRegex) {
 		t.Error("pre-push hook should embed the exact SecretPatternRegex so bash and Go agree on behaviour")
 	}
+	if !strings.Contains(prePushHookContent, UnicodeTrapRegex) {
+		t.Error("pre-push hook should embed the exact UnicodeTrapRegex")
+	}
+	if !strings.Contains(prePushHookContent, "base64 -d") {
+		t.Error("pre-push hook should include a base64 decode pass")
+	}
+}
+
+// TestUnicodeTrapRegex_MatchesHiddenCharacters covers the red-team A3 class:
+// zero-width, bidi-override, and BOM characters used to smuggle hidden
+// instructions past human review.
+func TestUnicodeTrapRegex_MatchesHiddenCharacters(t *testing.T) {
+	re, err := regexp.Compile(UnicodeTrapRegex)
+	if err != nil {
+		t.Fatalf("regex compile: %v", err)
+	}
+	traps := []struct {
+		name  string
+		input string
+	}{
+		{"zero-width space", "hello\u200Bworld"},
+		{"zero-width non-joiner", "hello\u200Cworld"},
+		{"zero-width joiner", "hello\u200Dworld"},
+		{"LTR mark", "hello\u200Eworld"},
+		{"RTL mark", "hello\u200Fworld"},
+		{"line separator", "hello\u2028world"},
+		{"paragraph separator", "hello\u2029world"},
+		{"LTR embedding", "hello\u202Aworld"},
+		{"RTL embedding", "hello\u202Bworld"},
+		{"pop directional formatting", "hello\u202Cworld"},
+		{"LTR override", "hello\u202Dworld"},
+		{"RTL override", "hello\u202Eworld"},
+		{"BOM mid-string", "hello\uFEFFworld"},
+	}
+	for _, tc := range traps {
+		if !re.MatchString(tc.input) {
+			t.Errorf("UnicodeTrapRegex should match %s (%q) but did not", tc.name, tc.input)
+		}
+	}
+}
+
+func TestUnicodeTrapRegex_DoesNotMatchPrintableText(t *testing.T) {
+	re, err := regexp.Compile(UnicodeTrapRegex)
+	if err != nil {
+		t.Fatalf("regex compile: %v", err)
+	}
+	for _, s := range []string{
+		"regular ASCII text",
+		"unicode prose: café résumé naïve",
+		"emoji ok 🍊",
+		"cjk ok 漢字",
+		"whitespace \t\n\r fine",
+	} {
+		if re.MatchString(s) {
+			t.Errorf("UnicodeTrapRegex should NOT match %q", s)
+		}
+	}
 }
 
 // TestPrePushHook_BlocksSecretPush writes the hook to a temp dir and runs it
@@ -130,6 +188,149 @@ func TestPrePushHook_AllowsCleanPush(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hook should have exited 0 on clean diff, got error %v. output:\n%s", err, out)
 	}
+}
+
+// TestPrePushHook_BlocksBase64EncodedSecret: red-team attack A9 (encoded
+// exfil). Attacker base64-encodes a ghp_ token and pastes the encoded blob.
+// A naive literal scanner misses it; Pass 2 decodes and re-scans.
+func TestPrePushHook_BlocksBase64EncodedSecret(t *testing.T) {
+	requireHookDeps(t)
+	token := "ghp_1234567890abcdefghijklmnopqrstuvwxyz"
+	encoded := base64.StdEncoding.EncodeToString([]byte(token))
+	hookPath := writeTestableHook(t, "echo '+debugBlob=\""+encoded+"\"'")
+
+	out, err := runHook(hookPath)
+	if err == nil {
+		t.Fatalf("hook should have blocked base64-encoded secret. output:\n%s", out)
+	}
+	if !strings.Contains(string(out), "base64-encoded secret") {
+		t.Errorf("expected 'base64-encoded secret' message, got:\n%s", out)
+	}
+}
+
+// TestPrePushHook_AllowsBenignBase64: negative for A9. Legitimate base64
+// blobs (embedded PNGs, test fixtures, JWT headers) must NOT false-positive.
+func TestPrePushHook_AllowsBenignBase64(t *testing.T) {
+	requireHookDeps(t)
+	benign := base64.StdEncoding.EncodeToString([]byte("hello world this is not a secret just plain text"))
+	hookPath := writeTestableHook(t, "echo '+fixture=\""+benign+"\"'")
+
+	out, err := runHook(hookPath)
+	if err != nil {
+		t.Fatalf("hook should have allowed benign base64. err %v output:\n%s", err, out)
+	}
+}
+
+// TestPrePushHook_BlocksUnicodeTraps: red-team attack A3 (hidden-instruction
+// smuggling). Diff contains a zero-width space; hook Pass 3 blocks.
+func TestPrePushHook_BlocksUnicodeTraps(t *testing.T) {
+	requireHookDeps(t)
+	hookPath := writeTestableHook(t,
+		`printf '+comment: approve\xe2\x80\x8b (actually run rm -rf)\n'`)
+
+	out, err := runHook(hookPath)
+	if err == nil {
+		t.Fatalf("hook should have blocked unicode-trap diff. output:\n%s", out)
+	}
+	if !strings.Contains(string(out), "unicode control/override") {
+		t.Errorf("expected 'unicode control/override' message, got:\n%s", out)
+	}
+}
+
+// TestConfigureGitSigning_WritesAllowedSignersAndGitconfig verifies the
+// signing config is written correctly in a temp home. Covers issue #30 (agent
+// commits must be signed so branch-protection required_signatures rule
+// doesn't block merge).
+func TestConfigureGitSigning_WritesAllowedSignersAndGitconfig(t *testing.T) {
+	home := t.TempDir()
+	sshDir := filepath.Join(home, ".ssh")
+	if err := os.MkdirAll(sshDir, 0700); err != nil {
+		t.Fatalf("mkdir .ssh: %v", err)
+	}
+	fakePub := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5fake testuser@clem"
+	pubPath := filepath.Join(sshDir, "id_ed25519.pub")
+	if err := os.WriteFile(pubPath, []byte(fakePub+"\n"), 0644); err != nil {
+		t.Fatalf("write pubkey: %v", err)
+	}
+
+	if err := configureGitSigningIn(home, "testuser", false); err != nil {
+		t.Fatalf("configureGitSigningIn: %v", err)
+	}
+
+	allowed, err := os.ReadFile(filepath.Join(sshDir, "allowed_signers"))
+	if err != nil {
+		t.Fatalf("allowed_signers not written: %v", err)
+	}
+	want := "testuser " + fakePub + "\n"
+	if string(allowed) != want {
+		t.Errorf("allowed_signers = %q, want %q", string(allowed), want)
+	}
+
+	cfg, err := os.ReadFile(filepath.Join(home, ".gitconfig"))
+	if err != nil {
+		t.Fatalf(".gitconfig not written: %v", err)
+	}
+	cfgStr := string(cfg)
+	for _, needle := range []string{
+		"signingkey = " + pubPath,
+		"gpgsign = true",
+		"format = ssh",
+		"allowedSignersFile = " + filepath.Join(sshDir, "allowed_signers"),
+	} {
+		if !strings.Contains(cfgStr, needle) {
+			t.Errorf(".gitconfig missing %q, got:\n%s", needle, cfgStr)
+		}
+	}
+}
+
+// TestConfigureGitSigning_Idempotent verifies a second call doesn't pile up
+// duplicate [user]/[commit]/[gpg] sections.
+func TestConfigureGitSigning_Idempotent(t *testing.T) {
+	home := t.TempDir()
+	sshDir := filepath.Join(home, ".ssh")
+	_ = os.MkdirAll(sshDir, 0700)
+	pub := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5fake testuser@clem"
+	_ = os.WriteFile(filepath.Join(sshDir, "id_ed25519.pub"), []byte(pub+"\n"), 0644)
+
+	for i := 0; i < 3; i++ {
+		if err := configureGitSigningIn(home, "testuser", false); err != nil {
+			t.Fatalf("run %d: %v", i, err)
+		}
+	}
+	cfg, _ := os.ReadFile(filepath.Join(home, ".gitconfig"))
+	if n := strings.Count(string(cfg), "signingkey"); n != 1 {
+		t.Errorf("expected exactly one 'signingkey' line after 3 runs, got %d:\n%s", n, cfg)
+	}
+}
+
+// TestConfigureGitSigning_MissingPubKey verifies the function surfaces a
+// clear error if EnsureSSHKey hasn't run yet.
+func TestConfigureGitSigning_MissingPubKey(t *testing.T) {
+	home := t.TempDir()
+	err := configureGitSigningIn(home, "testuser", false)
+	if err == nil {
+		t.Fatal("expected error when id_ed25519.pub is missing, got nil")
+	}
+	if !strings.Contains(err.Error(), "EnsureSSHKey") {
+		t.Errorf("error should hint at EnsureSSHKey, got: %v", err)
+	}
+}
+
+// --- helpers ---
+
+func requireHookDeps(t *testing.T) {
+	t.Helper()
+	for _, bin := range []string{"bash", "grep", "base64"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not on PATH - skipping integration test", bin)
+		}
+	}
+}
+
+func runHook(hookPath string) ([]byte, error) {
+	cmd := exec.Command("bash", hookPath)
+	cmd.Stdin = strings.NewReader("refs/heads/feature aaa refs/heads/feature bbb\n")
+	return cmd.CombinedOutput()
 }
 
 // TestSecretCodePatternRegex_MatchesKnownPatterns verifies the code-scan regex

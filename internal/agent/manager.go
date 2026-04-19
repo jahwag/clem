@@ -120,41 +120,80 @@ const SecretPatternRegex = `ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|ghs_[A-Za-z0
 // complex escaping, and double-quoted access is the dominant style for secrets.
 const SecretCodePatternRegex = `os\.Getenv\("(GH_TOKEN|DISCORD_TOKEN|ANTHROPIC_API_KEY|AWS_SECRET_ACCESS_KEY|SLACK_MCP_XOXP_TOKEN)"\)|os\.environ\["(GH_TOKEN|DISCORD_TOKEN|ANTHROPIC_API_KEY|AWS_SECRET_ACCESS_KEY|SLACK_MCP_XOXP_TOKEN)"\]|process\.env\.(GH_TOKEN|DISCORD_TOKEN|ANTHROPIC_API_KEY|AWS_SECRET_ACCESS_KEY|SLACK_MCP_XOXP_TOKEN)`
 
+// UnicodeTrapRegex matches Unicode code points commonly used to smuggle
+// hidden instructions or text past human review. Zero-width chars (U+200B-F),
+// bidi overrides (U+2028-E), and BOM (U+FEFF) should never appear in source
+// code or config and flag a likely injection attempt when they do.
+const UnicodeTrapRegex = `[\x{200B}-\x{200F}\x{2028}-\x{202E}\x{FEFF}]`
+
 // prePushHookContent is the pre-push hook installed for every agent user.
-// Pure bash + grep; no gitleaks dependency. The regexes come from
-// SecretPatternRegex and SecretCodePatternRegex so Go tests and the bash
-// hook share one source of truth.
+// Pure bash + grep + base64 (from coreutils); no gitleaks dependency. The
+// regexes come from SecretPatternRegex, SecretCodePatternRegex, and
+// UnicodeTrapRegex so Go tests and the bash hook share one source of truth.
+//
+// Passes:
+//  1. Literal credential patterns (tokens, keys, PEM blocks).
+//  2. Base64-encoded secrets: long base64 runs are decoded and re-scanned
+//     against SecretPatternRegex. Closes encoded-exfil bypass.
+//  3. Unicode traps: zero-width + bidi-override + BOM mid-content. Closes
+//     hidden-instruction-smuggling bypass.
+//  4. Code that reads protected secret env vars (Go/Python/Node). Closes
+//     indirect runtime-exfil bypass. Skip with CLEM_HOOK_SKIP_CODE_SCAN=1.
 var prePushHookContent = fmt.Sprintf(`#!/bin/bash
 # Installed by clem provision. Do not edit by hand - will be overwritten.
-# Pass 1-3: literal credential patterns (tokens, keys, PEM blocks).
-# Pass 4:   code that reads protected secret env vars (Go/Python/Node).
-#           Skip with: CLEM_HOOK_SKIP_CODE_SCAN=1 git push
+# Pass 1: literal credential patterns (tokens, keys, PEM blocks).
+# Pass 2: base64-encoded secrets (decoded + re-scanned).
+# Pass 3: Unicode traps (zero-width / bidi / BOM - hidden-instruction smuggling).
+# Pass 4: code that reads protected secret env vars (Go/Python/Node).
+#         Skip with: CLEM_HOOK_SKIP_CODE_SCAN=1 git push
 
 zero="0000000000000000000000000000000000000000"
 patterns='%s'
 code_patterns='%s'
+unicode_traps='%s'
+
+abort() {
+  echo "clem pre-push hook: push blocked - $1" >&2
+  echo "$2" | sed 's/^/  /' >&2
+  echo "" >&2
+  echo "Rotate the leaked credential immediately if it is real. To override" >&2
+  echo "for a false positive, push with --no-verify (think first)." >&2
+  exit 1
+}
 
 while read local_ref local_sha remote_ref remote_sha; do
   [ "$local_sha" = "$zero" ] && continue
   if [ "$remote_sha" = "$zero" ]; then
-    # new branch: scan all reachable commits not yet on remote
     range="$local_sha"
     diff_cmd="git log --all --not --remotes --pretty=format: -p $local_sha"
   else
     range="${remote_sha}..${local_sha}"
     diff_cmd="git diff $range"
   fi
-  hits=$($diff_cmd 2>/dev/null | grep -E "$patterns" | head -3)
-  if [ -n "$hits" ]; then
-    echo "clem pre-push hook: push blocked - secret pattern detected in $range" >&2
-    echo "$hits" | sed 's/^/  /' >&2
-    echo "" >&2
-    echo "Rotate the leaked credential immediately if it is real. To override" >&2
-    echo "for a false positive, push with --no-verify (think first)." >&2
-    exit 1
-  fi
+  diff=$($diff_cmd 2>/dev/null)
+
+  # Pass 1: direct literal secret match
+  hits=$(echo "$diff" | grep -E "$patterns" | head -3)
+  [ -n "$hits" ] && abort "secret pattern detected in $range" "$hits"
+
+  # Pass 2: base64-decode + re-scan. Finds long base64 runs, decodes each,
+  # greps the decoded bytes for secret patterns. Skips chunks that fail to
+  # decode (normal diff content).
+  while IFS= read -r chunk; do
+    [ -z "$chunk" ] && continue
+    decoded=$(echo "$chunk" | base64 -d 2>/dev/null) || continue
+    if echo "$decoded" | grep -qE "$patterns"; then
+      abort "base64-encoded secret detected in $range" "$chunk -> decoded hit"
+    fi
+  done < <(echo "$diff" | grep -oE '[A-Za-z0-9+/]{40,}={0,2}')
+
+  # Pass 3: unicode traps for hidden-instruction smuggling.
+  uhits=$(echo "$diff" | grep -P "$unicode_traps" | head -3)
+  [ -n "$uhits" ] && abort "unicode control/override characters detected in $range (possible prompt-injection smuggling)" "$uhits"
+
+  # Pass 4: indirect runtime exfil via os.Getenv on protected names.
   if [ "${CLEM_HOOK_SKIP_CODE_SCAN:-0}" != "1" ]; then
-    code_hits=$($diff_cmd 2>/dev/null | grep -E "$code_patterns" | head -3)
+    code_hits=$(echo "$diff" | grep -E "$code_patterns" | head -3)
     if [ -n "$code_hits" ]; then
       echo "clem pre-push hook: push blocked - diff reads a protected secret env var in $range" >&2
       echo "$code_hits" | sed 's/^/  /' >&2
@@ -165,7 +204,7 @@ while read local_ref local_sha remote_ref remote_sha; do
   fi
 done
 exit 0
-`, SecretPatternRegex, SecretCodePatternRegex)
+`, SecretPatternRegex, SecretCodePatternRegex, UnicodeTrapRegex)
 
 // InstallGitHooks writes a global pre-push hook for the agent user and points
 // their git config at it via core.hooksPath. Idempotent - safe to call every
@@ -192,6 +231,77 @@ func InstallGitHooks(username string) error {
 		if err := os.WriteFile(gitConfigPath, []byte(appended), 0644); err != nil {
 			return fmt.Errorf("writing %s: %w", gitConfigPath, err)
 		}
+		if err := chownToUser(gitConfigPath, username); err != nil {
+			return fmt.Errorf("chowning %s: %w", gitConfigPath, err)
+		}
+	}
+	return nil
+}
+
+// ConfigureGitSigning turns on SSH commit signing for the agent user. Each
+// agent already has an ed25519 keypair from EnsureSSHKey; this wires it up
+// as the commit signing key and appends the necessary sections to the
+// user's gitconfig so every commit is signed by default. Idempotent.
+//
+// For the resulting commits to show as "Verified" on github.com, the
+// operator must upload the agent's public key to the agent's GitHub
+// account under Settings -> SSH and GPG keys -> New SSH key, with key type
+// "Signing Key" (not Authentication Key). clem can't automate that; the
+// GitHub API requires an interactive OAuth token with admin:* scope, way
+// broader than any agent token should carry.
+//
+// allowed_signers is written so local verification
+// (git log --show-signature) works without prompting for trust.
+func ConfigureGitSigning(username string) error {
+	return configureGitSigningIn(fmt.Sprintf("/home/%s", username), username, true)
+}
+
+// configureGitSigningIn implements ConfigureGitSigning against an arbitrary
+// home directory. Separated so unit tests can exercise the full logic in a
+// t.TempDir without needing root or a real OS user. When chown is true,
+// newly-written files are chowned to username (production path); tests pass
+// false to skip the chown (no such OS user).
+func configureGitSigningIn(homeDir, username string, chown bool) error {
+	sshDir := filepath.Join(homeDir, ".ssh")
+	pubPath := filepath.Join(sshDir, "id_ed25519.pub")
+
+	pubBytes, err := os.ReadFile(pubPath)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w (run EnsureSSHKey first)", pubPath, err)
+	}
+	pubKey := strings.TrimSpace(string(pubBytes))
+
+	allowedPath := filepath.Join(sshDir, "allowed_signers")
+	allowedLine := fmt.Sprintf("%s %s\n", username, pubKey)
+	if err := os.WriteFile(allowedPath, []byte(allowedLine), 0644); err != nil {
+		return fmt.Errorf("writing %s: %w", allowedPath, err)
+	}
+	if chown {
+		if err := chownToUser(allowedPath, username); err != nil {
+			return fmt.Errorf("chowning %s: %w", allowedPath, err)
+		}
+	}
+
+	gitConfigPath := filepath.Join(homeDir, ".gitconfig")
+	existing, _ := os.ReadFile(gitConfigPath)
+	if strings.Contains(string(existing), "signingkey") {
+		return nil
+	}
+	block := fmt.Sprintf(`
+[user]
+	signingkey = %s
+[commit]
+	gpgsign = true
+[gpg]
+	format = ssh
+[gpg "ssh"]
+	allowedSignersFile = %s
+`, pubPath, allowedPath)
+	appended := string(existing) + block
+	if err := os.WriteFile(gitConfigPath, []byte(appended), 0644); err != nil {
+		return fmt.Errorf("writing %s: %w", gitConfigPath, err)
+	}
+	if chown {
 		if err := chownToUser(gitConfigPath, username); err != nil {
 			return fmt.Errorf("chowning %s: %w", gitConfigPath, err)
 		}
