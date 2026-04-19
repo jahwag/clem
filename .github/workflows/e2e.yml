@@ -120,7 +120,8 @@ jobs:
       - name: Assert - git signing configured + allowed_signers present
         run: |
           sudo test -f /home/e2etest-lead/.ssh/allowed_signers
-          sudo grep -q "e2etest-lead ssh-ed25519" /home/e2etest-lead/.ssh/allowed_signers
+          # ConfigureGit writes "<username>@clem <pubkey>" as the allowed-signers line
+          sudo grep -q "e2etest-lead@clem ssh-ed25519" /home/e2etest-lead/.ssh/allowed_signers
           sudo grep -q 'signingkey' /home/e2etest-lead/.gitconfig
           sudo grep -q 'gpgsign = true' /home/e2etest-lead/.gitconfig
           sudo grep -q 'format = ssh' /home/e2etest-lead/.gitconfig
