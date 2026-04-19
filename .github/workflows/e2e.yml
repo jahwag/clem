@@ -1,0 +1,151 @@
+name: e2e
+
+# End-to-end provisioning test. Runs on a fresh Ubuntu runner that already
+# has systemd + useradd, so the runner itself IS the target host. Checks the
+# contract clem provision writes: OS user, systemd units, runner.sh content,
+# pre-push hook, git signing config, .env permissions.
+#
+# Does not invoke claude or opencode - the runtime-install step downloads the
+# CLI but we don't exercise it. Scope boundary: we verify what clem writes to
+# disk, not what agents do at runtime.
+#
+# No untrusted GitHub Actions context is interpolated into run: steps - all
+# variables are either hardcoded or from GITHUB_WORKSPACE (safe).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Install runtime deps (tmux, age, sops, yq, python3)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            tmux age python3 python3-pip
+          sudo curl -sSL -o /usr/local/bin/sops \
+            https://github.com/getsops/sops/releases/download/v3.12.2/sops-v3.12.2.linux.amd64
+          sudo chmod +x /usr/local/bin/sops
+          sudo curl -sSL -o /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          sops --version | head -1
+          yq --version
+          age --version
+
+      - name: Build clem
+        run: |
+          go build -o clem .
+          ./clem --help | head -5
+
+      - name: Prepare test project
+        run: |
+          mkdir -p /tmp/e2e && cd /tmp/e2e
+          cat > clem.yaml <<'EOF'
+          project: e2etest
+          coordination:
+            backend: discord
+            server_id: "1"
+            channels:
+              general: "2"
+              alerts:  "3"
+              lessons: "4"
+          agents:
+            lead:
+              name: "E2ELead"
+              role: "tester"
+              model: "claude-sonnet-4-6"
+              iteration: 5m
+              subagent_model: "claude-sonnet-4-6"
+              vaults: [github]
+          EOF
+          "$GITHUB_WORKSPACE/clem" vault init
+          "$GITHUB_WORKSPACE/clem" vault set github GH_TOKEN=ghfakefortestingonly
+
+      - name: Run clem provision
+        run: |
+          cd /tmp/e2e
+          sudo -E "$GITHUB_WORKSPACE/clem" provision 2>&1 | tee /tmp/provision.log
+          tail -20 /tmp/provision.log
+
+      - name: Assert - OS user created
+        run: id e2etest-lead
+
+      - name: Assert - home dir mode 0750
+        run: |
+          mode=$(stat -c %a /home/e2etest-lead)
+          [ "$mode" = "750" ] || { echo "home mode=$mode, want 750"; exit 1; }
+
+      - name: Assert - systemd unit installed + parses
+        run: |
+          sudo test -f /etc/systemd/system/clem-e2etest-lead.service
+          sudo systemd-analyze verify /etc/systemd/system/clem-e2etest-lead.service
+
+      - name: Assert - runner.sh present + valid bash + contains key exports
+        run: |
+          path=/home/e2etest-lead/.local/bin/clem-runner.sh
+          sudo test -x "$path"
+          sudo bash -n "$path"
+          sudo grep -q 'CLAUDE_CODE_SUBAGENT_MODEL="claude-sonnet-4-6"' "$path"
+          sudo grep -q 'timeout 7200' "$path"
+          sudo grep -q 'tmux send-keys' "$path"
+
+      - name: Assert - pre-push hook installed + valid bash + four passes present
+        run: |
+          hook=/home/e2etest-lead/.config/git/hooks/pre-push
+          sudo test -x "$hook"
+          sudo bash -n "$hook"
+          sudo grep -q 'ghp_' "$hook"            # Pass 1: literal secret patterns
+          sudo grep -q 'base64 -d' "$hook"       # Pass 2: base64 decode
+          sudo grep -q 'unicode_traps' "$hook"   # Pass 3: unicode traps
+          sudo grep -q 'code_patterns' "$hook"   # Pass 4: code-scan
+
+      - name: Assert - git signing configured + allowed_signers present
+        run: |
+          sudo test -f /home/e2etest-lead/.ssh/allowed_signers
+          sudo grep -q "e2etest-lead ssh-ed25519" /home/e2etest-lead/.ssh/allowed_signers
+          sudo grep -q 'signingkey' /home/e2etest-lead/.gitconfig
+          sudo grep -q 'gpgsign = true' /home/e2etest-lead/.gitconfig
+          sudo grep -q 'format = ssh' /home/e2etest-lead/.gitconfig
+
+      - name: Assert - .env permissions 0600
+        run: |
+          sudo test -f /home/e2etest-lead/.env
+          mode=$(sudo stat -c %a /home/e2etest-lead/.env)
+          [ "$mode" = "600" ] || { echo ".env mode=$mode, want 600"; exit 1; }
+
+      - name: Assert - SSH key pair generated
+        run: |
+          sudo test -f /home/e2etest-lead/.ssh/id_ed25519
+          sudo test -f /home/e2etest-lead/.ssh/id_ed25519.pub
+
+      - name: Assert - global gitignore blocks secrets
+        run: |
+          ignore=/home/e2etest-lead/.gitignore_global
+          sudo test -f "$ignore"
+          sudo grep -q '^\.env$' "$ignore"
+          sudo grep -q '^secrets.sops.yaml$' "$ignore"
+
+      - name: Assert - idempotent provision
+        run: |
+          cd /tmp/e2e
+          sudo -E "$GITHUB_WORKSPACE/clem" provision 2>&1 | tail -5
+          count=$(sudo grep -c signingkey /home/e2etest-lead/.gitconfig)
+          [ "$count" = "1" ] || { echo "gitconfig has $count signingkey lines after second provision, want 1"; exit 1; }
