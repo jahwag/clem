@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>clem - Continuously Looping Engineering Machines</title>
+<meta name="description" content="docker-compose for Claude Code agents. Persistent teams of agents, 24/7, on any Linux host.">
+<meta property="og:title" content="clem - Continuously Looping Engineering Machines">
+<meta property="og:description" content="docker-compose for Claude Code agents. Persistent teams of agents, 24/7, on any Linux host.">
+<meta property="og:image" content="https://myclementine.ai/logo.png">
+<meta property="og:url" content="https://myclementine.ai/">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/png" href="logo.png">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { color-scheme: dark; }
+  html, body { background: #0a0a0b; }
+  body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  code, pre, .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+  .glow { background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(249, 115, 22, 0.15), transparent 70%); }
+  .grad-text { background: linear-gradient(135deg, #fb923c 0%, #f97316 50%, #ea580c 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .card { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); transition: all 0.2s ease; }
+  .card:hover { background: rgba(255,255,255,0.04); border-color: rgba(249, 115, 22, 0.3); }
+  .terminal { background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 0 80px -20px rgba(249, 115, 22, 0.15); }
+  .terminal-chrome { background: rgba(255,255,255,0.03); border-bottom: 1px solid rgba(255,255,255,0.06); }
+  .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  .btn-primary { background: linear-gradient(135deg, #f97316, #ea580c); transition: all 0.15s; }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 24px -8px rgba(249, 115, 22, 0.5); }
+  .btn-ghost { border: 1px solid rgba(255,255,255,0.12); transition: all 0.15s; }
+  .btn-ghost:hover { border-color: rgba(255,255,255,0.25); background: rgba(255,255,255,0.03); }
+  .copy-btn { opacity: 0.5; transition: opacity 0.15s; }
+  .copy-btn:hover { opacity: 1; }
+  .prompt::before { content: '$ '; color: #f97316; }
+  .comment { color: #6b7280; }
+</style>
+</head>
+<body class="text-slate-200 min-h-screen">
+
+<div class="glow absolute inset-0 pointer-events-none"></div>
+
+<nav class="relative z-10 max-w-6xl mx-auto px-6 py-6 flex items-center justify-between">
+  <a href="/" class="flex items-center gap-2 text-white font-semibold">
+    <img src="logo.png" alt="" class="w-8 h-8">
+    <span class="tracking-tight">clem</span>
+  </a>
+  <div class="flex items-center gap-5 text-sm">
+    <a href="https://github.com/jahwag/clem#readme" class="text-slate-400 hover:text-white">Docs</a>
+    <a href="https://github.com/jahwag/clem" class="text-slate-400 hover:text-white">GitHub</a>
+    <a href="https://discord.gg/pR4qeMH4u4" class="text-slate-400 hover:text-white">Discord</a>
+  </div>
+</nav>
+
+<main class="relative z-10 max-w-6xl mx-auto px-6 pt-12 pb-24">
+
+  <section class="text-center max-w-4xl mx-auto mb-24">
+    <img src="logo.png" alt="clem" class="w-28 h-28 mx-auto mb-6">
+    <h1 class="text-6xl md:text-7xl font-bold tracking-tight text-white mb-4">
+      <span class="grad-text">clem</span>
+    </h1>
+    <p class="text-lg md:text-xl text-slate-400 mb-2">Continuously Looping Engineering Machines.</p>
+    <p class="text-2xl md:text-3xl font-medium text-white mb-8 tracking-tight">
+      docker-compose for Claude Code agents.
+    </p>
+    <p class="text-lg text-slate-300 max-w-2xl mx-auto mb-10 leading-relaxed">
+      Run a team of Claude Code agents 24/7 on any Linux host. Each agent is a real OS user in a tmux session under systemd. Configure once, walk away.
+    </p>
+    <div class="flex flex-wrap items-center justify-center gap-3">
+      <a href="#install" class="btn-primary px-6 py-3 rounded-lg text-white font-semibold">Get started</a>
+      <a href="https://github.com/jahwag/clem" class="btn-ghost px-6 py-3 rounded-lg text-white font-medium">GitHub</a>
+    </div>
+  </section>
+
+  <section id="install" class="max-w-3xl mx-auto mb-24">
+    <div class="terminal rounded-xl overflow-hidden">
+      <div class="terminal-chrome px-4 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="dot" style="background:#ff5f57"></span>
+          <span class="dot" style="background:#febc2e"></span>
+          <span class="dot" style="background:#28c841"></span>
+        </div>
+        <span class="mono text-xs text-slate-500">install.sh</span>
+        <button class="copy-btn mono text-xs text-slate-400" onclick="navigator.clipboard.writeText(document.getElementById('install-cmd').textContent.trim()); this.textContent='copied'">copy</button>
+      </div>
+      <pre class="mono text-sm p-6 text-slate-100 overflow-x-auto"><code id="install-cmd"><span class="comment"># grab the latest release binary</span>
+<span class="text-orange-400">curl</span> -fsSL https://github.com/jahwag/clem/releases/latest/download/clem_linux_amd64 \
+  -o /usr/local/bin/clem &amp;&amp; <span class="text-orange-400">chmod</span> +x /usr/local/bin/clem
+
+<span class="comment"># provision your first team</span>
+<span class="text-orange-400">mkdir</span> my-team &amp;&amp; <span class="text-orange-400">cd</span> my-team
+<span class="text-orange-400">clem</span> init
+<span class="text-orange-400">clem</span> vault init
+<span class="text-orange-400">sudo</span> clem provision
+<span class="text-orange-400">sudo</span> clem up</code></pre>
+    </div>
+  </section>
+
+  <section class="mb-24">
+    <h2 class="text-4xl font-bold text-white tracking-tight mb-3 text-center">Not a framework.</h2>
+    <p class="text-lg text-slate-400 text-center mb-12 max-w-2xl mx-auto">
+      Agents are real Linux users, running under real systemd. No Kubernetes. No in-process orchestration. Just the pieces your OS already has.
+    </p>
+    <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+
+      <div class="card rounded-xl p-6">
+        <div class="text-orange-400 font-semibold mb-2 text-sm uppercase tracking-wide">OS identity</div>
+        <h3 class="text-white font-semibold mb-2">One agent, one Linux user</h3>
+        <p class="text-slate-400 text-sm leading-relaxed">Each agent gets its own home dir, git identity, Discord bot, GitHub PAT. Crash boundaries are real.</p>
+      </div>
+
+      <div class="card rounded-xl p-6">
+        <div class="text-orange-400 font-semibold mb-2 text-sm uppercase tracking-wide">Coordination</div>
+        <h3 class="text-white font-semibold mb-2">Discord or Slack</h3>
+        <p class="text-slate-400 text-sm leading-relaxed">Swappable backend via one config knob. Agents coordinate over a channel you already use.</p>
+      </div>
+
+      <div class="card rounded-xl p-6">
+        <div class="text-orange-400 font-semibold mb-2 text-sm uppercase tracking-wide">Runtime</div>
+        <h3 class="text-white font-semibold mb-2">claude-code or opencode</h3>
+        <p class="text-slate-400 text-sm leading-relaxed">Mix Anthropic, Bedrock, Vertex, Ollama, or any OpenAI-compatible backend. One surface.</p>
+      </div>
+
+      <div class="card rounded-xl p-6">
+        <div class="text-orange-400 font-semibold mb-2 text-sm uppercase tracking-wide">Secrets</div>
+        <h3 class="text-white font-semibold mb-2">age + sops</h3>
+        <p class="text-slate-400 text-sm leading-relaxed">Per-agent <code class="mono text-orange-300 text-xs">.env</code> decrypted at provision time. Nothing leaves the host.</p>
+      </div>
+
+      <div class="card rounded-xl p-6">
+        <div class="text-orange-400 font-semibold mb-2 text-sm uppercase tracking-wide">Self-healing</div>
+        <h3 class="text-white font-semibold mb-2">systemd + watchdog</h3>
+        <p class="text-slate-400 text-sm leading-relaxed">Dead or stalled agents restart automatically. Alerts only fire after repeated failures.</p>
+      </div>
+
+      <div class="card rounded-xl p-6">
+        <div class="text-orange-400 font-semibold mb-2 text-sm uppercase tracking-wide">Anywhere</div>
+        <h3 class="text-white font-semibold mb-2">Laptop. Pi. VPS.</h3>
+        <p class="text-slate-400 text-sm leading-relaxed">Runs on anything with systemd. No cloud services required.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="max-w-3xl mx-auto mb-24">
+    <h2 class="text-4xl font-bold text-white tracking-tight mb-8 text-center">How it works</h2>
+    <div class="terminal rounded-xl p-6 md:p-8">
+      <pre class="mono text-xs md:text-sm text-slate-300 leading-relaxed"><code>Linux host (laptop / server / VPS)
+
+  OS user: myteam-lead        OS user: myteam-worker
+     tmux session                tmux session
+        |                           |
+     claude loop  &lt;-MCP (stdio)-&gt; claude loop
+        |                           |
+        +------ watchdog timer -----+
+                     |
+          Discord or Slack backend</code></pre>
+    </div>
+    <p class="text-slate-400 text-sm mt-6 text-center leading-relaxed">
+      Each loop launches <code class="mono text-orange-300 text-xs">claude</code>, injects a prompt via <code class="mono text-orange-300 text-xs">tmux send-keys</code>, waits for the session to exit, sleeps the configured iteration, repeats.
+      Secrets live encrypted in <code class="mono text-orange-300 text-xs">secrets.sops.yaml</code>; <code class="mono text-orange-300 text-xs">clem provision</code> decrypts them into per-agent <code class="mono text-orange-300 text-xs">.env</code> files.
+    </p>
+  </section>
+
+  <section class="text-center">
+    <h2 class="text-3xl font-bold text-white tracking-tight mb-4">Ship a team.</h2>
+    <p class="text-slate-400 mb-8">Free and open source. MIT licensed.</p>
+    <div class="flex flex-wrap items-center justify-center gap-3">
+      <a href="https://github.com/jahwag/clem" class="btn-primary px-6 py-3 rounded-lg text-white font-semibold">Star on GitHub</a>
+      <a href="https://discord.gg/pR4qeMH4u4" class="btn-ghost px-6 py-3 rounded-lg text-white font-medium">Join Discord</a>
+    </div>
+  </section>
+
+</main>
+
+<footer class="relative z-10 border-t border-white/5 py-8 text-center text-sm text-slate-500">
+  <p>
+    <a href="https://github.com/jahwag/clem/blob/main/LICENSE" class="hover:text-slate-300">MIT</a>
+    <span class="mx-2">&middot;</span>
+    <a href="https://github.com/jahwag/clem" class="hover:text-slate-300">jahwag/clem</a>
+    <span class="mx-2">&middot;</span>
+    <a href="https://discord.gg/pR4qeMH4u4" class="hover:text-slate-300">Discord</a>
+  </p>
+</footer>
+
+</body>
+</html>
