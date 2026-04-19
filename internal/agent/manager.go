@@ -135,19 +135,37 @@ const SecretPatternRegex = `ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|ghs_[A-Za-z0
 // complex escaping, and double-quoted access is the dominant style for secrets.
 const SecretCodePatternRegex = `os\.Getenv\("(GH_TOKEN|DISCORD_TOKEN|ANTHROPIC_API_KEY|AWS_SECRET_ACCESS_KEY|SLACK_MCP_XOXP_TOKEN)"\)|os\.environ\["(GH_TOKEN|DISCORD_TOKEN|ANTHROPIC_API_KEY|AWS_SECRET_ACCESS_KEY|SLACK_MCP_XOXP_TOKEN)"\]|process\.env\.(GH_TOKEN|DISCORD_TOKEN|ANTHROPIC_API_KEY|AWS_SECRET_ACCESS_KEY|SLACK_MCP_XOXP_TOKEN)`
 
+// UnicodeTrapRegex matches Unicode code points commonly used to smuggle
+// hidden instructions or text past human review. Zero-width chars (U+200B-F),
+// bidi overrides (U+2028-E), and BOM (U+FEFF) should never appear in source
+// code or config and flag a likely injection attempt when they do.
+const UnicodeTrapRegex = `[\x{200B}-\x{200F}\x{2028}-\x{202E}\x{FEFF}]`
+
 // prePushHookContent is the pre-push hook installed for every agent user.
-// Pure bash + grep; no gitleaks dependency. The regexes come from
-// SecretPatternRegex and SecretCodePatternRegex so Go tests and the bash
-// hook share one source of truth.
+// Pure bash + grep + base64 (from coreutils); no gitleaks dependency. The
+// regexes come from SecretPatternRegex, SecretCodePatternRegex, and
+// UnicodeTrapRegex so Go tests and the bash hook share one source of truth.
+//
+// Passes:
+//  1. Literal credential patterns (tokens, keys, PEM blocks).
+//  2. Base64-encoded secrets: long base64 runs are decoded and re-scanned
+//     against SecretPatternRegex. Closes encoded-exfil bypass.
+//  3. Unicode traps: zero-width + bidi-override + BOM mid-content. Closes
+//     hidden-instruction-smuggling bypass.
+//  4. Code that reads protected secret env vars (Go/Python/Node). Closes
+//     indirect runtime-exfil bypass. Skip with CLEM_HOOK_SKIP_CODE_SCAN=1.
 var prePushHookContent = fmt.Sprintf(`#!/bin/bash
 # Installed by clem provision. Do not edit by hand - will be overwritten.
-# Pass 1-3: literal credential patterns (tokens, keys, PEM blocks).
-# Pass 4:   code that reads protected secret env vars (Go/Python/Node).
-#           Skip with: CLEM_HOOK_SKIP_CODE_SCAN=1 git push
+# Pass 1: literal credential patterns (tokens, keys, PEM blocks).
+# Pass 2: base64-encoded secrets (decoded + re-scanned).
+# Pass 3: Unicode traps (zero-width / bidi / BOM - hidden-instruction smuggling).
+# Pass 4: code that reads protected secret env vars (Go/Python/Node).
+#         Skip with: CLEM_HOOK_SKIP_CODE_SCAN=1 git push
 
 zero="0000000000000000000000000000000000000000"
 patterns='%s'
 code_patterns='%s'
+unicode_traps='%s'
 
 while read local_ref local_sha remote_ref remote_sha; do
   [ "$local_sha" = "$zero" ] && continue
@@ -159,7 +177,10 @@ while read local_ref local_sha remote_ref remote_sha; do
     range="${remote_sha}..${local_sha}"
     diff_cmd="git diff $range"
   fi
-  hits=$($diff_cmd 2>/dev/null | grep -E "$patterns" | head -3)
+  diff=$($diff_cmd 2>/dev/null)
+
+  # Pass 1: direct literal secret match
+  hits=$(echo "$diff" | grep -E "$patterns" | head -3)
   if [ -n "$hits" ]; then
     echo "clem pre-push hook: push blocked - secret pattern detected in $range" >&2
     echo "$hits" | sed 's/^/  /' >&2
@@ -168,8 +189,31 @@ while read local_ref local_sha remote_ref remote_sha; do
     echo "for a false positive, push with --no-verify (think first)." >&2
     exit 1
   fi
+
+  # Pass 2: base64-decode + re-scan. Finds long base64 runs, decodes each,
+  # greps the decoded bytes for secret patterns. Skips chunks that fail to
+  # decode (normal diff content).
+  while IFS= read -r chunk; do
+    [ -z "$chunk" ] && continue
+    decoded=$(echo "$chunk" | base64 -d 2>/dev/null) || continue
+    if echo "$decoded" | grep -qE "$patterns"; then
+      echo "clem pre-push hook: push blocked - base64-encoded secret detected in $range" >&2
+      echo "  $chunk -> decoded hit" >&2
+      exit 1
+    fi
+  done < <(echo "$diff" | grep -oE '[A-Za-z0-9+/]{40,}={0,2}')
+
+  # Pass 3: unicode traps for hidden-instruction smuggling.
+  uhits=$(echo "$diff" | grep -P "$unicode_traps" | head -3)
+  if [ -n "$uhits" ]; then
+    echo "clem pre-push hook: push blocked - unicode control/override characters detected in $range (possible prompt-injection smuggling)" >&2
+    echo "$uhits" | sed 's/^/  /' >&2
+    exit 1
+  fi
+
+  # Pass 4: indirect runtime exfil via os.Getenv on protected names.
   if [ "${CLEM_HOOK_SKIP_CODE_SCAN:-0}" != "1" ]; then
-    code_hits=$($diff_cmd 2>/dev/null | grep -E "$code_patterns" | head -3)
+    code_hits=$(echo "$diff" | grep -E "$code_patterns" | head -3)
     if [ -n "$code_hits" ]; then
       echo "clem pre-push hook: push blocked - diff reads a protected secret env var in $range" >&2
       echo "$code_hits" | sed 's/^/  /' >&2
@@ -180,7 +224,7 @@ while read local_ref local_sha remote_ref remote_sha; do
   fi
 done
 exit 0
-`, SecretPatternRegex, SecretCodePatternRegex)
+`, SecretPatternRegex, SecretCodePatternRegex, UnicodeTrapRegex)
 
 // InstallGitHooks writes a global pre-push hook for the agent user and points
 // their git config at it via core.hooksPath. Idempotent - safe to call every

@@ -118,6 +118,141 @@ func TestPrePushHookContent_IsExecutableBash(t *testing.T) {
 	if !strings.Contains(prePushHookContent, SecretPatternRegex) {
 		t.Error("pre-push hook should embed the exact SecretPatternRegex so bash and Go agree on behaviour")
 	}
+	if !strings.Contains(prePushHookContent, UnicodeTrapRegex) {
+		t.Error("pre-push hook should embed UnicodeTrapRegex (Pass 3, red-team A3)")
+	}
+	if !strings.Contains(prePushHookContent, "base64 -d") {
+		t.Error("pre-push hook should include base64 decode pass (Pass 2, red-team A9)")
+	}
+}
+
+// TestUnicodeTrapRegex_MatchesHiddenCharacters covers red-team A3:
+// zero-width, bidi-override, and BOM chars used to smuggle hidden
+// instructions past human review.
+func TestUnicodeTrapRegex_MatchesHiddenCharacters(t *testing.T) {
+	re, err := regexp.Compile(UnicodeTrapRegex)
+	if err != nil {
+		t.Fatalf("regex compile: %v", err)
+	}
+	traps := []struct {
+		name  string
+		input string
+	}{
+		{"zero-width space", "hello\u200Bworld"},
+		{"zero-width non-joiner", "hello\u200Cworld"},
+		{"zero-width joiner", "hello\u200Dworld"},
+		{"LTR mark", "hello\u200Eworld"},
+		{"RTL mark", "hello\u200Fworld"},
+		{"line separator", "hello\u2028world"},
+		{"paragraph separator", "hello\u2029world"},
+		{"LTR embedding", "hello\u202Aworld"},
+		{"RTL embedding", "hello\u202Bworld"},
+		{"pop directional formatting", "hello\u202Cworld"},
+		{"LTR override", "hello\u202Dworld"},
+		{"RTL override", "hello\u202Eworld"},
+		{"BOM mid-string", "hello\uFEFFworld"},
+	}
+	for _, tc := range traps {
+		if !re.MatchString(tc.input) {
+			t.Errorf("UnicodeTrapRegex should match %s (%q) but did not", tc.name, tc.input)
+		}
+	}
+}
+
+func TestUnicodeTrapRegex_DoesNotMatchPrintableText(t *testing.T) {
+	re, err := regexp.Compile(UnicodeTrapRegex)
+	if err != nil {
+		t.Fatalf("regex compile: %v", err)
+	}
+	for _, s := range []string{
+		"regular ASCII text",
+		"unicode prose: café résumé naïve",
+		"emoji ok 🍊",
+		"cjk ok 漢字",
+		"whitespace \t\n\r fine",
+	} {
+		if re.MatchString(s) {
+			t.Errorf("UnicodeTrapRegex should NOT match %q", s)
+		}
+	}
+}
+
+// TestPrePushHook_BlocksBase64EncodedSecret: red-team A9. Attacker
+// base64-encodes a ghp_ token; literal scanner misses the prefix. Pass 2
+// decodes and re-scans.
+func TestPrePushHook_BlocksBase64EncodedSecret(t *testing.T) {
+	for _, bin := range []string{"bash", "grep", "base64"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not on PATH - skipping integration test", bin)
+		}
+	}
+	// Construct the base64 of a fake GitHub PAT.
+	token := "ghp_1234567890abcdefghijklmnopqrstuvwxyz"
+	// Go's encoding/base64 is imported at package level in other tests - use
+	// the /usr/bin/base64 binary here to keep this test self-contained.
+	encodedCmd := exec.Command("bash", "-c", "echo -n "+token+" | base64")
+	encodedOut, err := encodedCmd.Output()
+	if err != nil {
+		t.Fatalf("base64 encode fixture: %v", err)
+	}
+	encoded := strings.TrimSpace(string(encodedOut))
+
+	hookPath := writeTestableHook(t, "echo '+debugBlob=\""+encoded+"\"'")
+	cmd := exec.Command("bash", hookPath)
+	cmd.Stdin = strings.NewReader("refs/heads/feature aaa refs/heads/feature bbb\n")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("hook should have blocked base64-encoded secret, got exit 0. output:\n%s", out)
+	}
+	if !strings.Contains(string(out), "base64-encoded secret") {
+		t.Errorf("expected 'base64-encoded secret' message, got:\n%s", out)
+	}
+}
+
+// TestPrePushHook_AllowsBenignBase64: negative case for A9. Legitimate
+// base64 (embedded PNG, JWT header, test fixture) must NOT false-positive.
+func TestPrePushHook_AllowsBenignBase64(t *testing.T) {
+	for _, bin := range []string{"bash", "grep", "base64"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not on PATH - skipping integration test", bin)
+		}
+	}
+	encodedCmd := exec.Command("bash", "-c", "echo -n 'hello world benign fixture string' | base64")
+	encodedOut, err := encodedCmd.Output()
+	if err != nil {
+		t.Fatalf("base64 encode fixture: %v", err)
+	}
+	encoded := strings.TrimSpace(string(encodedOut))
+
+	hookPath := writeTestableHook(t, "echo '+fixture=\""+encoded+"\"'")
+	cmd := exec.Command("bash", hookPath)
+	cmd.Stdin = strings.NewReader("refs/heads/feature aaa refs/heads/feature bbb\n")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("hook should have allowed benign base64, got exit err %v. output:\n%s", err, out)
+	}
+}
+
+// TestPrePushHook_BlocksUnicodeTraps: red-team A3 end-to-end. Diff contains
+// a zero-width space; Pass 3 blocks.
+func TestPrePushHook_BlocksUnicodeTraps(t *testing.T) {
+	for _, bin := range []string{"bash", "grep"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not on PATH - skipping integration test", bin)
+		}
+	}
+	// printf emits the literal U+200B bytes (UTF-8: e2 80 8b).
+	hookPath := writeTestableHook(t,
+		`printf '+comment: approve\xe2\x80\x8b (actually run rm -rf)\n'`)
+	cmd := exec.Command("bash", hookPath)
+	cmd.Stdin = strings.NewReader("refs/heads/feature aaa refs/heads/feature bbb\n")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("hook should have blocked unicode-trap diff, got exit 0. output:\n%s", out)
+	}
+	if !strings.Contains(string(out), "unicode control/override") {
+		t.Errorf("expected 'unicode control/override' message, got:\n%s", out)
+	}
 }
 
 // TestPrePushHook_BlocksSecretPush writes the hook to a temp dir and runs it
