@@ -13,6 +13,28 @@
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/png" href="logo.png">
 <script src="https://cdn.tailwindcss.com"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      fontFamily: "'Inter', system-ui, sans-serif",
+      fontSize: '14px',
+      primaryColor: '#141417',
+      primaryTextColor: '#e5e7eb',
+      primaryBorderColor: '#f97316',
+      secondaryColor: '#0f0f12',
+      tertiaryColor: '#0a0a0b',
+      lineColor: '#6b7280',
+      textColor: '#e5e7eb',
+      mainBkg: '#141417',
+      clusterBkg: 'rgba(255,255,255,0.02)',
+      clusterBorder: 'rgba(255,255,255,0.08)',
+      edgeLabelBackground: '#0a0a0b',
+    },
+  });
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -144,21 +166,34 @@
     </div>
   </section>
 
-  <section class="max-w-3xl mx-auto mb-24">
+  <section class="max-w-4xl mx-auto mb-24">
     <h2 class="text-4xl font-bold text-white tracking-tight mb-8 text-center">How it works</h2>
-    <div class="terminal rounded-xl p-6 md:p-8">
-      <pre class="mono text-xs md:text-sm text-slate-300 leading-relaxed"><code>Linux host (laptop / server / VPS)
-
-  OS user: myteam-lead        OS user: myteam-worker
-     tmux session                tmux session
-        |                           |
-     claude loop  &lt;-MCP (stdio)-&gt; claude loop
-        |                           |
-        +------ watchdog timer -----+
-                     |
-          Discord or Slack backend</code></pre>
+    <div class="card rounded-xl p-4 md:p-8 overflow-x-auto">
+      <pre class="mermaid">
+flowchart TB
+  subgraph host["Linux host &mdash; laptop / server / VPS"]
+    direction TB
+    subgraph lead["OS user: myteam-lead"]
+      direction TB
+      tmux1["tmux session"] --> loop1["claude loop"]
+    end
+    subgraph worker["OS user: myteam-worker"]
+      direction TB
+      tmux2["tmux session"] --> loop2["claude loop"]
+    end
+    loop1 <-. "MCP stdio" .-> loop2
+    wd["watchdog timer<br/>(every 5 min)"]
+    wd -. restarts .-> lead
+    wd -. restarts .-> worker
+  end
+  host ==> chat(["Discord or Slack<br/>#general · #tasks · #lessons"])
+  classDef orange fill:#141417,stroke:#f97316,stroke-width:1.5px,color:#e5e7eb
+  classDef chat fill:#1a1a1d,stroke:#fb923c,stroke-width:2px,color:#fff
+  class tmux1,tmux2,loop1,loop2,wd orange
+  class chat chat
+      </pre>
     </div>
-    <p class="text-slate-400 text-sm mt-6 text-center leading-relaxed">
+    <p class="text-slate-400 text-sm mt-6 text-center leading-relaxed max-w-3xl mx-auto">
       Each loop launches <code class="mono text-orange-300 text-xs">claude</code>, injects a prompt via <code class="mono text-orange-300 text-xs">tmux send-keys</code>, waits for the session to exit, sleeps the configured iteration, repeats.
       Secrets live encrypted in <code class="mono text-orange-300 text-xs">secrets.sops.yaml</code>; <code class="mono text-orange-300 text-xs">clem provision</code> decrypts them into per-agent <code class="mono text-orange-300 text-xs">.env</code> files.
     </p>
