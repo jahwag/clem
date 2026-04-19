@@ -58,6 +58,8 @@
   .copy-btn:hover { opacity: 1; }
   .prompt::before { content: '$ '; color: #f97316; }
   .comment { color: #6b7280; }
+  .mermaid { text-align: center; }
+  .mermaid svg { display: block; margin: 0 auto; max-width: 100%; }
 </style>
 </head>
 <body class="text-slate-200 min-h-screen">
@@ -168,8 +170,8 @@
 
   <section class="max-w-4xl mx-auto mb-24">
     <h2 class="text-4xl font-bold text-white tracking-tight mb-8 text-center">How it works</h2>
-    <div class="card rounded-xl p-4 md:p-8 overflow-x-auto">
-      <pre class="mermaid">
+    <div class="card rounded-xl p-4 md:p-8 overflow-x-auto flex justify-center">
+      <pre class="mermaid" style="display:flex;justify-content:center;width:100%;">
 flowchart TB
   subgraph host["Linux host &mdash; laptop / server / VPS"]
     direction TB
