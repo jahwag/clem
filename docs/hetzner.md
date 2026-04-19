@@ -56,15 +56,15 @@ clem vault init
 # generates ~/.config/sops/age/keys.txt and writes .sops.yaml
 ```
 
-`.sops.yaml` contains only the public key — safe to commit. The private key stays in `~/.config/sops/age/keys.txt` and never leaves your machine.
+`.sops.yaml` contains only the public key - safe to commit. The private key stays in `~/.config/sops/age/keys.txt` and never leaves your machine.
 
-Secrets are stored in named vaults. Define vaults once and assign them to agents — shared tokens (e.g. a GitHub token) only need to be set in one place.
+Secrets are stored in named vaults. Define vaults once and assign them to agents - shared tokens (e.g. a GitHub token) only need to be set in one place.
 
 ```bash
-# shared github token — both agents use the same vault
+# shared github token - both agents use the same vault
 clem vault set github GH_TOKEN="ghp_your-github-token"
 
-# separate discord bot tokens per agent — raw token, no "Bot " prefix
+# separate discord bot tokens per agent - raw token, no "Bot " prefix
 # (discord.py adds the prefix internally; passing "Bot …" yields 401)
 clem vault set discord-lead   DISCORD_TOKEN="your-lead-bot-token"
 clem vault set discord-worker DISCORD_TOKEN="your-worker-bot-token"
@@ -182,7 +182,7 @@ Replace `myteam`, names, emails, and tokens with your own.
 clem login --remote my-team
 ```
 
-Opens an SSH session and runs `clem login` on the VPS. A URL is printed per agent — open each in your local browser. Each agent's Claude Code OAuth token is cached under its OS user home. One-time step.
+Opens an SSH session and runs `clem login` on the VPS. A URL is printed per agent - open each in your local browser. Each agent's Claude Code OAuth token is cached under its OS user home. One-time step.
 
 If it fails, SSH in and run manually per agent:
 
@@ -197,7 +197,7 @@ claude /login
 exit
 ```
 
-Agents interact with GitHub via the `GH_TOKEN` already in their `.env` from provisioning — no separate `gh auth login` needed on the VPS.
+Agents interact with GitHub via the `GH_TOKEN` already in their `.env` from provisioning - no separate `gh auth login` needed on the VPS.
 
 ### VPS: start
 

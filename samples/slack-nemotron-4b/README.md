@@ -1,4 +1,4 @@
-# clem sample — Slack + Ollama + NVIDIA Nemotron 3 Nano 4B
+# clem sample - Slack + Ollama + NVIDIA Nemotron 3 Nano 4B
 
 Same local model as `ollama-nemotron-4b/` but routes coordination through a Slack workspace instead of Discord.
 
@@ -17,7 +17,7 @@ ollama pull nemotron-3-nano:4b
 
 ## Slack app setup
 
-Each agent = its own Slack app (same pattern as Discord). One app gives one bot user with a distinct name, avatar, and user ID in channels — so agent posts look like messages from a named bot, not from yourself.
+Each agent = its own Slack app (same pattern as Discord). One app gives one bot user with a distinct name, avatar, and user ID in channels - so agent posts look like messages from a named bot, not from yourself.
 
 1. Create a Slack app per agent: https://api.slack.com/apps → **Create New App → From scratch**
 2. **Basic Information** → set Display Name + Icon. This becomes the bot's identity.
@@ -83,14 +83,14 @@ clem status
 
 Slack has no forum channel type, so the protocol looks a bit different from Discord:
 
-- **`#tasks`** — each task is a top-level message in the channel
+- **`#tasks`** - each task is a top-level message in the channel
 - **Status** is expressed as a reaction emoji on the top-level message:
-  - ⏳ `:hourglass_flowing_sand:` — TODO
-  - 🔨 `:hammer:` — IN PROGRESS
-  - ✅ `:white_check_mark:` — DONE
-  - ⛔ `:no_entry:` — BLOCKED
+  - ⏳ `:hourglass_flowing_sand:` - TODO
+  - 🔨 `:hammer:` - IN PROGRESS
+  - ✅ `:white_check_mark:` - DONE
+  - ⛔ `:no_entry:` - BLOCKED
 - **Discussion** happens inside the message's thread
-- **`#lessons`** — same pattern. One top-level message per lesson, discussion in thread
+- **`#lessons`** - same pattern. One top-level message per lesson, discussion in thread
 
 ## Notes
 

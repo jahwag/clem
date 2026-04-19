@@ -1,8 +1,8 @@
-# clem sample — Ollama + NVIDIA Nemotron 3 Nano 4B
+# clem sample - Ollama + NVIDIA Nemotron 3 Nano 4B
 
 Runs clem agents against a local **NVIDIA Nemotron 3 Nano 4B** via Ollama. No Anthropic token, no cloud calls. Fits 8 GB MacBook Air.
 
-**Why Nemotron 4B:** most small local models (gemma4:e4b, qwen3.5:4b) emit reasoning text instead of structured tool-call blocks — the agent spins but never calls MCP tools. NVIDIA trained Nemotron explicitly for agentic workflows, and even the 4B size emits proper `tool_use` blocks reliably. Works with both `claude-code` and `opencode` runtimes.
+**Why Nemotron 4B:** most small local models (gemma4:e4b, qwen3.5:4b) emit reasoning text instead of structured tool-call blocks - the agent spins but never calls MCP tools. NVIDIA trained Nemotron explicitly for agentic workflows, and even the 4B size emits proper `tool_use` blocks reliably. Works with both `claude-code` and `opencode` runtimes.
 
 See [`../README.md`](../README.md) for the shared build command and tour/runtime modes.
 
@@ -52,7 +52,7 @@ clem up
 clem status
 ```
 
-No `clem login` step — Ollama has no OAuth. Provider env vars (`ANTHROPIC_BASE_URL=http://host.containers.internal:11434`, `ANTHROPIC_MODEL=nemotron-3-nano:4b`) are written into each agent's `.env` by `clem provision` based on `provider: ollama` in `clem.yaml`.
+No `clem login` step - Ollama has no OAuth. Provider env vars (`ANTHROPIC_BASE_URL=http://host.containers.internal:11434`, `ANTHROPIC_MODEL=nemotron-3-nano:4b`) are written into each agent's `.env` by `clem provision` based on `provider: ollama` in `clem.yaml`.
 
 ## Alternative models
 
@@ -69,5 +69,5 @@ Edit `clem.yaml` `model:` to swap:
 
 ## Notes
 
-- `TOKEN EXPIRES` in `clem status` will read `missing` — harmless.
+- `TOKEN EXPIRES` in `clem status` will read `missing` - harmless.
 - If the agent spins without calling tools: check `model:` is one of the "Strong tool use" rows above.

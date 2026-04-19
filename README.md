@@ -25,13 +25,13 @@
 
 | | |
 |---|---|
-| **Per-agent OS identity** | Each agent is its own Linux user — own home dir, own git identity, own GitHub PRs, own Discord/Slack bot. Crash boundaries are real. |
+| **Per-agent OS identity** | Each agent is its own Linux user - own home dir, own git identity, own GitHub PRs, own Discord/Slack bot. Crash boundaries are real. |
 | **Multi-backend coordination** | Discord + Slack today via swappable `coordination.backend:` in `clem.yaml`. One config knob. |
-| **Multi-runtime** | `runtime: claude-code \| opencode`. Mix Anthropic cloud, Bedrock, Vertex, Ollama, OpenAI-compat — one surface. |
+| **Multi-runtime** | `runtime: claude-code \| opencode`. Mix Anthropic cloud, Bedrock, Vertex, Ollama, OpenAI-compat - one surface. |
 | **Encrypted secrets** | Per-agent `.env` materialised from age/sops vaults at provision time. Never leave the host after. |
 | **Self-healing** | systemd + tmux per agent. Watchdog timer restarts dead or stalled sessions. Alerts fire only after repeated failures. |
 | **Bring your own model** | Default Claude; one flag away from Ollama Cloud / Bedrock / Vertex / local models. Tested end-to-end on NVIDIA Nemotron. |
-| **Live ops** | `clem status` shows health per agent. Optional ttyd web terminal per agent — attach in your browser. |
+| **Live ops** | `clem status` shows health per agent. Optional ttyd web terminal per agent - attach in your browser. |
 | **Works locally** | Laptop, home server, Raspberry Pi, small VPS. No Kubernetes. No cloud services required. |
 
 ---
@@ -85,17 +85,17 @@ Each agent runs a loop: launch `claude` (or `opencode`), inject a prompt, wait f
 
 ## Requirements
 
-**Host** — any Linux box with systemd (Ubuntu 24.04 recommended). Can be your laptop, a home server, a Pi, or a cloud VPS. Must have `tmux`, `git`, `python3`, `age`, `sops`, `yq`, and `curl`. Plus the MCP server for your chosen coordination backend — `mcp-discord` (Python) or `slack-mcp-server` (binary) — reachable via `$PATH`. `clem provision` installs the runtime CLI (Claude Code or opencode) per agent.
+**Host** - any Linux box with systemd (Ubuntu 24.04 recommended). Can be your laptop, a home server, a Pi, or a cloud VPS. Must have `tmux`, `git`, `python3`, `age`, `sops`, `yq`, and `curl`. Plus the MCP server for your chosen coordination backend - `mcp-discord` (Python) or `slack-mcp-server` (binary) - reachable via `$PATH`. `clem provision` installs the runtime CLI (Claude Code or opencode) per agent.
 
-**Local machine** — where you run `clem` commands (may be the same box as the host):
+**Local machine** - where you run `clem` commands (may be the same box as the host):
 - `go` 1.22+ (to build `clem`)
-- `age`, `sops`, `yq` — to edit secrets locally
-- `gh` — GitHub CLI
+- `age`, `sops`, `yq` - to edit secrets locally
+- `gh` - GitHub CLI
 
 **Accounts:**
 - A coordination backend:
-  - **Discord** — a private server + one bot token per agent, or
-  - **Slack** — a workspace + one Slack app per agent (bot user token `xoxb-…`)
+  - **Discord** - a private server + one bot token per agent, or
+  - **Slack** - a workspace + one Slack app per agent (bot user token `xoxb-…`)
 - A GitHub token per agent (fine-grained PAT or App)
 
 ---
@@ -124,9 +124,9 @@ sudo clem update
 
 Full local setup on one Linux box. If you want to provision on a separate remote host, see [Deploy to a VPS](#deploy-to-a-vps).
 
-**Try clem without touching your host:** sandboxed samples under [`samples/`](samples/README.md) —
-- [`ollama-nemotron-4b`](samples/ollama-nemotron-4b/README.md) — Discord + local NVIDIA Nemotron 3 Nano 4B (~2.8 GB)
-- [`slack-nemotron-4b`](samples/slack-nemotron-4b/README.md) — Slack + same local model
+**Try clem without touching your host:** sandboxed samples under [`samples/`](samples/README.md) - 
+- [`ollama-nemotron-4b`](samples/ollama-nemotron-4b/README.md) - Discord + local NVIDIA Nemotron 3 Nano 4B (~2.8 GB)
+- [`slack-nemotron-4b`](samples/slack-nemotron-4b/README.md) - Slack + same local model
 
 ```bash
 # 1. new team repo (replace with your org)
@@ -139,10 +139,10 @@ clem init
 Edit `clem.yaml`:
 - Set `project:` (becomes OS user prefix, e.g. `myteam-lead`)
 - Pick `coordination.backend:` (`discord` or `slack`)
-- Paste your server/workspace ID and channel IDs — see [Discord setup](#discord-setup) below. Slack setup lives in [`samples/slack-nemotron-4b/README.md`](samples/slack-nemotron-4b/README.md).
+- Paste your server/workspace ID and channel IDs - see [Discord setup](#discord-setup) below. Slack setup lives in [`samples/slack-nemotron-4b/README.md`](samples/slack-nemotron-4b/README.md).
 - Adjust agent `name`, `role`, `model`, `iteration` (Go duration: `30s`, `1m30s`, `2h`), `runtime`, `provider`
 
-Edit `CLAUDE.shared.md` — describe your project, fill in tiers T2-T4. Edit each `CLAUDE.<agentkey>.md` with per-agent specifics.
+Edit `CLAUDE.shared.md` - describe your project, fill in tiers T2-T4. Edit each `CLAUDE.<agentkey>.md` with per-agent specifics.
 
 ```bash
 # 3. generate age keypair + .sops.yaml
@@ -153,12 +153,12 @@ clem vault set github        GH_TOKEN="ghp_..."
 clem vault set discord-lead  DISCORD_TOKEN="Bot <lead-bot-token>"
 clem vault set discord-worker DISCORD_TOKEN="Bot <worker-bot-token>"
 
-# 5. commit config (secrets.sops.yaml is encrypted — safe)
+# 5. commit config (secrets.sops.yaml is encrypted - safe)
 git add clem.yaml CLAUDE.*.md .sops.yaml secrets.sops.yaml
 git commit -m "init team config"
 git push
 
-# 6. provision — creates OS users, installs services, writes .env
+# 6. provision - creates OS users, installs services, writes .env
 sudo clem provision
 
 # 7. authenticate each agent with Claude (opens browser per agent)
@@ -181,20 +181,20 @@ clem logs lead
 
 ## Discord setup
 
-Create a **private** Discord server (not a public one). Discord membership is the access control layer — agents act on instructions from anyone who can post in the channels.
+Create a **private** Discord server (not a public one). Discord membership is the access control layer - agents act on instructions from anyone who can post in the channels.
 
 **Channels to create:**
 
 | Name       | Type   | Purpose                                 |
 |------------|--------|-----------------------------------------|
 | `#general` | Text   | Status updates, operator comms          |
-| `#tasks`   | Forum  | Task board — agents claim threads here  |
+| `#tasks`   | Forum  | Task board - agents claim threads here  |
 | `#alerts`  | Text   | Critical issues, watchdog alerts        |
 | `#lessons` | Forum  | Post-mortems, learnings                 |
 
 Enable **Developer Mode** (Settings → Advanced), then right-click the server icon and each channel to copy their IDs into `clem.yaml`.
 
-**Bot per agent** — one application per agent gives each a distinct name and avatar in task threads:
+**Bot per agent** - one application per agent gives each a distinct name and avatar in task threads:
 
 1. https://discord.com/developers/applications → **New Application** (name it after the agent)
 2. **Bot** tab → **Reset Token** → copy
@@ -218,7 +218,7 @@ Each agent needs its own GitHub token so PRs and commits show distinct authors.
 3. Permissions: `Contents` (RW), `Pull requests` (RW), `Issues` (RW), `Workflows` (RW)
 4. `clem vault set github GH_TOKEN="ghp_..."` (or a per-agent vault if you want separate tokens)
 
-**Git identity per agent** — so PRs are authored by the agent's name, not root. Run after `clem provision`:
+**Git identity per agent** - so PRs are authored by the agent's name, not root. Run after `clem provision`:
 
 ```bash
 sudo -u myteam-lead git config --global user.name  "Amara"
@@ -230,7 +230,7 @@ echo "https://amara:ghp_...@github.com" | \
 
 Repeat per agent.
 
-**GitHub App** (recommended for teams) — create one app per agent, exchange the private key for a short-lived installation token each iteration. See [GitHub App authentication](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app).
+**GitHub App** (recommended for teams) - create one app per agent, exchange the private key for a short-lived installation token each iteration. See [GitHub App authentication](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app).
 
 ---
 
@@ -254,8 +254,8 @@ clem logs <agent>                  Tail an agent's runner log
 ```
 
 Flags:
-- `--config <path>` — override the default `clem.yaml` path
-- `--remote <user@host>` on `provision`/`login` — run against a remote host over SSH
+- `--config <path>` - override the default `clem.yaml` path
+- `--remote <user@host>` on `provision`/`login` - run against a remote host over SSH
 
 ---
 
@@ -263,7 +263,7 @@ Flags:
 
 ```yaml
 project: string             # OS user and service name prefix
-primary_milestone: string   # optional — referenced by CLAUDE.shared.md
+primary_milestone: string   # optional - referenced by CLAUDE.shared.md
 
 coordination:
   backend: string           # discord (default) | slack
@@ -282,12 +282,12 @@ agents:
     iteration: duration     # go-style duration: "30s", "1m30s", "2h" (default 5m)
     vaults: [string]        # vault names merged into .env (later vaults win)
     prompt: string          # injected at start of each session
-    web_terminal_port: int  # optional — ttyd port (1024-65535) for read-only viewing
-    caveman: bool           # optional — install caveman plugin (compresses output ~75%)
-    subagent_model: string  # optional — CLAUDE_CODE_SUBAGENT_MODEL for Task tool / Explore / general-purpose
-    provider: string        # optional — anthropic (default) | bedrock | vertex | ollama | openai-compat
+    web_terminal_port: int  # optional - ttyd port (1024-65535) for read-only viewing
+    caveman: bool           # optional - install caveman plugin (compresses output ~75%)
+    subagent_model: string  # optional - CLAUDE_CODE_SUBAGENT_MODEL for Task tool / Explore / general-purpose
+    provider: string        # optional - anthropic (default) | bedrock | vertex | ollama | openai-compat
     provider_url: string    # required when provider is ollama or openai-compat
-    runtime: string         # optional — claude-code (default) | opencode
+    runtime: string         # optional - claude-code (default) | opencode
 ```
 
 **Runtimes:**
@@ -304,7 +304,7 @@ agents:
 | `anthropic`      | none (default behaviour)                                                     | Uses Claude Code's OAuth or `ANTHROPIC_API_KEY`           |
 | `bedrock`        | `CLAUDE_CODE_USE_BEDROCK=1`                                                  | Agent also needs AWS creds in a vault                     |
 | `vertex`         | `CLAUDE_CODE_USE_VERTEX=1`                                                   | Agent also needs `GOOGLE_APPLICATION_CREDENTIALS`         |
-| `ollama`         | `ANTHROPIC_BASE_URL=<url>` · `ANTHROPIC_MODEL=<model>` · `ANTHROPIC_AUTH_TOKEN=none` | Ollama natively speaks Anthropic API — no proxy needed    |
+| `ollama`         | `ANTHROPIC_BASE_URL=<url>` · `ANTHROPIC_MODEL=<model>` · `ANTHROPIC_AUTH_TOKEN=none` | Ollama natively speaks Anthropic API - no proxy needed    |
 | `openai-compat`  | same as `ollama`                                                             | Requires you to run an Anthropic-wire translator yourself |
 
 Derived names:
@@ -316,24 +316,24 @@ Derived names:
 
 ## Secrets
 
-Secrets live in `secrets.sops.yaml`, encrypted with age via sops. The file is safe to commit. The age private key (`~/.config/sops/age/keys.txt`) is the only thing you must keep out of git — back it up.
+Secrets live in `secrets.sops.yaml`, encrypted with age via sops. The file is safe to commit. The age private key (`~/.config/sops/age/keys.txt`) is the only thing you must keep out of git - back it up.
 
 `clem provision` decrypts secrets into per-agent `/home/<user>/.env` (mode 0600). The runner sources this at the start of each iteration. Secrets never leave the host after provisioning.
 
-Each agent's `vaults:` list specifies which vaults to merge, in order. Later vaults overwrite earlier keys — useful for shared tokens with per-agent overrides.
+Each agent's `vaults:` list specifies which vaults to merge, in order. Later vaults overwrite earlier keys - useful for shared tokens with per-agent overrides.
 
 Common secrets:
-- `GH_TOKEN` — GitHub access
-- `DISCORD_TOKEN` — Discord bot (**raw token, no `Bot ` prefix** — `discord.py` adds it)
-- `SLACK_MCP_XOXP_TOKEN` — Slack bot (`xoxb-…`) or user (`xoxp-…`) token
-- `SSH_HOST`, `ES_PASSWORD` — optional, enables Prefect MCP server
-- `WRANGLER_OAUTH_TOKEN` — optional, enables Cloudflare Workers MCP
+- `GH_TOKEN` - GitHub access
+- `DISCORD_TOKEN` - Discord bot (**raw token, no `Bot ` prefix** - `discord.py` adds it)
+- `SLACK_MCP_XOXP_TOKEN` - Slack bot (`xoxb-…`) or user (`xoxp-…`) token
+- `SSH_HOST`, `ES_PASSWORD` - optional, enables Prefect MCP server
+- `WRANGLER_OAUTH_TOKEN` - optional, enables Cloudflare Workers MCP
 
 ---
 
 ## Deploy to a VPS
 
-`clem` doesn't require a VPS — any Linux host works. But for always-on agents, a small cloud box (2-4 GB RAM) is cheap and keeps them running while your laptop sleeps.
+`clem` doesn't require a VPS - any Linux host works. But for always-on agents, a small cloud box (2-4 GB RAM) is cheap and keeps them running while your laptop sleeps.
 
 Remote provisioning flow:
 
@@ -357,13 +357,13 @@ Not Linux, or missing core userspace. Use a standard Ubuntu/Debian host.
 Inspect the service: `systemctl status clem-<project>-<agentkey>.service`. Common causes: `.env` missing (run `clem provision` again after setting vaults), `claude` not installed per agent (provision reinstalls), or MCP server binary missing on PATH.
 
 **Agent not posting to Discord/Slack**  
-Check `clem logs <agent>`. The runner logs MCP server startup. If `mcp-discord` is missing, install: `pip3 install --break-system-packages git+https://github.com/Bytelope/mcp-discord.git`. Confirm the bot was invited to the server. **`DISCORD_TOKEN` must be the raw token** (no `Bot ` prefix); `discord.py` adds it internally — pasting `"Bot …"` yields 401. For Slack: use a bot token (`xoxb-`), not a user token (`xoxp-`) — user tokens post as you, not the bot.
+Check `clem logs <agent>`. The runner logs MCP server startup. If `mcp-discord` is missing, install: `pip3 install --break-system-packages git+https://github.com/Bytelope/mcp-discord.git`. Confirm the bot was invited to the server. **`DISCORD_TOKEN` must be the raw token** (no `Bot ` prefix); `discord.py` adds it internally - pasting `"Bot …"` yields 401. For Slack: use a bot token (`xoxb-`), not a user token (`xoxp-`) - user tokens post as you, not the bot.
 
 **Token expired** (`clem status` shows `EXPIRED`)  
 Re-run `sudo clem login <agent>`. OAuth tokens last ~30 days. You can also automate refresh via cron.
 
 **Agent wakes up and does nothing**  
-Open the task forum — threads must exist with `[TODO]` status. Agents only work what's on the board.
+Open the task forum - threads must exist with `[TODO]` status. Agents only work what's on the board.
 
 **Provisioning the same host twice**  
 Safe. `useradd` is idempotent; systemd units are overwritten; `.env` is regenerated from current vaults. Existing Claude OAuth tokens are preserved.
@@ -372,8 +372,8 @@ Safe. `useradd` is idempotent; systemd units are overwritten; `.env` is regenera
 
 ## Community
 
-Questions, ideas, showing off your team — join the [ClaudeSync / Clem Discord](https://discord.gg/pR4qeMH4u4).
+Questions, ideas, showing off your team - join the [ClaudeSync / Clem Discord](https://discord.gg/pR4qeMH4u4).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT - see [LICENSE](LICENSE).

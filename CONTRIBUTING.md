@@ -45,9 +45,9 @@ go fmt ./...
 go vet ./...
 ```
 
-Use the `log` package (or stdlib equivalent) for diagnostic output — do **not** leave stray `fmt.Println` debug calls.
+Use the `log` package (or stdlib equivalent) for diagnostic output - do **not** leave stray `fmt.Println` debug calls.
 
-## Commit Messages — Conventional Commits
+## Commit Messages - Conventional Commits
 
 We follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) specification. The commit message shape:
 
@@ -90,7 +90,7 @@ chore: bump github.com/spf13/cobra to v1.10.3
 feat(config)!: rename iteration_minutes to iteration (Go duration)
 
 BREAKING CHANGE: iteration_minutes: int is replaced by iteration: string.
-Existing configs must migrate — see README clem.yaml reference.
+Existing configs must migrate - see README clem.yaml reference.
 ```
 
 PRs with non-conforming commit messages will be asked to reword before merge.
@@ -99,8 +99,8 @@ PRs with non-conforming commit messages will be asked to reword before merge.
 
 All commits require **both**:
 
-- `-s` — DCO sign-off, certifying you wrote or have the right to submit the code
-- `-S` — cryptographic signature (GPG or SSH), producing a verified badge on GitHub
+- `-s` - DCO sign-off, certifying you wrote or have the right to submit the code
+- `-S` - cryptographic signature (GPG or SSH), producing a verified badge on GitHub
 
 ```
 git commit -s -S -am "feat: add a brief description of your change"
