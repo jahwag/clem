@@ -150,3 +150,60 @@ jobs:
           sudo -E "$GITHUB_WORKSPACE/clem" provision 2>&1 | tail -5
           count=$(sudo grep -c signingkey /home/e2etest-lead/.gitconfig)
           [ "$count" = "1" ] || { echo "gitconfig has $count signingkey lines after second provision, want 1"; exit 1; }
+
+  sample-container:
+    # Separate job: verify samples/Dockerfile builds AND a container actually
+    # boots into systemd (catches issue #42 class - CMD misconfigured, init
+    # missing, --systemd=always incompatibility). Doesn't exercise provision
+    # inside the container; the provision job above covers that contract on
+    # the bare runner.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Build clem binary
+        run: go build -o clem .
+
+      - name: Build sample image (ollama flavour)
+        run: |
+          podman build \
+            --build-arg SAMPLE=ollama-nemotron-4b \
+            -t clem-sample-e2e \
+            -f samples/Dockerfile .
+
+      - name: Boot container with systemd + wait for it to be up
+        id: boot
+        run: |
+          cid=$(podman run -d --systemd=always --name clem-sample-boot clem-sample-e2e)
+          echo "cid=$cid" >> "$GITHUB_OUTPUT"
+          # Give systemd up to 30s to reach a running state
+          for i in $(seq 1 30); do
+            if podman exec "$cid" systemctl is-system-running --wait 2>/dev/null; then
+              echo "systemd up after ${i}s"
+              exit 0
+            fi
+            state=$(podman exec "$cid" systemctl is-system-running 2>/dev/null || echo starting)
+            echo "wait $i/30 state=$state"
+            sleep 1
+          done
+          echo "::error::systemd did not reach running state; container state:"
+          podman inspect "$cid" --format '{{.State.Status}}: {{.State.Error}}'
+          podman logs "$cid" | tail -40
+          exit 1
+
+      - name: Assert - clem binary runs inside container
+        run: podman exec clem-sample-boot clem --help | head -3
+
+      - name: Assert - systemd reachable, not-dead
+        run: |
+          podman exec clem-sample-boot systemctl is-system-running 2>/dev/null | grep -qE 'running|degraded'
+
+      - name: Cleanup
+        if: always()
+        run: podman rm -f clem-sample-boot 2>/dev/null || true
