@@ -17,6 +17,13 @@
   <a href="https://github.com/jahwag/clem/pulls"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square" alt="PRs welcome"></a>
 </p>
 
+<p align="center">
+  <a href="https://myclementine.ai"><b>myclementine.ai</b></a> &middot;
+  <a href="https://github.com/jahwag/clem#quickstart">Quickstart</a> &middot;
+  <a href="https://github.com/jahwag/clem/releases/latest">Download</a> &middot;
+  <a href="https://discord.gg/pR4qeMH4u4">Discord</a>
+</p>
+
 `clem` runs a team of Claude Code agents 24/7 on any Linux host. Each agent is a separate OS user in a tmux session under systemd. Agents coordinate over Discord or Slack, pick up tasks, write code, and open PRs. A watchdog restarts anything that crashes. You configure it once and walk away.
 
 ---
