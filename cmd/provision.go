@@ -129,6 +129,14 @@ func runProvision(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  ssh pubkey: %s\n", pubKey)
 		}
 
+		// 3b. Install client-side pre-push hook that scans for secret patterns.
+		// Defense-in-depth alongside the existing .gitignore_global + GitHub
+		// Push Protection. Refuses any push whose diff contains credentials.
+		if err := agent.InstallGitHooks(osUser); err != nil {
+			return fmt.Errorf("installing git hooks for %s: %w", osUser, err)
+		}
+		fmt.Printf("  installed pre-push secret-scan hook\n")
+
 		// 4. Ensure agent-owned directories (workdir, ~/.local/bin, ~/.claude).
 		// MkdirAll as root would leave intermediate parents (.local, .claude)
 		// root-owned, which breaks the runner's log writes and claude's

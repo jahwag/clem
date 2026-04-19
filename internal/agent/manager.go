@@ -99,6 +99,76 @@ func chownToUser(path, username string) error {
 	return nil
 }
 
+// prePushHookContent is the pre-push hook installed for every agent user.
+// It scans the diff being pushed for known secret patterns and aborts the push
+// if any match. Pure bash + grep; no gitleaks dependency. Works against the
+// classes of exfil most likely to succeed: GitHub tokens, Slack tokens, AWS
+// keys, age/sops keys, and OpenSSH/RSA private-key blocks. Pattern set is
+// deliberately tight - false positives block pushes, which is annoying but
+// safe. If a legitimate push is blocked, commit via --no-verify from a
+// dedicated shell, or rotate the pattern if it turns out to be overbroad.
+const prePushHookContent = `#!/bin/bash
+# Installed by clem provision. Do not edit by hand - will be overwritten.
+# Refuses to push commits whose diff contains patterns matching common secrets.
+
+zero="0000000000000000000000000000000000000000"
+patterns='ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|ghs_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{70,}|sk-[A-Za-z0-9_-]{20,}|xox[bapr]-[0-9A-Za-z-]{10,}|AKIA[0-9A-Z]{16}|AGE-SECRET-KEY-1[A-Z0-9]+|-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'
+
+while read local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue
+  if [ "$remote_sha" = "$zero" ]; then
+    # new branch: scan all reachable commits not yet on remote
+    range="$local_sha"
+    diff_cmd="git log --all --not --remotes --pretty=format: -p $local_sha"
+  else
+    range="${remote_sha}..${local_sha}"
+    diff_cmd="git diff $range"
+  fi
+  hits=$($diff_cmd 2>/dev/null | grep -E "$patterns" | head -3)
+  if [ -n "$hits" ]; then
+    echo "clem pre-push hook: push blocked - secret pattern detected in $range" >&2
+    echo "$hits" | sed 's/^/  /' >&2
+    echo "" >&2
+    echo "Rotate the leaked credential immediately if it is real. To override" >&2
+    echo "for a false positive, push with --no-verify (think first)." >&2
+    exit 1
+  fi
+done
+exit 0
+`
+
+// InstallGitHooks writes a global pre-push hook for the agent user and points
+// their git config at it via core.hooksPath. Idempotent - safe to call every
+// provision. The hook rejects pushes whose diff contains credential patterns,
+// as a client-side defense layer on top of GitHub's push protection.
+func InstallGitHooks(username string) error {
+	homeDir := fmt.Sprintf("/home/%s", username)
+	hooksDir := filepath.Join(homeDir, ".config", "git", "hooks")
+	hookPath := filepath.Join(hooksDir, "pre-push")
+
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		return fmt.Errorf("creating hooks dir: %w", err)
+	}
+	if err := os.WriteFile(hookPath, []byte(prePushHookContent), 0755); err != nil {
+		return fmt.Errorf("writing pre-push hook: %w", err)
+	}
+	ChownPath(filepath.Join(homeDir, ".config"), username)
+
+	// Point the user's git at the global hooks dir so every repo clone uses it.
+	gitConfigPath := filepath.Join(homeDir, ".gitconfig")
+	existing, _ := os.ReadFile(gitConfigPath)
+	if !strings.Contains(string(existing), "hooksPath") {
+		appended := string(existing) + fmt.Sprintf("\n[core]\n\thooksPath = %s\n", hooksDir)
+		if err := os.WriteFile(gitConfigPath, []byte(appended), 0644); err != nil {
+			return fmt.Errorf("writing %s: %w", gitConfigPath, err)
+		}
+		if err := chownToUser(gitConfigPath, username); err != nil {
+			return fmt.Errorf("chowning %s: %w", gitConfigPath, err)
+		}
+	}
+	return nil
+}
+
 // WriteWranglerConfig writes a wrangler OAuth config for the agent if the
 // matching env vars are present in the secrets map. Idempotent — safe to call
 // every provision. The wrangler binary auto-refreshes the OAuth token using
