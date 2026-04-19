@@ -99,20 +99,24 @@ func chownToUser(path, username string) error {
 	return nil
 }
 
+// SecretPatternRegex is the ERE alternation the pre-push hook uses to detect
+// credentials in diffs. Exported for testing and for any other code that
+// wants to reuse the same pattern set. Covers the classes of exfil most
+// likely to succeed: GitHub tokens (classic, OAuth, App server, fine-grained),
+// Slack tokens (bot / user / refresh / app), AWS access keys, age/sops keys,
+// OpenSSH/RSA/EC/DSA private-key blocks. Pattern set is deliberately tight -
+// false positives block pushes, which is annoying but safe.
+const SecretPatternRegex = `ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|ghs_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{70,}|sk-[A-Za-z0-9_-]{20,}|xox[bapr]-[0-9A-Za-z-]{10,}|AKIA[0-9A-Z]{16}|AGE-SECRET-KEY-1[A-Z0-9]+|-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----`
+
 // prePushHookContent is the pre-push hook installed for every agent user.
-// It scans the diff being pushed for known secret patterns and aborts the push
-// if any match. Pure bash + grep; no gitleaks dependency. Works against the
-// classes of exfil most likely to succeed: GitHub tokens, Slack tokens, AWS
-// keys, age/sops keys, and OpenSSH/RSA private-key blocks. Pattern set is
-// deliberately tight - false positives block pushes, which is annoying but
-// safe. If a legitimate push is blocked, commit via --no-verify from a
-// dedicated shell, or rotate the pattern if it turns out to be overbroad.
-const prePushHookContent = `#!/bin/bash
+// Pure bash + grep; no gitleaks dependency. The regex comes from
+// SecretPatternRegex so Go tests and the bash hook share one source of truth.
+var prePushHookContent = fmt.Sprintf(`#!/bin/bash
 # Installed by clem provision. Do not edit by hand - will be overwritten.
 # Refuses to push commits whose diff contains patterns matching common secrets.
 
 zero="0000000000000000000000000000000000000000"
-patterns='ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|ghs_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{70,}|sk-[A-Za-z0-9_-]{20,}|xox[bapr]-[0-9A-Za-z-]{10,}|AKIA[0-9A-Z]{16}|AGE-SECRET-KEY-1[A-Z0-9]+|-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'
+patterns='%s'
 
 while read local_ref local_sha remote_ref remote_sha; do
   [ "$local_sha" = "$zero" ] && continue
@@ -135,7 +139,7 @@ while read local_ref local_sha remote_ref remote_sha; do
   fi
 done
 exit 0
-`
+`, SecretPatternRegex)
 
 // InstallGitHooks writes a global pre-push hook for the agent user and points
 // their git config at it via core.hooksPath. Idempotent - safe to call every
