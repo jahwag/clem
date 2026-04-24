@@ -92,7 +92,10 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 
 func fetchLatestRelease() (*ghRelease, error) {
 	client := &http.Client{Timeout: 15 * time.Second}
-	req, _ := http.NewRequest("GET", latestReleaseURL, nil)
+	req, err := http.NewRequest("GET", latestReleaseURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build release request: %w", err)
+	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := client.Do(req)
 	if err != nil {
