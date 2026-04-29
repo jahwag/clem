@@ -454,11 +454,47 @@ func WriteSettings(username, homeDir string) error {
 	// trailer Claude Code otherwise appends to commits it creates. Agents
 	// should author commits under their own identity, not leak that an LLM
 	// drove them - clem PRs go through normal human review regardless.
+	//
+	// permissions.deny enforces an irreversible-op denylist at the harness
+	// layer (T1989). Lesson: PocketOS 2026-04-25 — Claude Opus 4.6 in Cursor
+	// violated explicit "never destructive" system-prompt rules; treat any
+	// "NEVER do X" prompt as advisory, require infra-layer enforcement.
+	// Patterns target the highest-blast-radius verbs only; agents' own
+	// $HOME and /tmp are unrestricted so legitimate test/cleanup work runs.
 	settings := `{
   "hasTrustDialogAccepted": true,
   "hasCompletedProjectOnboarding": true,
   "skipDangerousModePermissionPrompt": true,
-  "includeCoAuthoredBy": false
+  "includeCoAuthoredBy": false,
+  "permissions": {
+    "deny": [
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git push * --force *)",
+      "Bash(git push * -f *)",
+      "Bash(rm -rf /)",
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf /opt*)",
+      "Bash(rm -rf /var*)",
+      "Bash(rm -rf /etc*)",
+      "Bash(rm -rf /usr*)",
+      "Bash(rm -rf /boot*)",
+      "Bash(rm -rf /lib*)",
+      "Bash(rm -rf /root*)",
+      "Bash(wrangler delete *)",
+      "Bash(wrangler pages delete *)",
+      "Bash(wrangler pages project delete *)",
+      "Bash(wrangler d1 delete *)",
+      "Bash(wrangler r2 bucket delete *)",
+      "Bash(wrangler kv:namespace delete *)",
+      "Bash(wrangler kv namespace delete *)",
+      "Bash(wrangler queues delete *)",
+      "Bash(wrangler workflows delete *)",
+      "Bash(docker volume rm *)",
+      "Bash(docker volume prune *)",
+      "Bash(docker system prune * --volumes*)"
+    ]
+  }
 }
 `
 	settingsPath := filepath.Join(claudeDir, "settings.json")

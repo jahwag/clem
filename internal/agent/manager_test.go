@@ -521,6 +521,26 @@ func TestWriteSettings_WritesExpectedFiles(t *testing.T) {
 		t.Errorf("settings.json missing includeCoAuthoredBy=false: %s", settingsData)
 	}
 
+	// permissions.deny block guards against destructive ops (T1989).
+	// Spot-check a few canonical patterns from each blast-radius bucket.
+	for _, want := range []string{
+		`"permissions"`,
+		`"deny"`,
+		"Bash(git push --force *)",
+		"Bash(rm -rf /opt*)",
+		"Bash(wrangler delete *)",
+		"Bash(docker volume rm *)",
+	} {
+		if !strings.Contains(string(settingsData), want) {
+			t.Errorf("settings.json missing %q: %s", want, settingsData)
+		}
+	}
+	// settings.json must remain valid JSON after the deny-list addition.
+	var parsed map[string]any
+	if err := json.Unmarshal(settingsData, &parsed); err != nil {
+		t.Fatalf("settings.json is not valid JSON: %v\n%s", err, settingsData)
+	}
+
 	// .claude.json must exist and contain the project trust entry
 	appStateData, err := os.ReadFile(filepath.Join(dir, ".claude.json"))
 	if err != nil {
