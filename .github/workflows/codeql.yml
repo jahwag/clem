@@ -1,0 +1,57 @@
+# CodeQL advanced setup. Replaces GitHub-managed default setup so that PRs
+# from forks (e.g. external contributors) also get analyzed — default setup
+# silently skips fork PRs, which left PR #63 missing the required
+# `code_scanning` ruleset check and unmergeable.
+#
+# Languages mirror the prior default-setup config (`go`, `actions`).
+# Triggers cover push to main, all PRs (incl. forks), and a weekly schedule
+# so periodic re-analysis still runs even on quiet weeks.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Mondays 06:13 UTC. Offset from :00 to avoid GitHub scheduler hot spots.
+    - cron: '13 6 * * 1'
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: go
+            build-mode: autobuild
+          - language: actions
+            build-mode: none
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # security-and-quality covers the default-setup query suite plus
+          # additional maintainability checks. Drop to "security-extended"
+          # if results get noisy.
+          queries: security-and-quality
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
