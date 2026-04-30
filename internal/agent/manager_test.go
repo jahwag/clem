@@ -801,3 +801,55 @@ func TestRegisterSSHSigningKey_APIError(t *testing.T) {
 		t.Errorf("expected status code 403 in error, got: %v", err)
 	}
 }
+
+func TestTmuxAlive_UsesSudoForAgentUser(t *testing.T) {
+	stub := withStub(t)
+
+	if !TmuxAlive("cdev-worker", "worker") {
+		t.Fatal("expected alive when stub returns no error")
+	}
+	if len(stub.calls) != 1 {
+		t.Fatalf("expected exactly one Run call, got %d: %v", len(stub.calls), stub.calls)
+	}
+	got := stub.calls[0]
+	want := []string{"sudo", "-n", "-u", "cdev-worker", "tmux", "has-session", "-t", "worker"}
+	if !equalSlice(got, want) {
+		t.Errorf("invocation mismatch:\n got: %v\nwant: %v", got, want)
+	}
+}
+
+func TestTmuxAlive_ReportsDownWhenSudoTmuxFails(t *testing.T) {
+	stub := withStub(t)
+	stub.failOn = "sudo"
+
+	if TmuxAlive("cdev-worker", "worker") {
+		t.Fatal("expected dead when sudo tmux returns error")
+	}
+}
+
+func TestTmuxAlive_EmptyOSUserFallsBackToCallerOwnServer(t *testing.T) {
+	// Backwards-compat path: an empty user means "check our own tmux server"
+	// which is what older callers (and tests) relied on. Keep that working
+	// so the new signature is additive, not breaking.
+	stub := withStub(t)
+
+	TmuxAlive("", "worker")
+	if len(stub.calls) != 1 {
+		t.Fatalf("expected one Run call, got %d", len(stub.calls))
+	}
+	if stub.calls[0][0] != "tmux" {
+		t.Errorf("expected fallback to call tmux directly, got: %v", stub.calls[0])
+	}
+}
+
+func equalSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

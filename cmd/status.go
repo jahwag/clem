@@ -39,7 +39,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 		systemdState := agent.SystemdState(svcName)
 		tmuxAlive := "no"
-		if agent.TmuxAlive(agentKey) {
+		if agent.TmuxAlive(osUser, agentKey) {
 			tmuxAlive = "yes"
 		}
 

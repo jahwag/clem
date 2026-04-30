@@ -245,3 +245,22 @@ func TestGenerate_DiscordWatchSkippedForNonDiscordBackend(t *testing.T) {
 		t.Fatalf("expected slack channel id NOT to appear in discord watcher block, got:\n%s", out)
 	}
 }
+
+func TestGenerateService_PullsTtydUp(t *testing.T) {
+	cfg := baseCfg("worker", config.AgentConfig{
+		Name:      "Worker",
+		Model:     "claude-opus-4-7",
+		Iteration: "1m",
+		Prompt:    "do the thing",
+	})
+
+	out := GenerateService(cfg, "worker")
+
+	// Wants= ensures starting clem-test-worker also pulls the ttyd sidecar.
+	// Without this, BindsTo+PartOf only propagate stops back, leaving the
+	// web terminal dead until the next provision.
+	want := "Wants=clem-ttyd-test-worker.service"
+	if !strings.Contains(out, want) {
+		t.Fatalf("expected %q in service unit, got:\n%s", want, out)
+	}
+}

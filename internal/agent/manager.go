@@ -593,9 +593,17 @@ func SystemdState(serviceName string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// TmuxAlive returns true if a tmux session with the given name exists.
-func TmuxAlive(sessionName string) bool {
-	_, err := sys.Run("tmux", "has-session", "-t", sessionName)
+// TmuxAlive returns true if a tmux session with the given name exists in the
+// agent user's tmux server. Tmux servers are per-UID, so checking from the
+// invoking shell (typically root running `clem status`) sees an empty server
+// and reports every agent as down. Always invoke under sudo -u <osUser>.
+func TmuxAlive(osUser, sessionName string) bool {
+	if osUser == "" {
+		// Backwards-compat path for callers that still query their own server.
+		_, err := sys.Run("tmux", "has-session", "-t", sessionName)
+		return err == nil
+	}
+	_, err := sys.Run("sudo", "-n", "-u", osUser, "tmux", "has-session", "-t", sessionName)
 	return err == nil
 }
 

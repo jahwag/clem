@@ -255,6 +255,11 @@ done
 const serviceTemplate = `[Unit]
 Description=Clem agent: {{.AgentName}} ({{.Project}})
 After=network.target
+# Pull the web-terminal sidecar up alongside the agent. The ttyd unit's
+# BindsTo+PartOf already propagate stops back, but neither propagates a fresh
+# start, so without a Wants here a "systemctl start" of the agent leaves the
+# terminal dead until provision re-enables it.
+Wants=clem-ttyd-{{.Project}}-{{.AgentKey}}.service
 
 [Service]
 Type=forking
