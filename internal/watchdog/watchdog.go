@@ -61,14 +61,34 @@ check_agent() {
 
     local fail_count_file="$COOLDOWN_DIR/${agent_key}.fails"
 
-    # Case 1: systemd service dead — restart, only alert after 3 consecutive failures
+    # Case 1: systemd service dead — restart, then re-check. Only alert when
+    # the restart did NOT bring the service back. Silences noise from
+    # transient non-active states (e.g. ExecStop kill-session exit 1 during
+    # a clean restart) that historically fired spurious "failed 3 times"
+    # alerts even though auto-recovery had succeeded.
     if [ "$systemd_state" != "active" ]; then
         echo "$(date -Iseconds) $agent_key: systemd=$systemd_state — restarting"
         systemctl restart "$service"
+
+        # systemctl restart returns after the job completes, but the forked
+        # tmux daemon needs a beat to register its session.
+        sleep 3
+        local post_state post_tmux
+        post_state=$(systemctl show -p ActiveState --value "$service" 2>/dev/null)
+        post_tmux="no"
+        tmux has-session -t "$agent_key" 2>/dev/null && post_tmux="yes"
+
+        if [ "$post_state" = "active" ] && [ "$post_tmux" = "yes" ]; then
+            # Restart succeeded — reset counter, suppress alert.
+            echo 0 > "$fail_count_file"
+            date +%s > "$cooldown_file"
+            return
+        fi
+
         local fails=$(( $(cat "$fail_count_file" 2>/dev/null || echo 0) + 1 ))
         echo "$fails" > "$fail_count_file"
         if (( fails >= 3 )); then
-            send_alert "🔴 clem/$PROJECT: $agent_key failed $fails times consecutively (systemd=$systemd_state)"
+            send_alert "🔴 clem/$PROJECT: $agent_key failed $fails times consecutively (systemd=$post_state tmux=$post_tmux)"
             echo 0 > "$fail_count_file"
         fi
         date +%s > "$cooldown_file"

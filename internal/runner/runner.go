@@ -2,6 +2,7 @@ package runner
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/jahwag/clem/internal/config"
@@ -30,9 +31,16 @@ tail -500 "$LOGFILE" > "$LOGFILE.tmp" 2>/dev/null && mv "$LOGFILE.tmp" "$LOGFILE
 python3 -c "
 import json, os
 cfg = {'mcpServers': {}}
-# Discord bot
+# Discord bot. When channel IDs are configured the MCP server also runs a
+# gateway watcher that pushes one debounced notification per burst into this
+# agent's tmux session — see mcp-discord's CLEM_TMUX_TARGET docs.
 if os.environ.get('DISCORD_TOKEN'):
-    cfg['mcpServers']['discord-bot'] = {'command': '/usr/local/bin/mcp-discord', 'env': {'DISCORD_TOKEN': os.environ['DISCORD_TOKEN']}}
+    _discord_env = {'DISCORD_TOKEN': os.environ['DISCORD_TOKEN']}
+    _watch = '{{.WatchChannelIDs}}'
+    if _watch:
+        _discord_env['DISCORD_WATCH_CHANNELS'] = _watch
+        _discord_env['CLEM_TMUX_TARGET'] = '{{.AgentKey}}'
+    cfg['mcpServers']['discord-bot'] = {'command': '/usr/local/bin/mcp-discord', 'env': _discord_env}
 # Slack (korotovsky/slack-mcp-server). Read access is free; write access
 # (conversations_add_message) requires SLACK_MCP_ADD_MESSAGE_TOOL — enabled
 # here by default so agents can actually post, matching the Discord default.
@@ -179,11 +187,16 @@ if os.environ.get('ANTHROPIC_MODEL'):
         'models': {os.environ['ANTHROPIC_MODEL']: {}},
     }
 if os.environ.get('DISCORD_TOKEN'):
+    _discord_env = {'DISCORD_TOKEN': os.environ['DISCORD_TOKEN']}
+    _watch = '{{.WatchChannelIDs}}'
+    if _watch:
+        _discord_env['DISCORD_WATCH_CHANNELS'] = _watch
+        _discord_env['CLEM_TMUX_TARGET'] = '{{.AgentKey}}'
     cfg['mcp']['discord-bot'] = {
         'type': 'local',
         'command': ['/usr/local/bin/mcp-discord'],
         'enabled': True,
-        'environment': {'DISCORD_TOKEN': os.environ['DISCORD_TOKEN']},
+        'environment': _discord_env,
     }
 if os.environ.get('SLACK_MCP_XOXP_TOKEN'):
     slack_cmd = ['/usr/local/bin/slack-mcp-server', '--transport', 'stdio']
@@ -317,6 +330,10 @@ type RunnerParams struct {
 	AlertChannel      string
 	AlertCurl         string
 	EgressDirectives  string
+	// WatchChannelIDs is the comma-separated list of Discord channel IDs the
+	// MCP server's gateway watcher should observe. Empty disables the watcher
+	// even when DISCORD_TOKEN is set, preserving the original tool-only mode.
+	WatchChannelIDs   string
 }
 
 // Generate renders the runner.sh content for an agent. Dispatches on the
@@ -350,18 +367,19 @@ func Generate(cfg *config.Config, agentKey string) string {
 		subagentExport = fmt.Sprintf("export CLAUDE_CODE_SUBAGENT_MODEL=%q", ac.SubagentModel)
 	}
 	p := RunnerParams{
-		Project:        cfg.Project,
-		AgentKey:       agentKey,
-		AgentName:      ac.Name,
-		Model:          ac.Model,
-		SubagentExport: subagentExport,
-		Prompt:         strings.ReplaceAll(promptText, "'", `'\''`),
-		OSUser:         cfg.OSUsername(agentKey),
-		HomeDir:        fmt.Sprintf("/home/%s", cfg.OSUsername(agentKey)),
-		SleepActive:    iterSec,
-		SleepNight:     iterSec * 2,
-		AlertChannel:   alertChannel,
-		AlertCurl:      alertCurl,
+		Project:         cfg.Project,
+		AgentKey:        agentKey,
+		AgentName:       ac.Name,
+		Model:           ac.Model,
+		SubagentExport:  subagentExport,
+		Prompt:          strings.ReplaceAll(promptText, "'", `'\''`),
+		OSUser:          cfg.OSUsername(agentKey),
+		HomeDir:         fmt.Sprintf("/home/%s", cfg.OSUsername(agentKey)),
+		SleepActive:     iterSec,
+		SleepNight:      iterSec * 2,
+		AlertChannel:    alertChannel,
+		AlertCurl:       alertCurl,
+		WatchChannelIDs: discordWatchChannels(cfg),
 	}
 	switch ac.RuntimeKind() {
 	case "opencode":
@@ -426,6 +444,30 @@ func renderTemplate(tmpl string, p RunnerParams) string {
 		"{{.AlertCurl}}", p.AlertCurl,
 		"{{.SubagentExport}}", p.SubagentExport,
 		"{{.EgressDirectives}}", p.EgressDirectives,
+		"{{.WatchChannelIDs}}", p.WatchChannelIDs,
 	)
 	return r.Replace(tmpl)
+}
+
+// discordWatchChannels returns a deterministic comma-separated list of
+// configured Discord channel IDs for the gateway watcher to observe.
+// Sorted by channel name (the map key) so renders are stable across
+// Go map-iteration orderings, which keeps generated runner.sh diffs
+// minimal between provisions.
+func discordWatchChannels(cfg *config.Config) string {
+	if cfg == nil || cfg.Coordination.Backend != "discord" {
+		return ""
+	}
+	names := make([]string, 0, len(cfg.Coordination.Channels))
+	for name := range cfg.Coordination.Channels {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	ids := make([]string, 0, len(names))
+	for _, name := range names {
+		if id := strings.TrimSpace(cfg.Coordination.Channels[name]); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return strings.Join(ids, ",")
 }

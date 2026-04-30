@@ -164,3 +164,84 @@ func TestGenerateService_EgressRestrictionDisabled(t *testing.T) {
 		t.Fatalf("expected no IPAddressDeny when egress_restriction unset, got:\n%s", out)
 	}
 }
+
+func TestGenerate_DiscordWatchChannelsWired(t *testing.T) {
+	cfg := baseCfg("worker", config.AgentConfig{
+		Name:      "Worker",
+		Model:     "claude-opus-4-7",
+		Iteration: "1m",
+		Prompt:    "do the thing",
+	})
+
+	out := Generate(cfg, "worker")
+
+	// Channels are sorted by name (alerts, general, tasks) -> 111,333,222.
+	wantList := "111,333,222"
+	if !strings.Contains(out, "DISCORD_WATCH_CHANNELS") {
+		t.Fatalf("expected DISCORD_WATCH_CHANNELS substitution, got:\n%s", out)
+	}
+	if !strings.Contains(out, wantList) {
+		t.Fatalf("expected channel list %q in runner, got:\n%s", wantList, out)
+	}
+	if !strings.Contains(out, "CLEM_TMUX_TARGET") {
+		t.Fatalf("expected CLEM_TMUX_TARGET substitution, got:\n%s", out)
+	}
+	// Tmux target = agent key, since clem starts the tmux session under that name.
+	if !strings.Contains(out, "'CLEM_TMUX_TARGET'] = 'worker'") {
+		t.Fatalf("expected tmux target = 'worker', got:\n%s", out)
+	}
+}
+
+func TestGenerate_DiscordWatchEmptyWhenNoChannels(t *testing.T) {
+	cfg := &config.Config{
+		Project: "test",
+		Coordination: config.Coordination{
+			Backend:  "discord",
+			Channels: map[string]string{},
+		},
+		Agents: map[string]config.AgentConfig{
+			"worker": {
+				Name:      "Worker",
+				Model:     "claude-opus-4-7",
+				Iteration: "1m",
+				Prompt:    "do the thing",
+			},
+		},
+	}
+
+	out := Generate(cfg, "worker")
+
+	// _watch resolves to '' so the wrapper if-block stays inert: tokens may be set
+	// but neither DISCORD_WATCH_CHANNELS nor CLEM_TMUX_TARGET should be assigned.
+	if strings.Contains(out, "_discord_env['DISCORD_WATCH_CHANNELS']") &&
+		!strings.Contains(out, "_watch = ''") {
+		t.Fatalf("expected empty _watch when no channels configured, got:\n%s", out)
+	}
+}
+
+func TestGenerate_DiscordWatchSkippedForNonDiscordBackend(t *testing.T) {
+	cfg := &config.Config{
+		Project: "test",
+		Coordination: config.Coordination{
+			Backend: "slack",
+			Channels: map[string]string{
+				"general": "C1234",
+			},
+		},
+		Agents: map[string]config.AgentConfig{
+			"worker": {
+				Name:      "Worker",
+				Model:     "claude-opus-4-7",
+				Iteration: "1m",
+				Prompt:    "do the thing",
+			},
+		},
+	}
+
+	out := Generate(cfg, "worker")
+
+	// Slack channel IDs must not leak into the Discord-watch env block.
+	if strings.Contains(out, "C1234") {
+		t.Fatalf("expected slack channel id NOT to appear in discord watcher block, got:\n%s", out)
+	}
+}
