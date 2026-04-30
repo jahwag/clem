@@ -38,17 +38,22 @@ var ghHTTPClient = &http.Client{}
 
 // RegisterSSHSigningKey registers pubKey on the agent's GitHub account as a
 // signing key via POST /user/ssh_signing_keys. Requires a GH_TOKEN with the
-// write:public_key scope. Idempotent: returns nil if the key is already registered.
-func RegisterSSHSigningKey(pubKey, ghToken string) error {
+// write:ssh_signing_key (admin:ssh_signing_key) scope. Idempotent: returns nil
+// if the key is already registered. The title argument lets callers
+// distinguish keys per agent in the GitHub UI (e.g. "clem-cdev-lead").
+func RegisterSSHSigningKey(pubKey, ghToken, title string) error {
 	if ghToken == "" {
-		return fmt.Errorf("GH_TOKEN required to register SSH signing key; grant write:public_key scope to the agent PAT")
+		return fmt.Errorf("GH_TOKEN required to register SSH signing key; grant write:ssh_signing_key scope to the agent PAT")
+	}
+	if title == "" {
+		title = "clem-signing"
 	}
 
 	type payload struct {
 		Title string `json:"title"`
 		Key   string `json:"key"`
 	}
-	body, err := json.Marshal(payload{Title: "clem-signing", Key: pubKey})
+	body, err := json.Marshal(payload{Title: title, Key: pubKey})
 	if err != nil {
 		return fmt.Errorf("marshaling signing key payload: %w", err)
 	}

@@ -145,8 +145,11 @@ func runProvision(cmd *cobra.Command, args []string) error {
 			}
 
 			// 3b1. Register the signing key on GitHub so commits show as verified.
-			// Requires write:public_key scope on the agent's GH_TOKEN.
-			if err := agent.RegisterSSHSigningKey(pubKey, ghToken); err != nil {
+			// Requires write:ssh_signing_key scope on the agent's GH_TOKEN.
+			// Title includes the OS user so multiple agents sharing a GitHub
+			// account are distinguishable in https://github.com/settings/ssh/signing.
+			signingTitle := fmt.Sprintf("clem-%s", osUser)
+			if err := agent.RegisterSSHSigningKey(pubKey, ghToken, signingTitle); err != nil {
 				fmt.Printf("  warning: register SSH signing key for %s: %v\n", osUser, err)
 			} else if ghToken != "" {
 				fmt.Printf("  registered SSH signing key on GitHub for %s\n", osUser)

@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -746,7 +747,7 @@ func (rt *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error)
 }
 
 func TestRegisterSSHSigningKey_NoToken(t *testing.T) {
-	err := RegisterSSHSigningKey("ssh-ed25519 AAAA testuser@clem", "")
+	err := RegisterSSHSigningKey("ssh-ed25519 AAAA testuser@clem", "", "clem-test")
 	if err == nil {
 		t.Fatal("expected error when ghToken is empty")
 	}
@@ -766,10 +767,29 @@ func TestRegisterSSHSigningKey_Success(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer fake-token" {
 			t.Errorf("unexpected Authorization: %s", r.Header.Get("Authorization"))
 		}
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), `"title":"clem-cdev-lead"`) {
+			t.Errorf("expected title 'clem-cdev-lead' in payload, got: %s", body)
+		}
 		w.WriteHeader(http.StatusCreated)
 	}))
 
-	err := RegisterSSHSigningKey("ssh-ed25519 AAAA testuser@clem", "fake-token")
+	err := RegisterSSHSigningKey("ssh-ed25519 AAAA testuser@clem", "fake-token", "clem-cdev-lead")
+	if err != nil {
+		t.Fatalf("expected no error on 201, got: %v", err)
+	}
+}
+
+func TestRegisterSSHSigningKey_DefaultTitleWhenEmpty(t *testing.T) {
+	withGHHTTPClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), `"title":"clem-signing"`) {
+			t.Errorf("expected default title 'clem-signing' when caller passes empty, got: %s", body)
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+
+	err := RegisterSSHSigningKey("ssh-ed25519 AAAA testuser@clem", "fake-token", "")
 	if err != nil {
 		t.Fatalf("expected no error on 201, got: %v", err)
 	}
@@ -781,7 +801,7 @@ func TestRegisterSSHSigningKey_AlreadyRegistered(t *testing.T) {
 		w.Write([]byte(`{"message":"key is already in use"}`)) //nolint:errcheck
 	}))
 
-	err := RegisterSSHSigningKey("ssh-ed25519 AAAA testuser@clem", "fake-token")
+	err := RegisterSSHSigningKey("ssh-ed25519 AAAA testuser@clem", "fake-token", "clem-test")
 	if err != nil {
 		t.Fatalf("expected nil error when key already registered, got: %v", err)
 	}
@@ -793,7 +813,7 @@ func TestRegisterSSHSigningKey_APIError(t *testing.T) {
 		w.Write([]byte(`{"message":"Must have admin rights to Repository."}`)) //nolint:errcheck
 	}))
 
-	err := RegisterSSHSigningKey("ssh-ed25519 AAAA testuser@clem", "fake-token")
+	err := RegisterSSHSigningKey("ssh-ed25519 AAAA testuser@clem", "fake-token", "clem-test")
 	if err == nil {
 		t.Fatal("expected error on non-201/non-422 response")
 	}
