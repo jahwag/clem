@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -12,6 +13,82 @@ import (
 )
 
 var validName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
+
+// vaultRefRe matches ${vault:BUCKET.KEY} in MCP server env values.
+var vaultRefRe = regexp.MustCompile(`\$\{vault:([^.}]+)\.([^}]+)\}`)
+
+// MarketplaceConfig declares a Claude Code plugin marketplace to install.
+// source must be "github". commit is optional; when set, provision verifies
+// the cloned HEAD matches before proceeding (supply-chain pin).
+type MarketplaceConfig struct {
+	Name   string `yaml:"name"`
+	Source string `yaml:"source"`
+	Repo   string `yaml:"repo"`
+	Commit string `yaml:"commit"`
+}
+
+// PluginConfig declares a plugin to install from a named marketplace.
+// Accepts the shorthand string form "pluginName@marketplaceName".
+type PluginConfig struct {
+	Name        string `yaml:"name"`
+	Marketplace string `yaml:"marketplace"`
+}
+
+// UnmarshalYAML accepts "name@marketplace" shorthand and the struct form.
+func (p *PluginConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Tag == "!!str" {
+		parts := strings.SplitN(value.Value, "@", 2)
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return fmt.Errorf("plugin shorthand must be name@marketplace, got %q", value.Value)
+		}
+		p.Name, p.Marketplace = parts[0], parts[1]
+		return nil
+	}
+	type plain PluginConfig
+	return value.Decode((*plain)(p))
+}
+
+// SkillConfig declares a skill to clone into ~/.claude/skills/<name>/.
+// When path is set, the skill entrypoint is at ~/.claude/skills/<name>/<path>.
+type SkillConfig struct {
+	Name   string `yaml:"name"`
+	Source string `yaml:"source"`
+	Repo   string `yaml:"repo"`
+	Path   string `yaml:"path"`
+}
+
+// MCPServerConfig declares an MCP server to register in ~/.claude/settings.json.
+// Env values may contain ${vault:BUCKET.KEY} refs resolved at provision time.
+// command/args run as the agent OS user; clem.yaml is operator-controlled.
+type MCPServerConfig struct {
+	Name    string            `yaml:"name"`
+	Command string            `yaml:"command"`
+	Args    []string          `yaml:"args"`
+	URL     string            `yaml:"url"`
+	Env     map[string]string `yaml:"env"`
+}
+
+// ExtensionsConfig declares all extensions to install for an agent at provision
+// time. Provision is idempotent: already-installed extensions are no-ops.
+// Removing an entry does not auto-uninstall; re-provision logs a reminder.
+type ExtensionsConfig struct {
+	Marketplaces []MarketplaceConfig `yaml:"marketplaces"`
+	Plugins      []PluginConfig      `yaml:"plugins"`
+	Skills       []SkillConfig       `yaml:"skills"`
+	MCPServers   []MCPServerConfig   `yaml:"mcp_servers"`
+}
+
+// ExpandVaultRefs replaces ${vault:BUCKET.KEY} refs in s using the flat
+// secrets map from vault.DecryptForAgent. Unresolvable refs are left as-is.
+func ExpandVaultRefs(s string, secrets map[string]string) string {
+	return vaultRefRe.ReplaceAllStringFunc(s, func(match string) string {
+		m := vaultRefRe.FindStringSubmatch(match)
+		if v, ok := secrets[m[2]]; ok {
+			return v
+		}
+		return match
+	})
+}
 
 // CavemanLevel controls whether and at what intensity the caveman plugin is
 // injected. Accepts "off"/""  (disabled), "lite", "full", "ultra", or the
@@ -115,6 +192,10 @@ type AgentConfig struct {
 	// logs a warning at runtime.
 	GitName  string `yaml:"git_name"`
 	GitEmail string `yaml:"git_email"`
+	// Extensions declares marketplaces, plugins, skills, and MCP servers to
+	// install for this agent at provision time. caveman: true is handled as a
+	// shorthand that prepends the caveman marketplace and plugin entries.
+	Extensions ExtensionsConfig `yaml:"extensions"`
 	// EgressRestrictionExperimental adds systemd IPAddressDeny=any + IPAddressAllow
 	// rules to the agent service unit. EXPERIMENTAL — known limitations:
 	//
@@ -293,9 +374,46 @@ func Load(path string) (*Config, error) {
 			usedPorts[ac.WebTerminalPort] = key
 		}
 		ac.normalizeSubagentModel()
+		if err := ac.validateExtensions(key); err != nil {
+			return nil, err
+		}
 		cfg.Agents[key] = ac
 	}
 	return &cfg, nil
+}
+
+// validateExtensions checks extension config for an agent identified by key.
+func (ac *AgentConfig) validateExtensions(key string) error {
+	for _, mp := range ac.Extensions.Marketplaces {
+		if mp.Name == "" || mp.Repo == "" {
+			return fmt.Errorf("agent %s: marketplace entry missing name or repo", key)
+		}
+	}
+	for _, sk := range ac.Extensions.Skills {
+		if sk.Name == "" || sk.Repo == "" {
+			return fmt.Errorf("agent %s: skill entry missing name or repo", key)
+		}
+	}
+	for _, mcp := range ac.Extensions.MCPServers {
+		if mcp.Name == "" {
+			return fmt.Errorf("agent %s: mcp_server entry missing name", key)
+		}
+		if mcp.URL == "" && mcp.Command == "" {
+			return fmt.Errorf("agent %s: mcp_server %s requires command or url", key, mcp.Name)
+		}
+		vaultSet := make(map[string]bool, len(ac.Vaults))
+		for _, v := range ac.Vaults {
+			vaultSet[v] = true
+		}
+		for envKey, envVal := range mcp.Env {
+			for _, m := range vaultRefRe.FindAllStringSubmatch(envVal, -1) {
+				if !vaultSet[m[1]] {
+					return fmt.Errorf("agent %s: mcp_server %s: env %s references vault %q not in agent vaults list", key, mcp.Name, envKey, m[1])
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // DefaultSubagentModel is applied when subagent_model is unset in clem.yaml.
