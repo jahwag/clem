@@ -29,6 +29,8 @@ tail -500 "$LOGFILE" > "$LOGFILE.tmp" 2>/dev/null && mv "$LOGFILE.tmp" "$LOGFILE
 # lists eat ~1-2k tokens per session. Exported BEFORE sourcing .env so
 # operators can re-enable per-host by setting the var in $HOME/.env.
 export ENABLE_CLAUDEAI_MCP_SERVERS=false
+# Skip IDE extension auto-install probe — agents run in headless tmux, no IDE.
+export CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL=1
 
 # Load secrets (written by clem provision, never committed)
 [ -f "$HOME/.env" ] && source "$HOME/.env"

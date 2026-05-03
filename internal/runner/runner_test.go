@@ -142,16 +142,19 @@ func TestGenerate_DisablesClaudeAIConnectorMCPs(t *testing.T) {
 
 	out := Generate(cfg, "lead")
 
-	want := "export ENABLE_CLAUDEAI_MCP_SERVERS=false"
-	if !strings.Contains(out, want) {
-		t.Fatalf("expected runner to contain %q, got:\n%s", want, out)
-	}
-
-	// Must export BEFORE sourcing .env so operators can override per-host.
-	exportIdx := strings.Index(out, want)
-	sourceIdx := strings.Index(out, `source "$HOME/.env"`)
-	if exportIdx < 0 || sourceIdx < 0 || exportIdx > sourceIdx {
-		t.Fatalf("expected export to precede .env source (export=%d, source=%d), got:\n%s", exportIdx, sourceIdx, out)
+	for _, want := range []string{
+		"export ENABLE_CLAUDEAI_MCP_SERVERS=false",
+		"export CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL=1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected runner to contain %q, got:\n%s", want, out)
+		}
+		// Must export BEFORE sourcing .env so operators can override per-host.
+		exportIdx := strings.Index(out, want)
+		sourceIdx := strings.Index(out, `source "$HOME/.env"`)
+		if exportIdx < 0 || sourceIdx < 0 || exportIdx > sourceIdx {
+			t.Errorf("expected %q to precede .env source (export=%d, source=%d)", want, exportIdx, sourceIdx)
+		}
 	}
 }
 
