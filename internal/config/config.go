@@ -79,8 +79,8 @@ type AgentConfig struct {
 	Role  string `yaml:"role"`
 	Model string `yaml:"model"`
 	// Iteration is a Go-style duration string (e.g. "30s", "1m30s", "2h").
-	// Parsed via time.ParseDuration. Sleep between agent sessions during
-	// active hours (07-22); doubled overnight. Default 5m.
+	// Parsed via time.ParseDuration. Sleep between agent sessions; same
+	// value applies day and night. Default 5m.
 	Iteration       string   `yaml:"iteration"`
 	Vaults          []string `yaml:"vaults"`
 	Prompt          string   `yaml:"prompt"`

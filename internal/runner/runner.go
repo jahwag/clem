@@ -380,7 +380,12 @@ func Generate(cfg *config.Config, agentKey string) string {
 		OSUser:          cfg.OSUsername(agentKey),
 		HomeDir:         fmt.Sprintf("/home/%s", cfg.OSUsername(agentKey)),
 		SleepActive:     iterSec,
-		SleepNight:      iterSec * 2,
+		// Night sleep matches active. The previous 2x doubler hurt spend:
+		// Anthropic's prompt cache TTL is 5 min, so any iter > 5m at night
+		// guaranteed a cache miss every session — same session count cut
+		// you'd get from cold-cache cost increase. Match active to keep cache
+		// hot, or override per-iteration in clem.yaml directly.
+		SleepNight:      iterSec,
 		AlertChannel:    alertChannel,
 		AlertCurl:       alertCurl,
 		WatchChannelIDs: discordWatchChannels(cfg),
