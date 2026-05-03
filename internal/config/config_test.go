@@ -447,3 +447,167 @@ agents:
 		t.Errorf("expected empty operator when unset, got %+v", cfg.Operator)
 	}
 }
+func TestLoad_ExtensionsParsed(t *testing.T) {
+	path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+    vaults: [github, discord-lead]
+    extensions:
+      marketplaces:
+        - name: caveman
+          source: github
+          repo: JuliusBrussee/caveman
+      plugins:
+        - caveman@caveman
+      skills:
+        - name: security
+          source: github
+          repo: anthropics/skills
+          path: skills/security-pre-commit
+      mcp_servers:
+        - name: context7
+          url: https://mcp.context7.com/mcp
+        - name: discord
+          command: npx
+          args: ["-y", "@some/discord-mcp"]
+          env:
+            DISCORD_TOKEN: "${vault:discord-lead.DISCORD_TOKEN}"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := cfg.Agents["lead"].Extensions
+	if len(ext.Marketplaces) != 1 || ext.Marketplaces[0].Name != "caveman" {
+		t.Errorf("marketplaces: got %v", ext.Marketplaces)
+	}
+	if len(ext.Plugins) != 1 || ext.Plugins[0].Name != "caveman" || ext.Plugins[0].Marketplace != "caveman" {
+		t.Errorf("plugins: got %v", ext.Plugins)
+	}
+	if len(ext.Skills) != 1 || ext.Skills[0].Name != "security" || ext.Skills[0].Path != "skills/security-pre-commit" {
+		t.Errorf("skills: got %v", ext.Skills)
+	}
+	if len(ext.MCPServers) != 2 {
+		t.Fatalf("mcp_servers: want 2, got %d", len(ext.MCPServers))
+	}
+	sse := ext.MCPServers[0]
+	if sse.Name != "context7" || sse.URL != "https://mcp.context7.com/mcp" {
+		t.Errorf("mcp_server[0]: got %+v", sse)
+	}
+	disc := ext.MCPServers[1]
+	if disc.Name != "discord" || disc.Command != "npx" {
+		t.Errorf("mcp_server[1]: got %+v", disc)
+	}
+	if disc.Env["DISCORD_TOKEN"] != "${vault:discord-lead.DISCORD_TOKEN}" {
+		t.Errorf("vault ref should be preserved in config, got %q", disc.Env["DISCORD_TOKEN"])
+	}
+}
+
+func TestLoad_ExtensionsMissingVaultRejectsAtLoad(t *testing.T) {
+	path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+    vaults: [github]
+    extensions:
+      mcp_servers:
+        - name: discord
+          command: npx
+          env:
+            DISCORD_TOKEN: "${vault:discord-lead.DISCORD_TOKEN}"
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for vault ref to unlisted vault, got nil")
+	}
+}
+
+func TestLoad_ExtensionsMCPMissingCommandAndURL(t *testing.T) {
+	path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+    extensions:
+      mcp_servers:
+        - name: broken
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for mcp_server with no command or url, got nil")
+	}
+}
+
+func TestExpandVaultRefs(t *testing.T) {
+	secrets := map[string]string{
+		"DISCORD_TOKEN": "tok123",
+		"GH_TOKEN":      "ghp_abc",
+	}
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"${vault:discord-lead.DISCORD_TOKEN}", "tok123"},
+		{"${vault:github.GH_TOKEN}", "ghp_abc"},
+		{"prefix-${vault:discord-lead.DISCORD_TOKEN}-suffix", "prefix-tok123-suffix"},
+		{"${vault:other.MISSING}", "${vault:other.MISSING}"},
+		{"no refs here", "no refs here"},
+	}
+	for _, tc := range cases {
+		if got := ExpandVaultRefs(tc.in, secrets); got != tc.want {
+			t.Errorf("ExpandVaultRefs(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestPluginConfig_ShorthandUnmarshal(t *testing.T) {
+	path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+    extensions:
+      plugins:
+        - caveman@caveman
+        - name: pr-review
+          marketplace: toolkit
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	plugins := cfg.Agents["lead"].Extensions.Plugins
+	if len(plugins) != 2 {
+		t.Fatalf("want 2 plugins, got %d", len(plugins))
+	}
+	if plugins[0].Name != "caveman" || plugins[0].Marketplace != "caveman" {
+		t.Errorf("plugin[0]: got %+v", plugins[0])
+	}
+	if plugins[1].Name != "pr-review" || plugins[1].Marketplace != "toolkit" {
+		t.Errorf("plugin[1]: got %+v", plugins[1])
+	}
+}
+

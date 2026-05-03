@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -742,61 +743,166 @@ func InstallClaude(username string) error {
 	return nil
 }
 
-// InstallCaveman installs and enables the caveman Claude Code plugin for the agent user.
-// Caveman reduces output tokens ~75% via terse response style. Idempotent.
+// InstallCaveman installs the caveman plugin for the agent user. Idempotent.
 // https://github.com/JuliusBrussee/caveman
 func InstallCaveman(username string) error {
-	home := fmt.Sprintf("/home/%s", username)
-	marketplaceDir := filepath.Join(home, ".claude", "plugins", "marketplaces", "caveman")
-	knownPath := filepath.Join(home, ".claude", "plugins", "known_marketplaces.json")
+	return InstallExtensions(username, fmt.Sprintf("/home/%s", username),
+		config.ExtensionsConfig{}, config.CavemanUltra, nil)
+}
 
-	// Clone marketplace (idempotent — skip if directory exists)
+// InstallMarketplace clones a GitHub marketplace and registers it in
+// known_marketplaces.json. Idempotent. Verifies HEAD against m.Commit if set.
+func InstallMarketplace(username string, m config.MarketplaceConfig) error {
+	home := fmt.Sprintf("/home/%s", username)
+	marketplaceDir := filepath.Join(home, ".claude", "plugins", "marketplaces", m.Name)
+	knownPath := filepath.Join(home, ".claude", "plugins", "known_marketplaces.json")
 	if _, err := os.Stat(marketplaceDir); os.IsNotExist(err) {
-		cloneCmd := exec.Command("sudo", "-iu", username, "bash", "-c",
-			fmt.Sprintf("mkdir -p ~/.claude/plugins/marketplaces && git clone https://github.com/JuliusBrussee/caveman.git %s", marketplaceDir))
-		if out, err := cloneCmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("cloning caveman for %s: %w\n%s", username, err, out)
+		cmd := exec.Command("sudo", "-iu", username, "bash", "-c",
+			fmt.Sprintf("mkdir -p ~/.claude/plugins/marketplaces && git clone https://github.com/%s.git %s", m.Repo, marketplaceDir))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("cloning marketplace %s for %s: %w\n%s", m.Name, username, err, out)
 		}
 	}
-
-	// Register in known_marketplaces.json if missing
-	existing, _ := os.ReadFile(knownPath)
-	if !strings.Contains(string(existing), `"caveman"`) {
-		base := strings.TrimSpace(string(existing))
-		entry := fmt.Sprintf(`"caveman":{"source":{"source":"github","repo":"JuliusBrussee/caveman"},"installLocation":"%s","lastUpdated":"1970-01-01T00:00:00.000Z"}`, marketplaceDir)
-		var merged string
-		switch {
-		case base == "" || base == "{}":
-			merged = "{" + entry + "}"
-		case strings.HasSuffix(base, "}"):
-			merged = strings.TrimSuffix(base, "}") + "," + entry + "}"
-		default:
-			return fmt.Errorf("unexpected known_marketplaces.json format for %s", username)
+	if m.Commit != "" {
+		cmd := exec.Command("sudo", "-iu", username, "bash", "-c",
+			fmt.Sprintf("git -C %s rev-parse HEAD | grep -q '^%s'", marketplaceDir, m.Commit))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("marketplace %s HEAD does not match pinned commit %s for %s:\n%s", m.Name, m.Commit, username, out)
 		}
+	}
+	var known map[string]json.RawMessage
+	if raw, _ := os.ReadFile(knownPath); len(raw) > 0 {
+		_ = json.Unmarshal(raw, &known)
+	}
+	if known == nil {
+		known = make(map[string]json.RawMessage)
+	}
+	if _, exists := known[m.Name]; !exists {
+		entry, _ := json.Marshal(map[string]any{
+			"source":          map[string]string{"source": m.Source, "repo": m.Repo},
+			"installLocation": marketplaceDir,
+			"lastUpdated":     "1970-01-01T00:00:00.000Z",
+		})
+		known[m.Name] = entry
+		out, _ := json.Marshal(known)
 		if err := os.MkdirAll(filepath.Dir(knownPath), 0755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(knownPath, []byte(merged), 0644); err != nil {
+		if err := os.WriteFile(knownPath, out, 0644); err != nil {
 			return fmt.Errorf("writing known_marketplaces.json: %w", err)
 		}
 		ChownPath(filepath.Dir(knownPath), username)
 	}
+	return nil
+}
 
-	// Install + enable plugin. "enable" returns non-zero when already
-	// enabled, so we inspect the output instead of trusting the exit code.
-	installCmd := exec.Command("sudo", "-iu", username, "bash", "-c",
-		"claude plugin install caveman@caveman 2>&1; claude plugin enable caveman@caveman 2>&1; true")
-	out, err := installCmd.CombinedOutput()
+// installPlugin installs and enables a plugin from the named marketplace. Idempotent.
+func installPlugin(username, pluginName, marketplaceName string) error {
+	cmd := exec.Command("sudo", "-iu", username, "bash", "-c",
+		fmt.Sprintf("claude plugin install %s@%s 2>&1; claude plugin enable %s@%s 2>&1; true",
+			pluginName, marketplaceName, pluginName, marketplaceName))
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("running claude plugin commands for %s: %w\n%s", username, err, out)
+		return fmt.Errorf("plugin %s@%s for %s: %w\n%s", pluginName, marketplaceName, username, err, out)
 	}
 	output := string(out)
-	installedOK := strings.Contains(output, "Successfully installed plugin") || strings.Contains(output, "already installed")
-	enabledOK := strings.Contains(output, "Successfully enabled plugin") || strings.Contains(output, "already enabled")
-	if !installedOK || !enabledOK {
-		return fmt.Errorf("caveman install/enable did not confirm success for %s:\n%s", username, output)
+	if !(strings.Contains(output, "Successfully installed plugin") || strings.Contains(output, "already installed")) ||
+		!(strings.Contains(output, "Successfully enabled plugin") || strings.Contains(output, "already enabled")) {
+		return fmt.Errorf("plugin %s@%s install/enable did not confirm success for %s:\n%s", pluginName, marketplaceName, username, output)
 	}
+	return nil
+}
 
+// InstallSkill clones a GitHub skill into ~/.claude/skills/<name>/. Idempotent.
+// When s.Path is set the entrypoint is at ~/.claude/skills/<name>/<path>.
+func InstallSkill(username string, s config.SkillConfig) error {
+	skillDir := filepath.Join(fmt.Sprintf("/home/%s", username), ".claude", "skills", s.Name)
+	if _, err := os.Stat(skillDir); os.IsNotExist(err) {
+		cmd := exec.Command("sudo", "-iu", username, "bash", "-c",
+			fmt.Sprintf("mkdir -p ~/.claude/skills && git clone https://github.com/%s.git %s", s.Repo, skillDir))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("cloning skill %s for %s: %w\n%s", s.Name, username, err, out)
+		}
+	}
+	ChownPath(skillDir, username)
+	return nil
+}
+
+// SetMCPServers overwrites the mcpServers key in ~/.claude/settings.json while
+// preserving all other settings. Vault refs in env values are expanded via secrets.
+func SetMCPServers(homeDir string, servers []config.MCPServerConfig, secrets map[string]string) error {
+	settingsPath := filepath.Join(homeDir, ".claude", "settings.json")
+	raw, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return fmt.Errorf("reading settings.json: %w", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return fmt.Errorf("parsing settings.json: %w", err)
+	}
+	mcpMap := make(map[string]any, len(servers))
+	for _, srv := range servers {
+		entry := make(map[string]any)
+		if srv.URL != "" {
+			entry["type"] = "sse"
+			entry["url"] = srv.URL
+		} else {
+			entry["type"] = "stdio"
+			entry["command"] = srv.Command
+			if len(srv.Args) > 0 {
+				entry["args"] = srv.Args
+			}
+		}
+		if len(srv.Env) > 0 {
+			env := make(map[string]string, len(srv.Env))
+			for k, v := range srv.Env {
+				env[k] = config.ExpandVaultRefs(v, secrets)
+			}
+			entry["env"] = env
+		}
+		mcpMap[srv.Name] = entry
+	}
+	doc["mcpServers"] = mcpMap
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling settings.json: %w", err)
+	}
+	return os.WriteFile(settingsPath, append(out, '\n'), 0644)
+}
+
+// InstallExtensions installs marketplaces, plugins, skills, and MCP servers for
+// an agent. caveman: true is translated to the equivalent marketplace+plugin
+// entries if not already explicit. Idempotent. Removed entries are not
+// auto-uninstalled — use `claude plugin list` to audit manually.
+func InstallExtensions(username, homeDir string, ext config.ExtensionsConfig, caveman config.CavemanLevel, secrets map[string]string) error {
+	if caveman.Enabled() {
+		if !slices.ContainsFunc(ext.Marketplaces, func(m config.MarketplaceConfig) bool { return m.Name == "caveman" }) {
+			ext.Marketplaces = append([]config.MarketplaceConfig{{Name: "caveman", Source: "github", Repo: "JuliusBrussee/caveman"}}, ext.Marketplaces...)
+		}
+		if !slices.ContainsFunc(ext.Plugins, func(p config.PluginConfig) bool { return p.Name == "caveman" && p.Marketplace == "caveman" }) {
+			ext.Plugins = append([]config.PluginConfig{{Name: "caveman", Marketplace: "caveman"}}, ext.Plugins...)
+		}
+	}
+	for _, mp := range ext.Marketplaces {
+		if err := InstallMarketplace(username, mp); err != nil {
+			return err
+		}
+	}
+	for _, pl := range ext.Plugins {
+		if err := installPlugin(username, pl.Name, pl.Marketplace); err != nil {
+			return err
+		}
+	}
+	for _, sk := range ext.Skills {
+		if err := InstallSkill(username, sk); err != nil {
+			return err
+		}
+	}
+	if len(ext.MCPServers) > 0 {
+		if err := SetMCPServers(homeDir, ext.MCPServers, secrets); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

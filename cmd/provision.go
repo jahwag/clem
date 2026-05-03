@@ -119,12 +119,14 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("  wrote %s/.claude/settings.json\n", homeDir)
 
-		// 3aa. Install caveman plugin if enabled (reduces output tokens ~75%)
-		if ac.Caveman.Enabled() {
-			if err := agent.InstallCaveman(osUser); err != nil {
-				fmt.Printf("  warning: caveman install for %s: %v\n", osUser, err)
+		// 3aa. Install extensions (marketplaces, plugins, skills, MCP servers).
+		// caveman: true is handled as a shorthand inside InstallExtensions.
+		ext := ac.Extensions
+		if ac.Caveman.Enabled() || len(ext.Marketplaces)+len(ext.Plugins)+len(ext.Skills)+len(ext.MCPServers) > 0 {
+			if err := agent.InstallExtensions(osUser, homeDir, ext, ac.Caveman, secrets); err != nil {
+				fmt.Printf("  warning: extensions for %s: %v\n", osUser, err)
 			} else {
-				fmt.Printf("  installed caveman plugin for %s\n", osUser)
+				fmt.Printf("  installed extensions for %s\n", osUser)
 			}
 		}
 
