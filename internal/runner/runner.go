@@ -24,6 +24,12 @@ log() { echo "$(date -Iseconds) $1" | tee -a "$LOGFILE"; }
 
 tail -500 "$LOGFILE" > "$LOGFILE.tmp" 2>/dev/null && mv "$LOGFILE.tmp" "$LOGFILE" 2>/dev/null
 
+# Disable claude.ai connector MCPs (Figma/Gmail/Drive/M365/...) — agents are
+# headless workers, never need human-account connectors, and the bundled tool
+# lists eat ~1-2k tokens per session. Exported BEFORE sourcing .env so
+# operators can re-enable per-host by setting the var in $HOME/.env.
+export ENABLE_CLAUDEAI_MCP_SERVERS=false
+
 # Load secrets (written by clem provision, never committed)
 [ -f "$HOME/.env" ] && source "$HOME/.env"
 {{.SubagentExport}}
