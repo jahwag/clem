@@ -103,6 +103,11 @@ type AgentConfig struct {
 	// than the main session. Accepts model aliases (sonnet, haiku, opus) or
 	// full IDs (claude-sonnet-4-6). Empty = inherit main model.
 	SubagentModel string `yaml:"subagent_model"`
+	// Effort caps extended-thinking budget per session via Claude Code's
+	// effortLevel setting. Accepts "low", "medium", "high". Empty = use
+	// Claude Code's own default (currently medium). Lowering trims output
+	// tokens — the dominant cost driver in agent loops.
+	Effort string `yaml:"effort"`
 	// GitName and GitEmail set the agent's git user identity during provision.
 	// Without these, commits are authored with whatever identity the OAuth login
 	// stored, which may leak the operator's personal email into public history.

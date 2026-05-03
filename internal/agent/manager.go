@@ -440,7 +440,8 @@ func EnsureSSHKey(username, homeDir string) (string, error) {
 }
 
 // WriteSettings writes Claude Code settings to skip MCP trust dialog and
-// first-run onboarding prompts.
+// first-run onboarding prompts. effort sets effortLevel when non-empty
+// (accepted: "low", "medium", "high"); empty leaves Claude Code's default.
 //
 // Claude Code stores two flavours of config:
 //   - ~/.claude/settings.json     — user-level flags + permissions
@@ -449,7 +450,7 @@ func EnsureSSHKey(username, homeDir string) (string, error) {
 // We write both. Without ~/.claude.json, fresh agents hit the "Security notes —
 // Press Enter" screen and the "Quick safety check: trust this folder?" prompt
 // before the runner can inject its prompt, causing lost first iterations.
-func WriteSettings(username, homeDir string) error {
+func WriteSettings(username, homeDir, effort string) error {
 	claudeDir := filepath.Join(homeDir, ".claude")
 	if err := os.MkdirAll(claudeDir, 0755); err != nil {
 		return fmt.Errorf("creating .claude dir: %w", err)
@@ -459,13 +460,16 @@ func WriteSettings(username, homeDir string) error {
 	// trailer Claude Code otherwise appends to commits it creates. Agents
 	// should author commits under their own identity, not leak that an LLM
 	// drove them - clem PRs go through normal human review regardless.
-	settings := `{
-  "hasTrustDialogAccepted": true,
-  "hasCompletedProjectOnboarding": true,
-  "skipDangerousModePermissionPrompt": true,
-  "includeCoAuthoredBy": false
-}
-`
+	fields := []string{
+		`"hasTrustDialogAccepted": true`,
+		`"hasCompletedProjectOnboarding": true`,
+		`"skipDangerousModePermissionPrompt": true`,
+		`"includeCoAuthoredBy": false`,
+	}
+	if effort != "" {
+		fields = append(fields, fmt.Sprintf(`"effortLevel": %q`, effort))
+	}
+	settings := "{\n  " + strings.Join(fields, ",\n  ") + "\n}\n"
 	settingsPath := filepath.Join(claudeDir, "settings.json")
 	if err := os.WriteFile(settingsPath, []byte(settings), 0644); err != nil {
 		return fmt.Errorf("writing settings.json: %w", err)

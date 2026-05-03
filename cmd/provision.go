@@ -114,7 +114,7 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		}
 
 		// 3. Write Claude Code settings (skip MCP trust dialog, onboarding)
-		if err := agent.WriteSettings(osUser, homeDir); err != nil {
+		if err := agent.WriteSettings(osUser, homeDir, ac.Effort); err != nil {
 			return fmt.Errorf("writing settings for %s: %w", agentKey, err)
 		}
 		fmt.Printf("  wrote %s/.claude/settings.json\n", homeDir)

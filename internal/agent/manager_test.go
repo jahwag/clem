@@ -506,7 +506,7 @@ func TestWriteSettings_WritesExpectedFiles(t *testing.T) {
 	dir := t.TempDir()
 	username := "testuser"
 
-	if err := WriteSettings(username, dir); err != nil {
+	if err := WriteSettings(username, dir, ""); err != nil {
 		t.Fatalf("WriteSettings: %v", err)
 	}
 
@@ -520,6 +520,10 @@ func TestWriteSettings_WritesExpectedFiles(t *testing.T) {
 	}
 	if !strings.Contains(string(settingsData), `"includeCoAuthoredBy": false`) {
 		t.Errorf("settings.json missing includeCoAuthoredBy=false: %s", settingsData)
+	}
+	// Empty effort => no effortLevel field rendered.
+	if strings.Contains(string(settingsData), "effortLevel") {
+		t.Errorf("settings.json should omit effortLevel when effort empty: %s", settingsData)
 	}
 
 	// .claude.json must exist and contain the project trust entry
@@ -536,6 +540,22 @@ func TestWriteSettings_WritesExpectedFiles(t *testing.T) {
 		t.Error("expected ChownPath to invoke sys.Run at least once")
 	}
 	_ = stub
+}
+
+func TestWriteSettings_RendersEffortLevel(t *testing.T) {
+	withStub(t)
+	dir := t.TempDir()
+
+	if err := WriteSettings("testuser", dir, "low"); err != nil {
+		t.Fatalf("WriteSettings: %v", err)
+	}
+	settingsData, err := os.ReadFile(filepath.Join(dir, ".claude", "settings.json"))
+	if err != nil {
+		t.Fatalf("settings.json not written: %v", err)
+	}
+	if !strings.Contains(string(settingsData), `"effortLevel": "low"`) {
+		t.Errorf("settings.json missing effortLevel=low: %s", settingsData)
+	}
 }
 
 func TestEnsureUser_AlreadyExists(t *testing.T) {
