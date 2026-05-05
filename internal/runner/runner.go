@@ -420,12 +420,17 @@ func Generate(cfg *config.Config, agentKey string) string {
 // buildHardeningDirectives returns the systemd filesystem hardening block for
 // an agent service. homeDir must come from os/user.Lookup — not %h, which
 // resolves to the service manager's home (root) in system units (systemd #12389).
+//
+// ReadWritePaths must include both ~/.claude (settings dir written at provision
+// time) and ~/.claude.json (Claude Code's runtime state file at the home root).
+// The latter sits OUTSIDE .claude/ and ProtectHome=read-only would otherwise
+// trip Claude Code's startup with EROFS on first write.
 func buildHardeningDirectives(homeDir, project string) string {
 	return fmt.Sprintf(
 		"NoNewPrivileges=yes\nProtectSystem=strict\nProtectHome=read-only\nPrivateTmp=yes\n"+
 			"ReadOnlyPaths=%s/CLAUDE.md %s/CLAUDE.local.md\n"+
-			"ReadWritePaths=%s/.claude %s/.local/state %s/%s\n",
-		homeDir, homeDir, homeDir, homeDir, homeDir, project,
+			"ReadWritePaths=%s/.claude %s/.claude.json %s/.local/state %s/%s\n",
+		homeDir, homeDir, homeDir, homeDir, homeDir, homeDir, project,
 	)
 }
 
