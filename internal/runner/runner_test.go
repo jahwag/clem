@@ -329,6 +329,19 @@ func TestGenerateTtydService_JoinsAgentPrivateTmp(t *testing.T) {
 			t.Errorf("expected %q in ttyd unit, got:\n%s", want, out)
 		}
 	}
+
+	// JoinsNamespaceOf is a [Unit]-section directive. If it lands in
+	// [Service] systemd silently ignores it and the namespace is not joined
+	// (clem #106 follow-up). Anchor on newline to avoid matching the same
+	// tokens inside doc comments.
+	serviceIdx := strings.Index(out, "\n[Service]")
+	joinsIdx := strings.Index(out, "\nJoinsNamespaceOf=")
+	if serviceIdx == -1 || joinsIdx == -1 {
+		t.Fatalf("missing required section/directive in ttyd unit:\n%s", out)
+	}
+	if joinsIdx > serviceIdx {
+		t.Errorf("JoinsNamespaceOf must live in [Unit] before [Service], got:\n%s", out)
+	}
 }
 
 func TestGenerateService_HardeningDirectivesPresent(t *testing.T) {
