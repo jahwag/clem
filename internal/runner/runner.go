@@ -321,6 +321,11 @@ PartOf=clem-{{.Project}}-{{.AgentKey}}.service
 [Service]
 Type=simple
 User={{.OSUser}}
+# The agent unit runs with PrivateTmp=yes, so its tmux socket lives in a
+# private /tmp namespace. ttyd must enter that same namespace to attach;
+# JoinsNamespaceOf is a no-op unless this unit also enables PrivateTmp.
+PrivateTmp=yes
+JoinsNamespaceOf=clem-{{.Project}}-{{.AgentKey}}.service
 ExecStart=/usr/local/bin/ttyd -R -i {{.TtydBind}} -p {{.TtydPort}} tmux attach-session -t {{.AgentKey}}
 Restart=on-failure
 RestartSec=5

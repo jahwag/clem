@@ -310,6 +310,27 @@ func TestGenerateService_PullsTtydUp(t *testing.T) {
 	}
 }
 
+func TestGenerateTtydService_JoinsAgentPrivateTmp(t *testing.T) {
+	mockHome(t, "/home/test-worker")
+	cfg := baseCfg("worker", config.AgentConfig{
+		Name: "Worker", Model: "claude-opus-4-7", Iteration: "1m", Prompt: "do the thing",
+	})
+
+	out := GenerateTtydService(cfg, "worker")
+
+	// The agent unit runs with PrivateTmp=yes; ttyd must opt into the same
+	// namespacing AND join the agent's namespace, otherwise tmux attach fails
+	// because the socket lives in a /tmp it cannot see (clem #106).
+	for _, want := range []string{
+		"PrivateTmp=yes",
+		"JoinsNamespaceOf=clem-test-worker.service",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in ttyd unit, got:\n%s", want, out)
+		}
+	}
+}
+
 func TestGenerateService_HardeningDirectivesPresent(t *testing.T) {
 	mockHome(t, "/home/test-lead")
 	cfg := baseCfg("lead", config.AgentConfig{
