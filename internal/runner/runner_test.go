@@ -357,7 +357,7 @@ func TestGenerateService_HardeningDirectivesPresent(t *testing.T) {
 		"NoNewPrivileges=yes",
 		"ProtectSystem=strict",
 		"PrivateTmp=yes",
-		"ReadOnlyPaths=/home/test-lead/CLAUDE.md /home/test-lead/CLAUDE.local.md",
+		"ReadOnlyPaths=-/home/test-lead/CLAUDE.md -/home/test-lead/CLAUDE.local.md",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q in service unit, got:\n%s", want, out)

@@ -449,9 +449,17 @@ func Generate(cfg *config.Config, agentKey string) string {
 // ReadOnlyPaths so the operator's instructions cannot be silently
 // rewritten by the agent.
 func buildHardeningDirectives(homeDir, _ string) string {
+	// The leading '-' on each ReadOnlyPaths entry tells systemd to ignore
+	// the path if it does not exist. Without it, missing CLAUDE.md or
+	// CLAUDE.local.md at $HOME root causes "Failed to set up mount
+	// namespacing: No such file or directory" (status=226/NAMESPACE) and
+	// the agent service refuses to start. Both files are operator-owned
+	// and may legitimately be absent (Daisy keeps her CLAUDE.local.md in
+	// the project subdir, not at $HOME root) — they should be locked
+	// when present, not required.
 	return fmt.Sprintf(
 		"NoNewPrivileges=yes\nProtectSystem=strict\nPrivateTmp=yes\n"+
-			"ReadOnlyPaths=%s/CLAUDE.md %s/CLAUDE.local.md\n",
+			"ReadOnlyPaths=-%s/CLAUDE.md -%s/CLAUDE.local.md\n",
 		homeDir, homeDir,
 	)
 }
