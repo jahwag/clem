@@ -364,10 +364,13 @@ Not Linux, or missing core userspace. Use a standard Ubuntu/Debian host.
 Inspect the service: `systemctl status clem-<project>-<agentkey>.service`. Common causes: `.env` missing (run `clem provision` again after setting vaults), `claude` not installed per agent (provision reinstalls), or MCP server binary missing on PATH.
 
 **Agent not posting to Discord/Slack**  
-Check `clem logs <agent>`. The runner logs MCP server startup. If `mcp-discord` is missing, install: `pip3 install --break-system-packages git+https://github.com/Bytelope/mcp-discord.git`. Confirm the bot was invited to the server. **`DISCORD_TOKEN` must be the raw token** (no `Bot ` prefix); `discord.py` adds it internally - pasting `"Bot …"` yields 401. For Slack: use a bot token (`xoxb-`), not a user token (`xoxp-`) - user tokens post as you, not the bot.
+Check `clem logs <agent>`. The runner logs MCP server startup. If `mcp-discord` is missing, install with `pipx` (recommended) so its dependencies live in an isolated venv: `pipx install git+https://github.com/Bytelope/mcp-discord.git`. Avoid `pip install --break-system-packages` for Python MCP servers - the agent service runs with `ProtectHome=read-only`, so any later dependency drift (e.g. a system `pydantic-core` upgrade desyncing from the wheel an MCP server was built against) cannot be self-healed from inside the sandbox and the MCP will fail to boot. `pipx` venvs decouple each MCP from system Python state and survive `apt upgrade`. Confirm the bot was invited to the server. **`DISCORD_TOKEN` must be the raw token** (no `Bot ` prefix); `discord.py` adds it internally - pasting `"Bot …"` yields 401. For Slack: use a bot token (`xoxb-`), not a user token (`xoxp-`) - user tokens post as you, not the bot.
 
-**Token expired** (`clem status` shows `EXPIRED`)  
-Re-run `sudo clem login <agent>`. OAuth tokens last ~30 days. You can also automate refresh via cron.
+**`clem login` keeps prompting daily / `clem status` flips to `EXPIRED` every 8 hours**  
+You probably ran a clem older than v0.8.4. The Claude Max access token genuinely lasts only ~8 hours, but Claude Code refreshes it automatically using the long-lived refresh token stored alongside it. Pre-0.8.4 `clem status` displayed the *access* token expiry and pre-0.8.4 `NeedsLogin` gated on a 7-day window - so it always reported "expired" and trained operators to log in daily for nothing. Upgrade to v0.8.4+; status now shows `auto-refresh` whenever a refresh token is present, and only reports `missing` when manual `clem login` is actually required.
+
+**Token actually missing** (`clem status` shows `missing`)  
+Re-run `sudo clem login <agent>`. The refresh token itself is long-lived; you only need to re-login if the credentials file is wiped or the refresh token is server-side revoked.
 
 **Agent wakes up and does nothing**  
 Open the task forum - threads must exist with `[TODO]` status. Agents only work what's on the board.

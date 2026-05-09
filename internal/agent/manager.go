@@ -614,35 +614,53 @@ func TmuxAlive(osUser, sessionName string) bool {
 // credentials is a subset of ~/.claude/.credentials.json
 type credentials struct {
 	ClaudeAiOauth struct {
-		ExpiresAt int64 `json:"expiresAt"`
+		ExpiresAt    int64  `json:"expiresAt"`
+		RefreshToken string `json:"refreshToken"`
 	} `json:"claudeAiOauth"`
 }
 
-// TokenExpiry reads the Claude token expiry from <homeDir>/.claude/.credentials.json.
-// Returns zero time if missing or unreadable.
-func TokenExpiry(homeDir string) time.Time {
+func readCredentials(homeDir string) (credentials, bool) {
 	credPath := filepath.Join(homeDir, ".claude", ".credentials.json")
 	data, err := os.ReadFile(credPath)
 	if err != nil {
-		return time.Time{}
+		return credentials{}, false
 	}
 	var creds credentials
 	if err := json.Unmarshal(data, &creds); err != nil {
-		return time.Time{}
+		return credentials{}, false
 	}
-	if creds.ClaudeAiOauth.ExpiresAt == 0 {
+	return creds, true
+}
+
+// TokenExpiry reads the Claude access-token expiry from <homeDir>/.claude/.credentials.json.
+// Returns zero time if missing or unreadable. Note: Claude Max access tokens
+// have an ~8-hour life and are auto-refreshed by Claude Code using the
+// refresh token — see HasRefreshToken / NeedsLogin.
+func TokenExpiry(homeDir string) time.Time {
+	creds, ok := readCredentials(homeDir)
+	if !ok || creds.ClaudeAiOauth.ExpiresAt == 0 {
 		return time.Time{}
 	}
 	return time.Unix(creds.ClaudeAiOauth.ExpiresAt/1000, 0)
 }
 
-// NeedsLogin returns true if the token is missing or expires within 7 days.
+// HasRefreshToken reports whether <homeDir>/.claude/.credentials.json contains
+// a non-empty OAuth refresh token. This is the real "logged in" signal —
+// Claude Code uses the refresh token to mint new ~8h access tokens
+// automatically, so a present refresh token means no manual login is needed
+// even if the access token has already expired.
+func HasRefreshToken(homeDir string) bool {
+	creds, ok := readCredentials(homeDir)
+	return ok && creds.ClaudeAiOauth.RefreshToken != ""
+}
+
+// NeedsLogin returns true only when manual `claude /login` is actually
+// required: the credentials file is missing, unreadable, or carries no
+// refresh token. Access-token expiry is intentionally NOT checked — those
+// are short-lived (~8h) and refreshed transparently by Claude Code, so
+// gating on access expiry would prompt unnecessary daily logins.
 func NeedsLogin(homeDir string) bool {
-	expiry := TokenExpiry(homeDir)
-	if expiry.IsZero() {
-		return true
-	}
-	return time.Until(expiry) < 7*24*time.Hour
+	return !HasRefreshToken(homeDir)
 }
 
 // ChownPath changes ownership of a path to the given user (best effort).

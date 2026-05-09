@@ -53,16 +53,10 @@ func runStatus(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		expiry := agent.TokenExpiry(fmt.Sprintf("/home/%s", osUser))
-		expiryStr := "missing"
-		if !expiry.IsZero() {
-			daysLeft := int(time.Until(expiry).Hours() / 24)
-			if daysLeft < 0 {
-				expiryStr = fmt.Sprintf("EXPIRED (%d days)", -daysLeft)
-			} else {
-				expiryStr = fmt.Sprintf("%s (%dd)", expiry.Format("2006-01-02"), daysLeft)
-			}
-		}
+		homeDir := fmt.Sprintf("/home/%s", osUser)
+		expiry := agent.TokenExpiry(homeDir)
+		hasRefresh := agent.HasRefreshToken(homeDir)
+		expiryStr := tokenExpiryDisplay(expiry, hasRefresh)
 
 		logPath := fmt.Sprintf("/home/%s/.claude/%s-runner.log", osUser, agentKey)
 		lastLog := agent.LastLogLine(logPath)
@@ -79,4 +73,28 @@ func repeatStr(s string, n int) string {
 		result += s
 	}
 	return result
+}
+
+// tokenExpiryDisplay formats the access-token expiry for `clem status`.
+// Claude Max access tokens last ~8h and are refreshed transparently, so we
+// distinguish "no credentials at all" (login required) from "access token
+// short/expired but refresh token present" (auto-refresh handles it).
+func tokenExpiryDisplay(expiry time.Time, hasRefresh bool) string {
+	if expiry.IsZero() && !hasRefresh {
+		return "missing"
+	}
+	if expiry.IsZero() {
+		return "auto-refresh"
+	}
+	remaining := time.Until(expiry)
+	if remaining < 0 {
+		if hasRefresh {
+			return "auto-refresh"
+		}
+		return fmt.Sprintf("EXPIRED (%dd)", -int(remaining.Hours()/24))
+	}
+	if remaining < 24*time.Hour {
+		return fmt.Sprintf("%s (%dh)", expiry.Format("2006-01-02"), int(remaining.Hours()))
+	}
+	return fmt.Sprintf("%s (%dd)", expiry.Format("2006-01-02"), int(remaining.Hours()/24))
 }

@@ -487,20 +487,59 @@ func TestNeedsLogin_NoToken(t *testing.T) {
 	}
 }
 
-func TestNeedsLogin_ValidToken(t *testing.T) {
-	dir := t.TempDir()
+// writeCreds is a small helper for credentials-file fixtures.
+func writeCreds(t *testing.T, dir string, oauth map[string]any) {
+	t.Helper()
 	claudeDir := filepath.Join(dir, ".claude")
 	if err := os.MkdirAll(claudeDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	future := time.Now().Add(30 * 24 * time.Hour)
-	creds := map[string]any{
-		"claudeAiOauth": map[string]any{"expiresAt": future.UnixMilli()},
+	data, err := json.Marshal(map[string]any{"claudeAiOauth": oauth})
+	if err != nil {
+		t.Fatal(err)
 	}
-	data, _ := json.Marshal(creds)
-	os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), data, 0600) //nolint:errcheck
+	if err := os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Refresh-token presence — not access-token expiry — gates NeedsLogin.
+// Claude Max access tokens live ~8h and refresh transparently; gating on
+// expiry would prompt unnecessary daily logins.
+func TestNeedsLogin_RefreshTokenPresent(t *testing.T) {
+	dir := t.TempDir()
+	writeCreds(t, dir, map[string]any{
+		"expiresAt":    time.Now().Add(-1 * time.Hour).UnixMilli(), // already expired
+		"refreshToken": "rt_abc",
+	})
 	if NeedsLogin(dir) {
-		t.Error("NeedsLogin should return false when token is valid for 30 days")
+		t.Error("NeedsLogin should return false when a refresh token is present, even if access token expired")
+	}
+}
+
+func TestNeedsLogin_RefreshTokenMissing(t *testing.T) {
+	dir := t.TempDir()
+	writeCreds(t, dir, map[string]any{
+		"expiresAt": time.Now().Add(24 * time.Hour).UnixMilli(),
+		// no refreshToken
+	})
+	if !NeedsLogin(dir) {
+		t.Error("NeedsLogin should return true when refresh token is missing — access token alone cannot self-renew")
+	}
+}
+
+func TestHasRefreshToken(t *testing.T) {
+	dir := t.TempDir()
+	if HasRefreshToken(dir) {
+		t.Error("HasRefreshToken should be false when credentials file is missing")
+	}
+	writeCreds(t, dir, map[string]any{"refreshToken": ""})
+	if HasRefreshToken(dir) {
+		t.Error("HasRefreshToken should be false when refreshToken is empty")
+	}
+	writeCreds(t, dir, map[string]any{"refreshToken": "rt_xyz"})
+	if !HasRefreshToken(dir) {
+		t.Error("HasRefreshToken should be true when refreshToken is non-empty")
 	}
 }
 

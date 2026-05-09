@@ -421,16 +421,26 @@ func Generate(cfg *config.Config, agentKey string) string {
 // an agent service. homeDir must come from os/user.Lookup — not %h, which
 // resolves to the service manager's home (root) in system units (systemd #12389).
 //
-// ReadWritePaths must include both ~/.claude (settings dir written at provision
-// time) and ~/.claude.json (Claude Code's runtime state file at the home root).
-// The latter sits OUTSIDE .claude/ and ProtectHome=read-only would otherwise
-// trip Claude Code's startup with EROFS on first write.
+// ReadWritePaths must cover every path Claude Code writes during normal
+// operation under ProtectHome=read-only. Missing any of these causes EROFS
+// at runtime which can manifest as failed self-update, broken OAuth refresh
+// (refresh-token rotation needs to persist new credentials staging state),
+// or hung MCP servers:
+//   - ~/.claude              settings + .credentials.json
+//   - ~/.claude.json         runtime state at home root, outside .claude/
+//   - ~/.cache/claude        Claude Code XDG cache (sessions, staging)
+//   - ~/.cache/claude-cli-nodejs  legacy cache path used by older builds
+//   - ~/.local/share/claude  XDG data dir; `claude install` writes versions here
+//   - ~/.local/state         systemd-recommended XDG state dir
+//   - ~/.npm                 npm cache used by claude install when fetching tarballs
+//   - ~/<project>            agent's working tree
 func buildHardeningDirectives(homeDir, project string) string {
 	return fmt.Sprintf(
 		"NoNewPrivileges=yes\nProtectSystem=strict\nProtectHome=read-only\nPrivateTmp=yes\n"+
 			"ReadOnlyPaths=%s/CLAUDE.md %s/CLAUDE.local.md\n"+
-			"ReadWritePaths=%s/.claude %s/.claude.json %s/.local/state %s/%s\n",
-		homeDir, homeDir, homeDir, homeDir, homeDir, homeDir, project,
+			"ReadWritePaths=%s/.claude %s/.claude.json %s/.cache/claude %s/.cache/claude-cli-nodejs %s/.local/share/claude %s/.local/state %s/.npm %s/%s\n",
+		homeDir, homeDir,
+		homeDir, homeDir, homeDir, homeDir, homeDir, homeDir, homeDir, homeDir, project,
 	)
 }
 
