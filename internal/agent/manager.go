@@ -212,9 +212,31 @@ const UnicodeTrapRegex = `[\x{200B}-\x{200F}\x{2028}-\x{202E}\x{FEFF}]`
 //  2. Base64-encoded secrets: long base64 runs are decoded and re-scanned
 //     against SecretPatternRegex. Closes encoded-exfil bypass.
 //  3. Unicode traps: zero-width + bidi-override + BOM mid-content. Closes
-//     hidden-instruction-smuggling bypass.
+//     hidden-instruction-smuggling bypass. No allow-marker — zero-width
+//     and bidi-override characters are never legitimate in source.
 //  4. Code that reads protected secret env vars (Go/Python/Node). Closes
 //     indirect runtime-exfil bypass. Skip with CLEM_HOOK_SKIP_CODE_SCAN=1.
+//
+// Two scoping rules apply to passes 1, 2, and 4 to keep the hook usable
+// when forks legitimately need to sync history that contains test fixtures
+// for the very regexes we install:
+//
+//   a. Only ADDED diff lines (lines starting with `+`, excluding the
+//      `+++ b/path` file headers) are scanned. A removed line cannot
+//      introduce a secret to the remote even if it textually matches —
+//      it was already there. This eliminates the most common false
+//      positive: cumulative-diff fork-sync where an unannotated old
+//      version of a fixture line is being replaced by an annotated new
+//      version, and both versions appear in the diff.
+//
+//   b. Lines containing the literal marker `clem:allow-secret` are
+//      dropped before scanning. This is the documented escape hatch for
+//      legitimate test fixtures (e.g. positives tables for the hook's
+//      own regex tests). The marker is namespaced to avoid colliding
+//      with prose mentions and is scoped to the same line as the
+//      secret-shaped string. Pass 3 ignores the marker by design.
+const PrePushAllowSecretMarker = "clem:allow-secret"
+
 var prePushHookContent = fmt.Sprintf(`#!/bin/bash
 # Installed by clem provision. Do not edit by hand - will be overwritten.
 # Pass 1: literal credential patterns (tokens, keys, PEM blocks).
@@ -222,11 +244,23 @@ var prePushHookContent = fmt.Sprintf(`#!/bin/bash
 # Pass 3: Unicode traps (zero-width / bidi / BOM - hidden-instruction smuggling).
 # Pass 4: code that reads protected secret env vars (Go/Python/Node).
 #         Skip with: CLEM_HOOK_SKIP_CODE_SCAN=1 git push
+#
+# Scope (passes 1, 2, 4): added lines only (^\+ excluding ^\+\+\+), and
+# any line carrying the marker '%s' is skipped. Pass 3 scans every line
+# regardless because hidden-character smuggling has no legitimate use.
 
 zero="0000000000000000000000000000000000000000"
 patterns='%s'
 code_patterns='%s'
 unicode_traps='%s'
+allow_marker='%s'
+
+# extract_added prints diff lines that introduce content on the remote:
+# they start with a single '+' (the '+++' file-header line is excluded)
+# and do not carry the allow-secret marker.
+extract_added() {
+  grep -E '^\+([^+]|$)' | grep -v -F "$allow_marker"
+}
 
 while read local_ref local_sha remote_ref remote_sha; do
   [ "$local_sha" = "$zero" ] && continue
@@ -239,21 +273,22 @@ while read local_ref local_sha remote_ref remote_sha; do
     diff_cmd="git diff $range"
   fi
   diff=$($diff_cmd 2>/dev/null)
+  added=$(echo "$diff" | extract_added)
 
-  # Pass 1: direct literal secret match
-  hits=$(echo "$diff" | grep -E "$patterns" | head -3)
+  # Pass 1: direct literal secret match (added lines, no allow-marker).
+  hits=$(echo "$added" | grep -E "$patterns" | head -3)
   if [ -n "$hits" ]; then
     echo "clem pre-push hook: push blocked - secret pattern detected in $range" >&2
     echo "$hits" | sed 's/^/  /' >&2
     echo "" >&2
     echo "Rotate the leaked credential immediately if it is real. To override" >&2
-    echo "for a false positive, push with --no-verify (think first)." >&2
+    echo "for an intentional test fixture, append '$allow_marker' to the same" >&2
+    echo "line. As a last resort, push with --no-verify (think first)." >&2
     exit 1
   fi
 
-  # Pass 2: base64-decode + re-scan. Finds long base64 runs, decodes each,
-  # greps the decoded bytes for secret patterns. Skips chunks that fail to
-  # decode (normal diff content).
+  # Pass 2: base64-decode + re-scan added lines. Long base64 runs that
+  # decode to secret-shaped bytes are blocked.
   while IFS= read -r chunk; do
     [ -z "$chunk" ] && continue
     decoded=$(echo "$chunk" | base64 -d 2>/dev/null) || continue
@@ -262,9 +297,11 @@ while read local_ref local_sha remote_ref remote_sha; do
       echo "  $chunk -> decoded hit" >&2
       exit 1
     fi
-  done < <(echo "$diff" | grep -oE '[A-Za-z0-9+/]{40,}={0,2}')
+  done < <(echo "$added" | grep -oE '[A-Za-z0-9+/]{40,}={0,2}')
 
-  # Pass 3: unicode traps for hidden-instruction smuggling.
+  # Pass 3: unicode traps. Scans the entire diff (added + removed +
+  # context) since hidden control characters never have a legitimate
+  # source-code use; allow-marker intentionally ignored.
   uhits=$(echo "$diff" | grep -P "$unicode_traps" | head -3)
   if [ -n "$uhits" ]; then
     echo "clem pre-push hook: push blocked - unicode control/override characters detected in $range (possible prompt-injection smuggling)" >&2
@@ -274,18 +311,19 @@ while read local_ref local_sha remote_ref remote_sha; do
 
   # Pass 4: indirect runtime exfil via os.Getenv on protected names.
   if [ "${CLEM_HOOK_SKIP_CODE_SCAN:-0}" != "1" ]; then
-    code_hits=$(echo "$diff" | grep -E "$code_patterns" | head -3)
+    code_hits=$(echo "$added" | grep -E "$code_patterns" | head -3)
     if [ -n "$code_hits" ]; then
       echo "clem pre-push hook: push blocked - diff reads a protected secret env var in $range" >&2
       echo "$code_hits" | sed 's/^/  /' >&2
       echo "" >&2
-      echo "Set CLEM_HOOK_SKIP_CODE_SCAN=1 if this read is intentional and reviewed." >&2
+      echo "Set CLEM_HOOK_SKIP_CODE_SCAN=1 if this read is intentional and reviewed," >&2
+      echo "or append '$allow_marker' to the line if it is a test fixture." >&2
       exit 1
     fi
   fi
 done
 exit 0
-`, SecretPatternRegex, SecretCodePatternRegex, UnicodeTrapRegex)
+`, PrePushAllowSecretMarker, SecretPatternRegex, SecretCodePatternRegex, UnicodeTrapRegex, PrePushAllowSecretMarker)
 
 // ConfigureGit writes SSH commit-signing configuration and optionally the git
 // user identity to the agent's ~/.gitconfig. Idempotent — safe to call every

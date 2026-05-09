@@ -58,19 +58,19 @@ func TestSecretPatternRegex_MatchesKnownCredentials(t *testing.T) {
 		name  string
 		input string
 	}{
-		{"github classic PAT", "ghp_1234567890abcdefghijklmnopqrstuvwxyz"},
-		{"github OAuth token", "gho_1234567890abcdefghijklmnopqrstuvwxyz"},
-		{"github App server", "ghs_1234567890abcdefghijklmnopqrstuvwxyz"},
-		{"github fine-grained PAT", "github_pat_11ABCDEFG0abcdefghijkl_" + strings.Repeat("a", 60)},
-		{"anthropic API key", "sk-ant-abcdefghijklmnopqrstuvwxyz12345"},
-		{"openai API key", "sk-proj-abcdefghijklmnopqrstuvwxyz1234567890"},
-		{"slack bot token", "xoxb-1234567890-0987654321-abcdefghij"},
-		{"slack user token", "xoxp-1234567890-abcdefghij-klmnopqrst"},
-		{"aws access key", "AKIAIOSFODNN7EXAMPLE"},
-		{"age secret key", "AGE-SECRET-KEY-1ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNO"},
-		{"openssh private key", "-----BEGIN OPENSSH PRIVATE KEY-----"},
-		{"rsa private key", "-----BEGIN RSA PRIVATE KEY-----"},
-		{"generic private key", "-----BEGIN PRIVATE KEY-----"},
+		{"github classic PAT", "ghp_1234567890abcdefghijklmnopqrstuvwxyz"},                                  // clem:allow-secret
+		{"github OAuth token", "gho_1234567890abcdefghijklmnopqrstuvwxyz"},                                  // clem:allow-secret
+		{"github App server", "ghs_1234567890abcdefghijklmnopqrstuvwxyz"},                                   // clem:allow-secret
+		{"github fine-grained PAT", "github_pat_11ABCDEFG0abcdefghijkl_" + strings.Repeat("a", 60)},         // clem:allow-secret
+		{"anthropic API key", "sk-ant-abcdefghijklmnopqrstuvwxyz12345"},                                     // clem:allow-secret
+		{"openai API key", "sk-proj-abcdefghijklmnopqrstuvwxyz1234567890"},                                  // clem:allow-secret
+		{"slack bot token", "xoxb-1234567890-0987654321-abcdefghij"},                                        // clem:allow-secret
+		{"slack user token", "xoxp-1234567890-abcdefghij-klmnopqrst"},                                       // clem:allow-secret
+		{"aws access key", "AKIAIOSFODNN7EXAMPLE"},                                                          // clem:allow-secret
+		{"age secret key", "AGE-SECRET-KEY-1ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNO"},           // clem:allow-secret
+		{"openssh private key", "-----BEGIN OPENSSH PRIVATE KEY-----"},                                      // clem:allow-secret
+		{"rsa private key", "-----BEGIN RSA PRIVATE KEY-----"},                                              // clem:allow-secret
+		{"generic private key", "-----BEGIN PRIVATE KEY-----"},                                              // clem:allow-secret
 	}
 	for _, tc := range positives {
 		if !re.MatchString(tc.input) {
@@ -128,6 +128,12 @@ func TestPrePushHookContent_IsExecutableBash(t *testing.T) {
 	}
 	if !strings.Contains(prePushHookContent, "base64 -d") {
 		t.Error("pre-push hook should include base64 decode pass (Pass 2, red-team A9)")
+	}
+	if !strings.Contains(prePushHookContent, PrePushAllowSecretMarker) {
+		t.Errorf("pre-push hook should embed allow-marker %q so bash and Go agree on the bypass token", PrePushAllowSecretMarker)
+	}
+	if !strings.Contains(prePushHookContent, `grep -E '^\+([^+]|$)'`) {
+		t.Error("pre-push hook should restrict secret-pattern scanning to ADDED diff lines (^+ excluding ^+++)")
 	}
 }
 
@@ -192,7 +198,7 @@ func TestPrePushHook_BlocksBase64EncodedSecret(t *testing.T) {
 		}
 	}
 	// Construct the base64 of a fake GitHub PAT.
-	token := "ghp_1234567890abcdefghijklmnopqrstuvwxyz"
+	token := "ghp_1234567890abcdefghijklmnopqrstuvwxyz" // clem:allow-secret
 	// Go's encoding/base64 is imported at package level in other tests - use
 	// the /usr/bin/base64 binary here to keep this test self-contained.
 	encodedCmd := exec.Command("bash", "-c", "echo -n "+token+" | base64")
@@ -271,7 +277,7 @@ func TestPrePushHook_BlocksSecretPush(t *testing.T) {
 	}
 
 	hookPath := writeTestableHook(t,
-		"echo '+token = \"ghp_1234567890abcdefghijklmnopqrstuvwxyz\"'")
+		"echo '+token = \"ghp_1234567890abcdefghijklmnopqrstuvwxyz\"'") // clem:allow-secret
 
 	cmd := exec.Command("bash", hookPath)
 	cmd.Stdin = strings.NewReader("refs/heads/feature aaa refs/heads/feature bbb\n")
@@ -281,6 +287,73 @@ func TestPrePushHook_BlocksSecretPush(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "push blocked") {
 		t.Errorf("hook output missing 'push blocked' message:\n%s", out)
+	}
+}
+
+// TestPrePushHook_AllowsRemovedSecretLine pins the added-only scope rule:
+// a removed line that textually matches the secret pattern cannot leak the
+// token to the remote (it was already there and is now being deleted), so
+// the hook must NOT block. Without this rule, every fork-sync that touches
+// a file whose previous version contained a secret-shaped fixture is blocked
+// — see the regression Ada reported on cdev 2026-05-09.
+func TestPrePushHook_AllowsRemovedSecretLine(t *testing.T) {
+	for _, bin := range []string{"bash", "grep"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not on PATH - skipping integration test", bin)
+		}
+	}
+	hookPath := writeTestableHook(t,
+		"echo '-token = \"ghp_1234567890abcdefghijklmnopqrstuvwxyz\"'") // clem:allow-secret
+	cmd := exec.Command("bash", hookPath)
+	cmd.Stdin = strings.NewReader("refs/heads/feature aaa refs/heads/feature bbb\n")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("hook should have exited 0 on removed-line diff, got error %v. output:\n%s", err, out)
+	}
+}
+
+// TestPrePushHook_AllowsLineWithAllowMarker pins the marker escape hatch:
+// an ADDED line containing a secret-shaped string AND the
+// PrePushAllowSecretMarker on the same line must NOT block. This lets the
+// hook's own regex test fixtures live in the repo without making fork sync
+// a wedge. The marker must be on the SAME line as the secret — line scope is
+// intentional so a stray marker elsewhere cannot blanket-bypass scanning.
+func TestPrePushHook_AllowsLineWithAllowMarker(t *testing.T) {
+	for _, bin := range []string{"bash", "grep"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not on PATH - skipping integration test", bin)
+		}
+	}
+	// Build the stub diff line at runtime so this source line itself does
+	// not embed a secret-shaped literal that would trip the hook when the
+	// commit lands.
+	addedLine := "+token := \"ghp_" + strings.Repeat("X", 36) + "\" // " + PrePushAllowSecretMarker
+	hookPath := writeTestableHook(t, "echo '"+addedLine+"'")
+	cmd := exec.Command("bash", hookPath)
+	cmd.Stdin = strings.NewReader("refs/heads/feature aaa refs/heads/feature bbb\n")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("hook should have exited 0 on marker-bearing line, got error %v. output:\n%s", err, out)
+	}
+}
+
+// TestPrePushHook_StillBlocksAddedSecretWithoutMarker is the negative side
+// of the marker rule: removing the marker brings the block back. Together
+// with TestPrePushHook_AllowsLineWithAllowMarker this guarantees the marker
+// is the only difference and not a regex-loosening bug.
+func TestPrePushHook_StillBlocksAddedSecretWithoutMarker(t *testing.T) {
+	for _, bin := range []string{"bash", "grep"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not on PATH - skipping integration test", bin)
+		}
+	}
+	addedLine := "+token := \"ghp_" + strings.Repeat("X", 36) + "\""
+	hookPath := writeTestableHook(t, "echo '"+addedLine+"'")
+	cmd := exec.Command("bash", hookPath)
+	cmd.Stdin = strings.NewReader("refs/heads/feature aaa refs/heads/feature bbb\n")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("hook should have blocked added secret without marker, got exit 0. output:\n%s", out)
 	}
 }
 
@@ -315,14 +388,14 @@ func TestSecretCodePatternRegex_MatchesKnownPatterns(t *testing.T) {
 		name  string
 		input string
 	}{
-		{"go GH_TOKEN", `token := os.Getenv("GH_TOKEN")`},
-		{"go DISCORD_TOKEN", `d := os.Getenv("DISCORD_TOKEN")`},
-		{"go ANTHROPIC_API_KEY", `k := os.Getenv("ANTHROPIC_API_KEY")`},
-		{"go AWS_SECRET_ACCESS_KEY", `s := os.Getenv("AWS_SECRET_ACCESS_KEY")`},
-		{"go SLACK_MCP_XOXP_TOKEN", `t := os.Getenv("SLACK_MCP_XOXP_TOKEN")`},
-		{"python double-quote GH_TOKEN", `tok = os.environ["GH_TOKEN"]`},
-		{"node GH_TOKEN", `const t = process.env.GH_TOKEN`},
-		{"node ANTHROPIC_API_KEY", `const k = process.env.ANTHROPIC_API_KEY`},
+		{"go GH_TOKEN", `token := os.Getenv("GH_TOKEN")`},                  // clem:allow-secret
+		{"go DISCORD_TOKEN", `d := os.Getenv("DISCORD_TOKEN")`},            // clem:allow-secret
+		{"go ANTHROPIC_API_KEY", `k := os.Getenv("ANTHROPIC_API_KEY")`},    // clem:allow-secret
+		{"go AWS_SECRET_ACCESS_KEY", `s := os.Getenv("AWS_SECRET_ACCESS_KEY")`}, // clem:allow-secret
+		{"go SLACK_MCP_XOXP_TOKEN", `t := os.Getenv("SLACK_MCP_XOXP_TOKEN")`},   // clem:allow-secret
+		{"python double-quote GH_TOKEN", `tok = os.environ["GH_TOKEN"]`},   // clem:allow-secret
+		{"node GH_TOKEN", `const t = process.env.GH_TOKEN`},                // clem:allow-secret
+		{"node ANTHROPIC_API_KEY", `const k = process.env.ANTHROPIC_API_KEY`}, // clem:allow-secret
 	}
 	for _, tc := range positives {
 		if !re.MatchString(tc.input) {
