@@ -168,6 +168,49 @@ func TestGenerate_DisablesClaudeAIConnectorMCPs(t *testing.T) {
 	}
 }
 
+// TestGenerate_McpBinResolverPrefersPipx pins the pipx-vs-system fallback
+// in the runner's .mcp.json writer. v0.9.5 introduced _mcp_bin to stop
+// hardcoding /usr/local/bin paths that desync from system Python state and
+// require manual operator edits to .mcp.json every iteration. The helper
+// must (a) be defined, (b) prefer /opt/pipx/bin, (c) fall back to
+// /usr/local/bin, and (d) be used at every Python-MCP call site.
+func TestGenerate_McpBinResolverPrefersPipx(t *testing.T) {
+	cfg := baseCfg("lead", config.AgentConfig{
+		Name:      "Lead",
+		Model:     "claude-opus-4-7",
+		Iteration: "1m",
+		Prompt:    "do the thing",
+	})
+	out := Generate(cfg, "lead")
+
+	if !strings.Contains(out, "def _mcp_bin(name):") {
+		t.Error("runner must define _mcp_bin in the .mcp.json writer")
+	}
+	if !strings.Contains(out, "'/opt/pipx/bin/' + name") {
+		t.Error("_mcp_bin must check the pipx path /opt/pipx/bin/<name> first")
+	}
+	if !strings.Contains(out, "'/usr/local/bin/' + name") {
+		t.Error("_mcp_bin must fall back to /usr/local/bin/<name>")
+	}
+	for _, mcp := range []string{"mcp-discord", "prefect-mcp", "social-mcp", "slack-mcp-server"} {
+		want := "_mcp_bin('" + mcp + "')"
+		if !strings.Contains(out, want) {
+			t.Errorf("runner must resolve %s via _mcp_bin, expected substring %q", mcp, want)
+		}
+	}
+	// Hardcoded /usr/local/bin/<mcp> calls outside _mcp_bin would defeat
+	// the fallback. Pin them out so a future copy-paste cannot regress.
+	for _, banned := range []string{
+		"'command': '/usr/local/bin/mcp-discord'",
+		"'command': '/usr/local/bin/prefect-mcp'",
+		"'command': '/usr/local/bin/social-mcp'",
+	} {
+		if strings.Contains(out, banned) {
+			t.Errorf("runner must not hardcode %q (use _mcp_bin)", banned)
+		}
+	}
+}
+
 func TestGenerateService_EgressRestrictionEnabled(t *testing.T) {
 	mockHome(t, "/home/test-lead")
 	cfg := baseCfg("lead", config.AgentConfig{

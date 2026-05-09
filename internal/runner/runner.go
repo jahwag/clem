@@ -46,9 +46,21 @@ export CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL=1
 # Load secrets (written by clem provision, never committed)
 [ -f "$HOME/.env" ] && source "$HOME/.env"
 {{.SubagentExport}}
-# Write ephemeral .mcp.json from env (python3 ensures correct JSON encoding)
+# Write ephemeral .mcp.json from env (python3 ensures correct JSON encoding).
+# Each Python-based MCP server is resolved via _mcp_bin which prefers an
+# isolated pipx venv at /opt/pipx/bin if present and falls back to the
+# system pip install at /usr/local/bin. Pipx is the supported install path
+# (see README): each MCP gets its own pydantic + pydantic-core pair, so a
+# system pydantic-core upgrade cannot desync from the wheel an MCP was
+# built against. Pre-0.9.5 hardcoded /usr/local/bin and broke every time
+# system Python state drifted, requiring jahwag to re-edit .mcp.json every
+# iteration because the runner overwrites it.
 python3 -c "
 import json, os
+def _mcp_bin(name):
+    pipx = '/opt/pipx/bin/' + name
+    sysbin = '/usr/local/bin/' + name
+    return pipx if os.path.exists(pipx) else sysbin
 cfg = {'mcpServers': {}}
 # Discord bot. When channel IDs are configured the MCP server also runs a
 # gateway watcher that pushes one debounced notification per burst into this
@@ -59,7 +71,7 @@ if os.environ.get('DISCORD_TOKEN'):
     if _watch:
         _discord_env['DISCORD_WATCH_CHANNELS'] = _watch
         _discord_env['CLEM_TMUX_TARGET'] = '{{.AgentKey}}'
-    cfg['mcpServers']['discord-bot'] = {'command': '/usr/local/bin/mcp-discord', 'env': _discord_env}
+    cfg['mcpServers']['discord-bot'] = {'command': _mcp_bin('mcp-discord'), 'env': _discord_env}
 # Slack (korotovsky/slack-mcp-server). Read access is free; write access
 # (conversations_add_message) requires SLACK_MCP_ADD_MESSAGE_TOOL — enabled
 # here by default so agents can actually post, matching the Discord default.
@@ -67,12 +79,16 @@ if os.environ.get('DISCORD_TOKEN'):
 # SLACK_MCP_ENABLED_TOOLS is optional: comma-separated list to restrict the
 # exposed toolset. Useful for small local models (e.g. Nemotron 4B) that get
 # confused by the full 13-tool surface. Leave unset on cloud Claude / Opus.
+#
+# slack-mcp-server is a Go binary (not Python) so the pipx fallback does
+# not apply; we still resolve it through _mcp_bin for symmetry / future-
+# proofing in case the upstream ships a Python version.
 if os.environ.get('SLACK_MCP_XOXP_TOKEN'):
     slack_args = ['--transport', 'stdio']
     if os.environ.get('SLACK_MCP_ENABLED_TOOLS'):
         slack_args += ['--enabled-tools', os.environ['SLACK_MCP_ENABLED_TOOLS']]
     cfg['mcpServers']['slack-mcp'] = {
-        'command': '/usr/local/bin/slack-mcp-server',
+        'command': _mcp_bin('slack-mcp-server'),
         'args': slack_args,
         'env': {
             'SLACK_MCP_XOXP_TOKEN': os.environ['SLACK_MCP_XOXP_TOKEN'],
@@ -82,7 +98,7 @@ if os.environ.get('SLACK_MCP_XOXP_TOKEN'):
 # Prefect MCP (needs SSH_HOST + ES_PASSWORD)
 if os.environ.get('SSH_HOST') and os.environ.get('ES_PASSWORD'):
     cfg['mcpServers']['prefect'] = {
-        'command': '/usr/local/bin/prefect-mcp',
+        'command': _mcp_bin('prefect-mcp'),
         'env': {
             'SSH_HOST': os.environ['SSH_HOST'],
             'SSH_USER': os.environ.get('SSH_USER', 'ubuntu'),
@@ -98,7 +114,7 @@ if os.environ.get('SSH_HOST') and os.environ.get('ES_PASSWORD'):
 # Social media (Typefully backend — local MCP server)
 if os.environ.get('TYPEFULLY_API_KEY'):
     cfg['mcpServers']['social'] = {
-        'command': '/usr/local/bin/social-mcp',
+        'command': _mcp_bin('social-mcp'),
         'env': {'TYPEFULLY_API_KEY': os.environ['TYPEFULLY_API_KEY']}
     }
 print(json.dumps(cfg, indent=2))
@@ -181,8 +197,14 @@ tail -500 "$LOGFILE" > "$LOGFILE.tmp" 2>/dev/null && mv "$LOGFILE.tmp" "$LOGFILE
 [ -f "$HOME/.env" ] && source "$HOME/.env"
 {{.SubagentExport}}
 # Write opencode.json with Ollama provider + discord-bot MCP (if token is set).
+# MCP binary paths come from _mcp_bin (pipx-isolated venv preferred over system
+# pip install — see the claude-code runner template above for the rationale).
 python3 -c "
 import json, os
+def _mcp_bin(name):
+    pipx = '/opt/pipx/bin/' + name
+    sysbin = '/usr/local/bin/' + name
+    return pipx if os.path.exists(pipx) else sysbin
 cfg = {
     '\$schema': 'https://opencode.ai/config.json',
     'provider': {},
@@ -204,12 +226,12 @@ if os.environ.get('DISCORD_TOKEN'):
         _discord_env['CLEM_TMUX_TARGET'] = '{{.AgentKey}}'
     cfg['mcp']['discord-bot'] = {
         'type': 'local',
-        'command': ['/usr/local/bin/mcp-discord'],
+        'command': [_mcp_bin('mcp-discord')],
         'enabled': True,
         'environment': _discord_env,
     }
 if os.environ.get('SLACK_MCP_XOXP_TOKEN'):
-    slack_cmd = ['/usr/local/bin/slack-mcp-server', '--transport', 'stdio']
+    slack_cmd = [_mcp_bin('slack-mcp-server'), '--transport', 'stdio']
     if os.environ.get('SLACK_MCP_ENABLED_TOOLS'):
         slack_cmd += ['--enabled-tools', os.environ['SLACK_MCP_ENABLED_TOOLS']]
     cfg['mcp']['slack-mcp'] = {
