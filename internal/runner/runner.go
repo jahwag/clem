@@ -421,26 +421,38 @@ func Generate(cfg *config.Config, agentKey string) string {
 // an agent service. homeDir must come from os/user.Lookup — not %h, which
 // resolves to the service manager's home (root) in system units (systemd #12389).
 //
-// ReadWritePaths must cover every path Claude Code writes during normal
-// operation under ProtectHome=read-only. Missing any of these causes EROFS
-// at runtime which can manifest as failed self-update, broken OAuth refresh
-// (refresh-token rotation needs to persist new credentials staging state),
-// or hung MCP servers:
-//   - ~/.claude              settings + .credentials.json
-//   - ~/.claude.json         runtime state at home root, outside .claude/
-//   - ~/.cache/claude        Claude Code XDG cache (sessions, staging)
-//   - ~/.cache/claude-cli-nodejs  legacy cache path used by older builds
-//   - ~/.local/share/claude  XDG data dir; `claude install` writes versions here
-//   - ~/.local/state         systemd-recommended XDG state dir
-//   - ~/.npm                 npm cache used by claude install when fetching tarballs
-//   - ~/<project>            agent's working tree
-func buildHardeningDirectives(homeDir, project string) string {
+// Design: cross-agent isolation is enforced by Unix permissions on
+// /home/<agent> (mode 0750, owner = agent, others = none — provisioned by
+// useradd and not loosened anywhere). One agent cannot read or write
+// another agent's home regardless of systemd hardening, so layering
+// ProtectHome=read-only on top of those permissions adds no security
+// against the threat model and creates a steady stream of false positives:
+//
+//   - v0.8.3 (#109) added ReadWritePaths=~/.claude.json to fix the first
+//     EROFS surfaced by Claude Code at startup.
+//   - v0.9.1 (#133) added ~/.cache/claude, ~/.cache/claude-cli-nodejs,
+//     ~/.local/share/claude, ~/.npm to fix self-update + OAuth refresh
+//     EROFS spam in the runner log.
+//   - v0.9.3 (this change) hits the next mole: Claude Code writes
+//     ~/.claude.json atomically by creating ~/.claude.json.tmp and
+//     renaming it, which requires write to the PARENT directory ($HOME
+//     itself). ReadWritePaths grants write to specific inodes only, not
+//     to their containing directory, so atomic-write tempfiles in
+//     read-only $HOME always EROFS. The web terminal at port 7681
+//     surfaces this as a bun openSync error from the cli entrypoint.
+//
+// Rather than continue adding paths every time Claude Code writes
+// somewhere new, drop ProtectHome entirely. The agent retains full write
+// access to its own $HOME (already restricted to itself by Unix perms)
+// and is still blocked from /etc, /usr, and other system locations by
+// ProtectSystem=strict. CLAUDE.md remains explicitly locked via
+// ReadOnlyPaths so the operator's instructions cannot be silently
+// rewritten by the agent.
+func buildHardeningDirectives(homeDir, _ string) string {
 	return fmt.Sprintf(
-		"NoNewPrivileges=yes\nProtectSystem=strict\nProtectHome=read-only\nPrivateTmp=yes\n"+
-			"ReadOnlyPaths=%s/CLAUDE.md %s/CLAUDE.local.md\n"+
-			"ReadWritePaths=%s/.claude %s/.claude.json %s/.cache/claude %s/.cache/claude-cli-nodejs %s/.local/share/claude %s/.local/state %s/.npm %s/%s\n",
+		"NoNewPrivileges=yes\nProtectSystem=strict\nPrivateTmp=yes\n"+
+			"ReadOnlyPaths=%s/CLAUDE.md %s/CLAUDE.local.md\n",
 		homeDir, homeDir,
-		homeDir, homeDir, homeDir, homeDir, homeDir, homeDir, homeDir, homeDir, project,
 	)
 }
 

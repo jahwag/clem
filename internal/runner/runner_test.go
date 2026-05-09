@@ -356,13 +356,24 @@ func TestGenerateService_HardeningDirectivesPresent(t *testing.T) {
 	for _, want := range []string{
 		"NoNewPrivileges=yes",
 		"ProtectSystem=strict",
-		"ProtectHome=read-only",
 		"PrivateTmp=yes",
 		"ReadOnlyPaths=/home/test-lead/CLAUDE.md /home/test-lead/CLAUDE.local.md",
-		"ReadWritePaths=/home/test-lead/.claude /home/test-lead/.claude.json /home/test-lead/.cache/claude /home/test-lead/.cache/claude-cli-nodejs /home/test-lead/.local/share/claude /home/test-lead/.local/state /home/test-lead/.npm /home/test-lead/test",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q in service unit, got:\n%s", want, out)
+		}
+	}
+	// ProtectHome=read-only was dropped in v0.9.3 — see buildHardeningDirectives
+	// doc comment for the rationale (cross-agent isolation already comes from
+	// 0750 perms on /home/<agent>; ProtectHome added EROFS whack-a-mole without
+	// adding security against the threat model). Pin it removed so a future
+	// well-meaning re-add cannot silently regress every Claude Code path.
+	for _, banned := range []string{
+		"ProtectHome=",
+		"ReadWritePaths=",
+	} {
+		if strings.Contains(out, banned) {
+			t.Errorf("hardening must not contain %q (cross-agent isolation = Unix perms; per-path RW carveouts cause EROFS regressions). Got:\n%s", banned, out)
 		}
 	}
 }
