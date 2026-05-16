@@ -142,6 +142,27 @@ func TestGenerate_PreservesUserKillPPID(t *testing.T) {
 	}
 }
 
+func TestGenerate_SubstitutesPromptPlaceholders(t *testing.T) {
+	cfg := baseCfg("workerb", config.AgentConfig{
+		Name:      "Solane",
+		Role:      "Software Engineer",
+		Model:     "claude-opus-4-7",
+		Iteration: "1m",
+		Prompt:    "Act as {{agent.name}} ({{agent.role}}) in #{{channels.general}}",
+	})
+
+	out := Generate(cfg, "workerb")
+
+	for _, want := range []string{"Act as Solane (Software Engineer)", "#333"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in runner, got:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "{{agent.name}}") || strings.Contains(out, "{{agent.role}}") || strings.Contains(out, "{{channels.general}}") {
+		t.Errorf("placeholders left unsubstituted in runner:\n%s", out)
+	}
+}
+
 func TestGenerate_DisablesClaudeAIConnectorMCPs(t *testing.T) {
 	cfg := baseCfg("lead", config.AgentConfig{
 		Name:      "Lead",

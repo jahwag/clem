@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jahwag/clem/internal/agentdoc"
 	"github.com/jahwag/clem/internal/config"
 	"github.com/jahwag/clem/internal/coordination"
 )
@@ -400,7 +401,10 @@ func Generate(cfg *config.Config, agentKey string) string {
 	iterDur, _ := ac.IterationDuration() // validated at load time
 	iterSec := int(iterDur.Seconds())
 
-	promptText := ac.Prompt
+	// Render {{agent.name}}, {{channels.*}}, etc. in the operator-authored
+	// prompt the same way CLAUDE.local.md is rendered. Without this, agents
+	// receive the literal placeholder text and cannot identify themselves.
+	promptText := agentdoc.Substitute(ac.Prompt, cfg, agentKey)
 	if ac.Caveman.Enabled() {
 		promptText = "/caveman " + ac.Caveman.Level() + "\n" + promptText
 	}

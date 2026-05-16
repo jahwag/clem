@@ -77,10 +77,14 @@ func Render(cfg *config.Config, agentKey, repoDir string) ([]byte, Mode, error) 
 		return nil, ModeNone, fmt.Errorf("reading %s: %w", perAgentPath, err)
 	}
 
-	return []byte(substitute(sb.String(), cfg, agentKey)), ModeSplit, nil
+	return []byte(Substitute(sb.String(), cfg, agentKey)), ModeSplit, nil
 }
 
-func substitute(content string, cfg *config.Config, agentKey string) string {
+// Substitute replaces {{var}} placeholders in content using cfg and the given
+// agent key. Exposed so other packages (e.g. runner) can reuse the same
+// substitution rules when rendering operator-authored strings such as the
+// per-agent prompt.
+func Substitute(content string, cfg *config.Config, agentKey string) string {
 	ac := cfg.Agents[agentKey]
 	pairs := []string{
 		"{{project}}", cfg.Project,
