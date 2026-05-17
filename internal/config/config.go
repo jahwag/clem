@@ -271,6 +271,56 @@ type AgentConfig struct {
 	// Despite these limitations, this provides meaningful containment against
 	// naive outbound connections. Use with understanding of the gaps above.
 	EgressRestrictionExperimental bool `yaml:"egress_restriction_experimental"`
+	// ResourceLimits caps CPU/memory/IO for the agent's systemd service via
+	// cgroup directives. Use when co-locating agents with other workloads
+	// (e.g. CI runners on the same VPS) so one cannot starve the other.
+	// Empty fields are omitted from the generated unit — systemd defaults apply.
+	ResourceLimits ResourceLimits `yaml:"resource_limits"`
+}
+
+// ResourceLimits maps directly to systemd cgroup directives. All fields
+// optional; empty values are omitted from the rendered service unit.
+//
+// Field strings are written verbatim into the [Service] section; validation
+// is delegated to systemd. Standard formats:
+//   - CPUQuota:   "150%" (1.5 cores), "50%" (half a core), "200ms/1s"
+//   - MemoryHigh: "8G", "512M" (soft throttle — process slowed but not killed)
+//   - MemoryMax:  "10G" (hard kill — fires before global OOM-killer)
+//   - CPUWeight:  1..10000 (default 100; higher = more shares under contention)
+//   - IOWeight:   1..10000 (default 100; higher = more disk bandwidth)
+type ResourceLimits struct {
+	CPUQuota   string `yaml:"cpu_quota"`
+	MemoryHigh string `yaml:"memory_high"`
+	MemoryMax  string `yaml:"memory_max"`
+	CPUWeight  int    `yaml:"cpu_weight"`
+	IOWeight   int    `yaml:"io_weight"`
+}
+
+// Directives renders the resource-limit block for injection into a systemd
+// service unit's [Service] section. Returns an empty string when no fields
+// are set, so callers can safely concatenate without conditional logic.
+func (r ResourceLimits) Directives() string {
+	var lines []string
+	if r.CPUQuota != "" {
+		lines = append(lines, "CPUQuota="+r.CPUQuota)
+	}
+	if r.MemoryHigh != "" {
+		lines = append(lines, "MemoryHigh="+r.MemoryHigh)
+	}
+	if r.MemoryMax != "" {
+		lines = append(lines, "MemoryMax="+r.MemoryMax)
+	}
+	if r.CPUWeight != 0 {
+		lines = append(lines, fmt.Sprintf("CPUWeight=%d", r.CPUWeight))
+	}
+	if r.IOWeight != 0 {
+		lines = append(lines, fmt.Sprintf("IOWeight=%d", r.IOWeight))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "# Resource limits (resource_limits in clem.yaml)\n" +
+		strings.Join(lines, "\n") + "\n"
 }
 
 // RuntimeKind returns the normalized runtime name for this agent.

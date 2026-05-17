@@ -313,7 +313,7 @@ ExecStart=/usr/bin/tmux new-session -d -s {{.AgentKey}} {{.HomeDir}}/.local/bin/
 ExecStop=/usr/bin/tmux kill-session -t {{.AgentKey}}
 RemainAfterExit=yes
 Restart=no
-{{.HardeningDirectives}}{{.EgressDirectives}}
+{{.HardeningDirectives}}{{.EgressDirectives}}{{.ResourceDirectives}}
 [Install]
 WantedBy=multi-user.target
 `
@@ -388,6 +388,7 @@ type RunnerParams struct {
 	AlertCurl         string
 	EgressDirectives    string
 	HardeningDirectives string
+	ResourceDirectives  string
 	// WatchChannelIDs is the comma-separated list of Discord channel IDs the
 	// MCP server's gateway watcher should observe. Empty disables the watcher
 	// even when DISCORD_TOKEN is set, preserving the original tool-only mode.
@@ -523,6 +524,7 @@ func GenerateService(cfg *config.Config, agentKey string) (string, error) {
 		HomeDir:             homeDir,
 		EgressDirectives:    egress,
 		HardeningDirectives: buildHardeningDirectives(homeDir, cfg.Project),
+		ResourceDirectives:  ac.ResourceLimits.Directives(),
 	}
 	return renderTemplate(serviceTemplate, p), nil
 }
@@ -565,6 +567,7 @@ func renderTemplate(tmpl string, p RunnerParams) string {
 		"{{.SubagentExport}}", p.SubagentExport,
 		"{{.EgressDirectives}}", p.EgressDirectives,
 		"{{.HardeningDirectives}}", p.HardeningDirectives,
+		"{{.ResourceDirectives}}", p.ResourceDirectives,
 		"{{.WatchChannelIDs}}", p.WatchChannelIDs,
 	)
 	return r.Replace(tmpl)
