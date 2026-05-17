@@ -118,6 +118,15 @@ if os.environ.get('TYPEFULLY_API_KEY'):
         'command': _mcp_bin('social-mcp'),
         'env': {'TYPEFULLY_API_KEY': os.environ['TYPEFULLY_API_KEY']}
     }
+# browser-render (remote Playwright service for visual QA)
+if os.environ.get('BROWSER_RENDER_URL') and os.environ.get('BROWSER_RENDER_API_KEY'):
+    cfg['mcpServers']['browser-render'] = {
+        'command': _mcp_bin('mcp-browser-render'),
+        'env': {
+            'BROWSER_RENDER_URL': os.environ['BROWSER_RENDER_URL'],
+            'BROWSER_RENDER_API_KEY': os.environ['BROWSER_RENDER_API_KEY'],
+        }
+    }
 print(json.dumps(cfg, indent=2))
 " > "$WORKDIR/.mcp.json"
 
@@ -242,6 +251,16 @@ if os.environ.get('SLACK_MCP_XOXP_TOKEN'):
         'environment': {
             'SLACK_MCP_XOXP_TOKEN': os.environ['SLACK_MCP_XOXP_TOKEN'],
             'SLACK_MCP_ADD_MESSAGE_TOOL': os.environ.get('SLACK_MCP_ADD_MESSAGE_TOOL', 'true'),
+        },
+    }
+if os.environ.get('BROWSER_RENDER_URL') and os.environ.get('BROWSER_RENDER_API_KEY'):
+    cfg['mcp']['browser-render'] = {
+        'type': 'local',
+        'command': [_mcp_bin('mcp-browser-render')],
+        'enabled': True,
+        'environment': {
+            'BROWSER_RENDER_URL': os.environ['BROWSER_RENDER_URL'],
+            'BROWSER_RENDER_API_KEY': os.environ['BROWSER_RENDER_API_KEY'],
         },
     }
 print(json.dumps(cfg, indent=2))
