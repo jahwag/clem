@@ -143,6 +143,8 @@ while true; do
     log "Updating claude"
     "$CLAUDE" install 2>&1 | tail -5 | tee -a "$LOGFILE" || log "claude install failed, continuing with current version"
 
+    {{.SkillsSyncCmd}}
+
     log "Starting {{.AgentName}} (fresh session)"
     (sleep 1 && tmux send-keys -t {{.AgentKey}} "" Enter
      sleep 25 && tmux send-keys -l -t {{.AgentKey}} "$PROMPT"
@@ -265,6 +267,8 @@ while true; do
             {{.AlertCurl}}
         fi
     fi
+
+    {{.SkillsSyncCmd}}
 
     log "Starting {{.AgentName}} (opencode, fresh session)"
     MODEL_ARG=""
@@ -393,6 +397,10 @@ type RunnerParams struct {
 	// MCP server's gateway watcher should observe. Empty disables the watcher
 	// even when DISCORD_TOKEN is set, preserving the original tool-only mode.
 	WatchChannelIDs   string
+	// SkillsSyncCmd is the shell snippet invoked at the top of every iteration
+	// to refresh the agent's ~/.claude/skills/ symlinks from the team skills
+	// repo. Empty when cfg.SkillsRepo is unset, in which case no sync runs.
+	SkillsSyncCmd string
 }
 
 // Generate renders the runner.sh content for an agent. Dispatches on the
@@ -428,6 +436,13 @@ func Generate(cfg *config.Config, agentKey string) string {
 	if ac.SubagentModel != "" {
 		subagentExport = fmt.Sprintf("export CLAUDE_CODE_SUBAGENT_MODEL=%q", ac.SubagentModel)
 	}
+	skillsSyncCmd := ""
+	if cfg.SkillsRepo != "" {
+		skillsSyncCmd = fmt.Sprintf(
+			`clem sync-skills --home "$HOME" --agent-key %q --repo %q 2>&1 | tee -a "$LOGFILE" || log "skills sync failed"`,
+			agentKey, cfg.SkillsRepo,
+		)
+	}
 	p := RunnerParams{
 		Project:         cfg.Project,
 		AgentKey:        agentKey,
@@ -447,6 +462,7 @@ func Generate(cfg *config.Config, agentKey string) string {
 		AlertChannel:    alertChannel,
 		AlertCurl:       alertCurl,
 		WatchChannelIDs: discordWatchChannels(cfg),
+		SkillsSyncCmd:   skillsSyncCmd,
 	}
 	switch ac.RuntimeKind() {
 	case "opencode":
@@ -569,6 +585,7 @@ func renderTemplate(tmpl string, p RunnerParams) string {
 		"{{.HardeningDirectives}}", p.HardeningDirectives,
 		"{{.ResourceDirectives}}", p.ResourceDirectives,
 		"{{.WatchChannelIDs}}", p.WatchChannelIDs,
+		"{{.SkillsSyncCmd}}", p.SkillsSyncCmd,
 	)
 	return r.Replace(tmpl)
 }

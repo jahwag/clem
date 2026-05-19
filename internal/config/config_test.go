@@ -829,8 +829,8 @@ agents:
 
 func TestLoad_SkillsRepoAccepted(t *testing.T) {
 	cases := map[string]string{
-		"github https":  "https://github.com/Bytelope/consultant-dev-team-skills",
-		"github .git":   "https://github.com/Bytelope/consultant-dev-team-skills.git",
+		"github https":  "https://github.com/example/myteam-skills",
+		"github .git":   "https://github.com/example/myteam-skills.git",
 		"gitlab ssh":    "git@gitlab.example.com:org/skills.git",
 		"self-hosted":   "ssh://git@self.example.com/org/skills.git",
 	}
