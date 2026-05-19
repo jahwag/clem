@@ -138,6 +138,17 @@ func provisionAgent(agentKey string, ac config.AgentConfig) error {
 		}
 	}
 
+	// 3ab. Sync team skills repo. Symlinks shared/* and <agentKey>/*
+	// from the cloned repo into ~/.claude/skills/. Lets agents PR new
+	// skills without operator-mediated config edits.
+	if cfg.SkillsRepo != "" {
+		if err := agent.SyncSkillsRepo(osUser, homeDir, agentKey, cfg.SkillsRepo); err != nil {
+			fmt.Printf("  warning: skills repo sync for %s: %v\n", osUser, err)
+		} else {
+			fmt.Printf("  synced skills from %s for %s\n", cfg.SkillsRepo, osUser)
+		}
+	}
+
 	// 3a. Generate SSH keypair (idempotent)
 	pubKey, err := agent.EnsureSSHKey(osUser, homeDir)
 	if err != nil {

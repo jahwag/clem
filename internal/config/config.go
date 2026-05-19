@@ -61,6 +61,27 @@ var modelRe = regexp.MustCompile(`^[A-Za-z0-9._:/@-]+$`)
 // splits arguments — so only this conservative character set is allowed.
 var validBindRe = regexp.MustCompile(`^[0-9A-Za-z./:_-]+$`)
 
+// IsValidExtensionName reports whether s is a safe extension name (marketplace,
+// plugin, skill). Exported so other packages can validate skill names sourced
+// from disk (e.g. SyncSkillsRepo) without duplicating the regex.
+func IsValidExtensionName(s string) bool { return extensionNameRe.MatchString(s) }
+
+// isPlausibleGitURL accepts the URL shapes git clone understands: https://,
+// http://, git://, ssh://, and the scp-style git@host:owner/repo. Operator-only
+// config so this is a shape check, not a security boundary.
+func isPlausibleGitURL(s string) bool {
+	if strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://") ||
+		strings.HasPrefix(s, "git://") || strings.HasPrefix(s, "ssh://") {
+		return true
+	}
+	if i := strings.Index(s, "@"); i > 0 {
+		if j := strings.Index(s[i+1:], ":"); j > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // OperatorConfig identifies the humans who are trusted to issue instructions
 // to agents via Discord or GitHub. Provisioned agents use these IDs in the
 // generated prompt so no operator ID is hardcoded in clem source.
@@ -132,6 +153,19 @@ type Config struct {
 	Vault            VaultBackend           `yaml:"vault"`
 	MCPSidecars      MCPSidecarsConfig      `yaml:"mcp_sidecars"`
 	Agents           map[string]AgentConfig `yaml:"agents"`
+	// SkillsRepo names a git repo whose `shared/<skill>/` and
+	// `<agentKey>/<skill>/` subdirs are symlinked into each agent's
+	// ~/.claude/skills/. Agents PR new skills there; clem provision pulls and
+	// re-syncs. Empty = no skills repo wiring.
+	//
+	// Accepts any URL git clone understands:
+	//   https://github.com/owner/repo
+	//   https://github.com/owner/repo.git
+	//   git@gitlab.com:owner/repo.git
+	//   ssh://git@self-hosted/owner/repo.git
+	// The cache directory name is derived from the URL's last path segment
+	// (with .git stripped).
+	SkillsRepo string `yaml:"skills_repo"`
 	// Extra collects top-level keys not matched by any field above (the
 	// decoder is otherwise strict — see Load). Only "x-"-prefixed extension
 	// keys are accepted, as holders for shared YAML anchors (the
@@ -488,6 +522,9 @@ func Load(path string) (*Config, error) {
 		// valid
 	default:
 		return nil, fmt.Errorf("vault.backend must be env or agent-vault, got %q", cfg.Vault.Backend)
+	}
+	if cfg.SkillsRepo != "" && !isPlausibleGitURL(cfg.SkillsRepo) {
+		return nil, fmt.Errorf("skills_repo %q is not a recognized git URL (expected https://, git://, ssh://, or git@host:path)", cfg.SkillsRepo)
 	}
 	usedPorts := make(map[int]string)
 	// Reserve the egress proxy port so no agent's web terminal collides with it.
