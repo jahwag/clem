@@ -1270,6 +1270,263 @@ func TestWriteHostManagedSettings_EmptyDenyWhenNoPermissions(t *testing.T) {
 	}
 }
 
+// skillsStub interprets ln -sfn / rm -f / mkdir -p so SyncSkillsRepo's
+// filesystem-mutating side effects land on the real test temp dir. Calls are
+// still recorded for assertions on what was invoked.
+type skillsStub struct {
+	stubExec
+	cloneSeed func(cache string) // called when `git clone` is invoked
+}
+
+func (s *skillsStub) Run(name string, args ...string) ([]byte, error) {
+	s.calls = append(s.calls, append([]string{name}, args...))
+	// Recognized form: sudo -iu <user> <cmd> <cmdArgs...>
+	if name == "sudo" && len(args) >= 4 && args[0] == "-iu" {
+		cmd := args[2]
+		cargs := args[3:]
+		switch cmd {
+		case "ln":
+			// ln -sfn target link
+			if len(cargs) >= 3 && cargs[0] == "-sfn" {
+				_ = os.Remove(cargs[2])
+				if err := os.Symlink(cargs[1], cargs[2]); err != nil {
+					return nil, err
+				}
+			}
+		case "rm":
+			// rm -f path
+			if len(cargs) >= 2 && cargs[0] == "-f" {
+				_ = os.Remove(cargs[1])
+			}
+		case "git":
+			// git clone <url> <cache> — seed the cache dir from the test fixture
+			if len(cargs) >= 1 && cargs[0] == "clone" && s.cloneSeed != nil {
+				if len(cargs) >= 3 {
+					s.cloneSeed(cargs[2])
+				}
+			}
+			// git -C <dir> pull --ff-only — no-op
+		}
+	}
+	return nil, nil
+}
+
+func withSkillsStub(t *testing.T) *skillsStub {
+	t.Helper()
+	stub := &skillsStub{}
+	orig := sys
+	sys = stub
+	t.Cleanup(func() { sys = orig })
+	return stub
+}
+
+func TestSkillsCacheName(t *testing.T) {
+	cases := map[string]string{
+		"https://github.com/foo/bar":             "bar",
+		"https://github.com/foo/bar.git":         "bar",
+		"https://github.com/foo/bar/":            "bar",
+		"git@github.com:foo/bar.git":             "bar",
+		"ssh://git@self-hosted/foo/bar.git":      "bar",
+		"https://gitlab.example.com/g/sub/repo":  "repo",
+	}
+	for in, want := range cases {
+		if got := skillsCacheName(in); got != want {
+			t.Errorf("skillsCacheName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestSyncSkillsRepo_SymlinksSharedAndAgent verifies the happy path: a
+// pre-existing cache with shared/ and worker/ subdirs produces symlinks in
+// the agent's skills dir for each, and ignores top-level dirs outside that set.
+func TestSyncSkillsRepo_SymlinksSharedAndAgent(t *testing.T) {
+	stub := withSkillsStub(t)
+	home := t.TempDir()
+	repoURL := "https://example.com/owner/team-skills.git"
+	cache := filepath.Join(home, ".cache", "team-skills")
+
+	// Seed cache as if `git clone` had already run.
+	for _, p := range []string{
+		filepath.Join(cache, "shared", "skill-a", "SKILL.md"),
+		filepath.Join(cache, "worker", "skill-b", "SKILL.md"),
+		filepath.Join(cache, "lead", "skill-c", "SKILL.md"),     // not for worker
+		filepath.Join(cache, "random-dir", "skill-d", "SKILL.md"), // ignored
+	} {
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatalf("seed mkdir: %v", err)
+		}
+		if err := os.WriteFile(p, []byte("---\nname: x\n---\n"), 0644); err != nil {
+			t.Fatalf("seed write: %v", err)
+		}
+	}
+
+	if err := SyncSkillsRepo("testuser", home, "worker", repoURL); err != nil {
+		t.Fatalf("SyncSkillsRepo: %v", err)
+	}
+
+	skillsDir := filepath.Join(home, ".claude", "skills")
+	for _, name := range []string{"skill-a", "skill-b"} {
+		link := filepath.Join(skillsDir, name)
+		target, err := os.Readlink(link)
+		if err != nil {
+			t.Errorf("%s: expected symlink, got: %v", name, err)
+			continue
+		}
+		if !strings.HasPrefix(target, cache+string(filepath.Separator)) {
+			t.Errorf("%s: symlink target %q not under cache %q", name, target, cache)
+		}
+	}
+	// skill-c (lead) and skill-d (random-dir) must NOT appear for worker
+	for _, name := range []string{"skill-c", "skill-d"} {
+		if _, err := os.Lstat(filepath.Join(skillsDir, name)); err == nil {
+			t.Errorf("worker should not see %s", name)
+		}
+	}
+
+	// First call should have invoked `git clone` (cache didn't exist before
+	// the test seeded it... wait, we seeded it. So `git -C cache pull --ff-only`
+	// is what should have fired).
+	sawPull := false
+	for _, c := range stub.calls {
+		if len(c) >= 5 && c[0] == "sudo" && c[3] == "git" && c[4] == "-C" {
+			sawPull = true
+		}
+	}
+	if !sawPull {
+		t.Errorf("expected git pull to fire on existing cache; calls: %v", stub.calls)
+	}
+}
+
+// TestSyncSkillsRepo_PrunesStaleSymlinks verifies that a symlink in the
+// skills dir pointing into the cache for a skill that no longer exists in
+// the repo is removed on next sync. Real dirs and external-target symlinks
+// are left alone.
+func TestSyncSkillsRepo_PrunesStaleSymlinks(t *testing.T) {
+	withSkillsStub(t)
+	home := t.TempDir()
+	repoURL := "https://example.com/owner/team-skills.git"
+	cache := filepath.Join(home, ".cache", "team-skills")
+	skillsDir := filepath.Join(home, ".claude", "skills")
+
+	// Cache has only one skill in shared.
+	if err := os.MkdirAll(filepath.Join(cache, "shared", "kept-skill"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-existing stale symlink pointing into cache for a now-removed skill.
+	staleTarget := filepath.Join(cache, "shared", "removed-skill")
+	if err := os.Symlink(staleTarget, filepath.Join(skillsDir, "removed-skill")); err != nil {
+		t.Fatal(err)
+	}
+	// Operator-installed real skill dir (e.g. from InstallSkill). Must survive.
+	if err := os.MkdirAll(filepath.Join(skillsDir, "operator-skill"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Symlink pointing OUTSIDE the cache. Must survive.
+	external := filepath.Join(home, "external-skill")
+	if err := os.MkdirAll(external, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(skillsDir, "external-skill")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SyncSkillsRepo("testuser", home, "worker", repoURL); err != nil {
+		t.Fatalf("SyncSkillsRepo: %v", err)
+	}
+
+	if _, err := os.Lstat(filepath.Join(skillsDir, "removed-skill")); err == nil {
+		t.Error("stale symlink to cache should have been pruned")
+	}
+	if _, err := os.Lstat(filepath.Join(skillsDir, "operator-skill")); err != nil {
+		t.Errorf("operator-installed real dir should survive: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(skillsDir, "external-skill")); err != nil {
+		t.Errorf("symlink outside cache should survive: %v", err)
+	}
+	if _, err := os.Readlink(filepath.Join(skillsDir, "kept-skill")); err != nil {
+		t.Errorf("kept-skill symlink should be created: %v", err)
+	}
+}
+
+// TestSyncSkillsRepo_RejectsInvalidNames verifies that skill subdirs whose
+// names fail the extension-name regex (e.g. shell-special characters) are
+// skipped rather than symlinked, even if the operator-controlled repo
+// somehow contained them.
+func TestSyncSkillsRepo_RejectsInvalidNames(t *testing.T) {
+	withSkillsStub(t)
+	home := t.TempDir()
+	repoURL := "https://example.com/owner/team-skills.git"
+	cache := filepath.Join(home, ".cache", "team-skills")
+
+	if err := os.MkdirAll(filepath.Join(cache, "shared", "good-skill"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Names that should be rejected by the regex
+	for _, bad := range []string{"-leading-dash", "has space", "has;semi"} {
+		if err := os.MkdirAll(filepath.Join(cache, "shared", bad), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := SyncSkillsRepo("testuser", home, "worker", repoURL); err != nil {
+		t.Fatalf("SyncSkillsRepo: %v", err)
+	}
+
+	skillsDir := filepath.Join(home, ".claude", "skills")
+	if _, err := os.Readlink(filepath.Join(skillsDir, "good-skill")); err != nil {
+		t.Errorf("good-skill should be symlinked: %v", err)
+	}
+	for _, bad := range []string{"-leading-dash", "has space", "has;semi"} {
+		if _, err := os.Lstat(filepath.Join(skillsDir, bad)); err == nil {
+			t.Errorf("invalid name %q should have been skipped", bad)
+		}
+	}
+}
+
+// TestSyncSkillsRepo_ClonesWhenCacheMissing verifies that a missing cache dir
+// triggers `git clone` rather than `git pull`. The stub's cloneSeed creates
+// the dir so the rest of the function can read it.
+func TestSyncSkillsRepo_ClonesWhenCacheMissing(t *testing.T) {
+	stub := withSkillsStub(t)
+	home := t.TempDir()
+	repoURL := "git@gitlab.example.com:owner/team-skills.git"
+	cache := filepath.Join(home, ".cache", "team-skills")
+
+	stub.cloneSeed = func(c string) {
+		if c != cache {
+			t.Errorf("clone target %q, want %q", c, cache)
+		}
+		if err := os.MkdirAll(filepath.Join(c, "shared", "first-skill"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := SyncSkillsRepo("testuser", home, "worker", repoURL); err != nil {
+		t.Fatalf("SyncSkillsRepo: %v", err)
+	}
+
+	sawClone := false
+	for _, c := range stub.calls {
+		if len(c) >= 5 && c[0] == "sudo" && c[3] == "git" && c[4] == "clone" {
+			sawClone = true
+			if c[5] != repoURL {
+				t.Errorf("clone URL = %q, want %q", c[5], repoURL)
+			}
+		}
+	}
+	if !sawClone {
+		t.Errorf("expected git clone on missing cache; calls: %v", stub.calls)
+	}
+
+	if _, err := os.Readlink(filepath.Join(home, ".claude", "skills", "first-skill")); err != nil {
+		t.Errorf("first-skill should be symlinked after clone: %v", err)
+	}
+}
+
 func TestWriteHostManagedSettings_Idempotent(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "managed-settings.json")

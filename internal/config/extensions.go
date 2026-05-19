@@ -18,6 +18,11 @@ var vaultRefRe = regexp.MustCompile(`\$\{vault:([^.}]+)\.([^}]+)\}`)
 // Rejects semicolons, spaces, backticks, and other shell-special characters.
 var extensionNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
+// IsValidExtensionName reports whether s is a safe extension name (marketplace,
+// plugin, skill). Exported so other packages can validate skill names sourced
+// from disk (e.g. SyncSkillsRepo) without duplicating the regex.
+func IsValidExtensionName(s string) bool { return extensionNameRe.MatchString(s) }
+
 // extensionRepoRe requires owner/repo format with safe characters only.
 var extensionRepoRe = regexp.MustCompile(`^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$`)
 

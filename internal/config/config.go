@@ -18,6 +18,22 @@ import (
 
 var validName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
 
+// isPlausibleGitURL accepts the URL shapes git clone understands: https://,
+// http://, git://, ssh://, and the scp-style git@host:owner/repo. Operator-only
+// config so this is a shape check, not a security boundary.
+func isPlausibleGitURL(s string) bool {
+	if strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://") ||
+		strings.HasPrefix(s, "git://") || strings.HasPrefix(s, "ssh://") {
+		return true
+	}
+	if i := strings.Index(s, "@"); i > 0 {
+		if j := strings.Index(s[i+1:], ":"); j > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // snowflakeRe matches a Discord snowflake ID: 17–19 decimal digits.
 var snowflakeRe = regexp.MustCompile(`^[0-9]{17,19}$`)
 
@@ -132,6 +148,19 @@ type Config struct {
 	Vault            VaultBackend           `yaml:"vault"`
 	MCPSidecars      MCPSidecarsConfig      `yaml:"mcp_sidecars"`
 	Agents           map[string]AgentConfig `yaml:"agents"`
+	// SkillsRepo names a git repo whose `shared/<skill>/` and
+	// `<agentKey>/<skill>/` subdirs are symlinked into each agent's
+	// ~/.claude/skills/. Agents PR new skills there; clem provision pulls and
+	// re-syncs. Empty = no skills repo wiring.
+	//
+	// Accepts any URL git clone understands:
+	//   https://github.com/owner/repo
+	//   https://github.com/owner/repo.git
+	//   git@gitlab.com:owner/repo.git
+	//   ssh://git@self-hosted/owner/repo.git
+	// The cache directory name is derived from the URL's last path segment
+	// (with .git stripped).
+	SkillsRepo string `yaml:"skills_repo"`
 	// Extra collects top-level keys not matched by any field above (the
 	// decoder is otherwise strict — see Load). Only "x-"-prefixed extension
 	// keys are accepted, as holders for shared YAML anchors (the
@@ -465,6 +494,9 @@ func Load(path string) (*Config, error) {
 	}
 	if err := cfg.Operator.validate(); err != nil {
 		return nil, err
+	}
+	if cfg.SkillsRepo != "" && !isPlausibleGitURL(cfg.SkillsRepo) {
+		return nil, fmt.Errorf("skills_repo %q is not a recognized git URL (expected https://, git://, ssh://, or git@host:path)", cfg.SkillsRepo)
 	}
 	switch cfg.Egress.Posture {
 	case "", "strict", "balanced", "audit":

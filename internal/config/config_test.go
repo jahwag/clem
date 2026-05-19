@@ -1946,3 +1946,55 @@ agents:
 		}
 	}
 }
+
+func TestLoad_SkillsRepoAccepted(t *testing.T) {
+	cases := map[string]string{
+		"github https": "https://github.com/example/myteam-skills",
+		"github .git":  "https://github.com/example/myteam-skills.git",
+		"gitlab ssh":   "git@gitlab.example.com:org/skills.git",
+		"self-hosted":  "ssh://git@self.example.com/org/skills.git",
+	}
+	for name, url := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+skills_repo: `+url+`
+agents:
+  lead:
+    name: "Amara"
+    model: "claude-sonnet-4-6"
+`)
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load(%s): %v", name, err)
+			}
+			if cfg.SkillsRepo != url {
+				t.Errorf("SkillsRepo = %q, want %q", cfg.SkillsRepo, url)
+			}
+		})
+	}
+}
+
+func TestLoad_SkillsRepoRejected(t *testing.T) {
+	for _, bad := range []string{"not-a-url", "ftp://example.com/repo", "owner/repo"} {
+		path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+skills_repo: `+bad+`
+agents:
+  lead:
+    name: "Amara"
+    model: "claude-sonnet-4-6"
+`)
+		if _, err := Load(path); err == nil {
+			t.Errorf("Load should have rejected skills_repo=%q", bad)
+		}
+	}
+}
