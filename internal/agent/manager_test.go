@@ -1280,33 +1280,38 @@ type skillsStub struct {
 
 func (s *skillsStub) Run(name string, args ...string) ([]byte, error) {
 	s.calls = append(s.calls, append([]string{name}, args...))
-	// Recognized form: sudo -iu <user> <cmd> <cmdArgs...>
-	if name == "sudo" && len(args) >= 4 && args[0] == "-iu" {
-		cmd := args[2]
-		cargs := args[3:]
-		switch cmd {
-		case "ln":
-			// ln -sfn target link
-			if len(cargs) >= 3 && cargs[0] == "-sfn" {
-				_ = os.Remove(cargs[2])
-				if err := os.Symlink(cargs[1], cargs[2]); err != nil {
-					return nil, err
-				}
+	// Two forms supported:
+	//   sudo -iu <user> <cmd> <cmdArgs...>    (provision path)
+	//   <cmd> <cmdArgs...>                    (runner/self path)
+	var cmd string
+	var cargs []string
+	switch {
+	case name == "sudo" && len(args) >= 4 && args[0] == "-iu":
+		cmd = args[2]
+		cargs = args[3:]
+	default:
+		cmd = name
+		cargs = args
+	}
+	switch cmd {
+	case "ln":
+		if len(cargs) >= 3 && cargs[0] == "-sfn" {
+			_ = os.Remove(cargs[2])
+			if err := os.Symlink(cargs[1], cargs[2]); err != nil {
+				return nil, err
 			}
-		case "rm":
-			// rm -f path
-			if len(cargs) >= 2 && cargs[0] == "-f" {
-				_ = os.Remove(cargs[1])
-			}
-		case "git":
-			// git clone <url> <cache> — seed the cache dir from the test fixture
-			if len(cargs) >= 1 && cargs[0] == "clone" && s.cloneSeed != nil {
-				if len(cargs) >= 3 {
-					s.cloneSeed(cargs[2])
-				}
-			}
-			// git -C <dir> pull --ff-only — no-op
 		}
+	case "rm":
+		if len(cargs) >= 2 && cargs[0] == "-f" {
+			_ = os.Remove(cargs[1])
+		}
+	case "git":
+		if len(cargs) >= 1 && cargs[0] == "clone" && s.cloneSeed != nil {
+			if len(cargs) >= 3 {
+				s.cloneSeed(cargs[2])
+			}
+		}
+		// git -C <dir> pull --ff-only — no-op
 	}
 	return nil, nil
 }
@@ -1322,12 +1327,12 @@ func withSkillsStub(t *testing.T) *skillsStub {
 
 func TestSkillsCacheName(t *testing.T) {
 	cases := map[string]string{
-		"https://github.com/foo/bar":             "bar",
-		"https://github.com/foo/bar.git":         "bar",
-		"https://github.com/foo/bar/":            "bar",
-		"git@github.com:foo/bar.git":             "bar",
-		"ssh://git@self-hosted/foo/bar.git":      "bar",
-		"https://gitlab.example.com/g/sub/repo":  "repo",
+		"https://github.com/foo/bar":            "bar",
+		"https://github.com/foo/bar.git":        "bar",
+		"https://github.com/foo/bar/":           "bar",
+		"git@github.com:foo/bar.git":            "bar",
+		"ssh://git@self-hosted/foo/bar.git":     "bar",
+		"https://gitlab.example.com/g/sub/repo": "repo",
 	}
 	for in, want := range cases {
 		if got := skillsCacheName(in); got != want {
@@ -1349,7 +1354,7 @@ func TestSyncSkillsRepo_SymlinksSharedAndAgent(t *testing.T) {
 	for _, p := range []string{
 		filepath.Join(cache, "shared", "skill-a", "SKILL.md"),
 		filepath.Join(cache, "worker", "skill-b", "SKILL.md"),
-		filepath.Join(cache, "lead", "skill-c", "SKILL.md"),     // not for worker
+		filepath.Join(cache, "lead", "skill-c", "SKILL.md"),       // not for worker
 		filepath.Join(cache, "random-dir", "skill-d", "SKILL.md"), // ignored
 	} {
 		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
@@ -1490,6 +1495,31 @@ func TestSyncSkillsRepo_RejectsInvalidNames(t *testing.T) {
 // TestSyncSkillsRepo_ClonesWhenCacheMissing verifies that a missing cache dir
 // triggers `git clone` rather than `git pull`. The stub's cloneSeed creates
 // the dir so the rest of the function can read it.
+// TestSyncSkillsRepoAsSelf_NoSudoWrap verifies the runtime variant invokes
+// git/ln/rm directly (no `sudo -iu` wrapping), since the runner already
+// executes as the agent user.
+func TestSyncSkillsRepoAsSelf_NoSudoWrap(t *testing.T) {
+	stub := withSkillsStub(t)
+	home := t.TempDir()
+	cache := filepath.Join(home, ".cache", "team-skills")
+	if err := os.MkdirAll(filepath.Join(cache, "shared", "live-skill"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SyncSkillsRepoAsSelf(home, "worker", "https://example.com/owner/team-skills.git"); err != nil {
+		t.Fatalf("SyncSkillsRepoAsSelf: %v", err)
+	}
+
+	for _, c := range stub.calls {
+		if len(c) >= 2 && c[0] == "sudo" {
+			t.Errorf("AsSelf path must not call sudo; got %v", c)
+		}
+	}
+	if _, err := os.Readlink(filepath.Join(home, ".claude", "skills", "live-skill")); err != nil {
+		t.Errorf("AsSelf should symlink live-skill: %v", err)
+	}
+}
+
 func TestSyncSkillsRepo_ClonesWhenCacheMissing(t *testing.T) {
 	stub := withSkillsStub(t)
 	home := t.TempDir()

@@ -51,6 +51,11 @@ func loadConfig(cmd *cobra.Command, args []string) error {
 	if cmd.Name() == "update" {
 		return nil
 	}
+	// sync-skills runs as the agent user (who can't read root-owned clem.yaml)
+	// and gets its args from runner-script flags, not from config
+	if cmd.Name() == "sync-skills" {
+		return nil
+	}
 
 	var err error
 	cfg, err = config.Load(configPath)
