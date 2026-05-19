@@ -140,6 +140,8 @@ while true; do
     log "Updating claude"
     "$CLAUDE" install 2>&1 | tail -5 | tee -a "$LOGFILE" || log "claude install failed, continuing with current version"
 
+    {{.SkillsSyncCmd}}
+
     log "Starting {{.AgentName}} (fresh session)"
     (sleep 1 && tmux send-keys -t {{.AgentKey}} "" Enter
      sleep 25 && tmux send-keys -l -t {{.AgentKey}} "$PROMPT"
@@ -263,6 +265,8 @@ while true; do
         fi
     fi
 
+    {{.SkillsSyncCmd}}
+
     log "Starting {{.AgentName}} (opencode, fresh session)"
     MODEL_ARG=""
     [ -n "$ANTHROPIC_MODEL" ] && MODEL_ARG="--model ollama/$ANTHROPIC_MODEL"
@@ -385,6 +389,10 @@ type RunnerParams struct {
 	// SidecarServers is a Python/JSON list literal of [toolName, port] pairs for
 	// the privileged MCP sidecars this agent subscribes to. "[]" when none.
 	SidecarServers string
+	// SkillsSyncCmd is the shell snippet invoked at the top of every iteration
+	// to refresh the agent's ~/.claude/skills/ symlinks from the team skills
+	// repo. Empty when cfg.SkillsRepo is unset, in which case no sync runs.
+	SkillsSyncCmd string
 }
 
 // bashDoubleQuoteEscaper escapes the four characters that stay live inside a
@@ -437,6 +445,13 @@ func Generate(cfg *config.Config, agentKey string) string {
 	if ac.SubagentModel != "" {
 		subagentExport = fmt.Sprintf("export CLAUDE_CODE_SUBAGENT_MODEL=%q", ac.SubagentModel)
 	}
+	skillsSyncCmd := ""
+	if cfg.SkillsRepo != "" {
+		skillsSyncCmd = fmt.Sprintf(
+			`clem sync-skills --home "$HOME" --agent-key %q --repo %q 2>&1 | tee -a "$LOGFILE" || log "skills sync failed"`,
+			agentKey, cfg.SkillsRepo,
+		)
+	}
 	p := RunnerParams{
 		Project:        cfg.Project,
 		AgentKey:       agentKey,
@@ -458,6 +473,7 @@ func Generate(cfg *config.Config, agentKey string) string {
 		WatchChannelIDs: discordWatchChannels(cfg),
 		ProxyExport:     proxyExportBlock(cfg, agentKey),
 		SidecarServers:  sidecarServersLiteral(cfg, agentKey),
+		SkillsSyncCmd:   skillsSyncCmd,
 	}
 	switch ac.RuntimeKind() {
 	case "opencode":
@@ -614,6 +630,7 @@ func renderTemplate(tmpl string, p RunnerParams) string {
 		"{{.ProxyExport}}", p.ProxyExport,
 		"{{.ProxyUnitDeps}}", p.ProxyUnitDeps,
 		"{{.SidecarServers}}", p.SidecarServers,
+		"{{.SkillsSyncCmd}}", p.SkillsSyncCmd,
 	)
 	return r.Replace(tmpl)
 }

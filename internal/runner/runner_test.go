@@ -738,3 +738,33 @@ func TestSidecarServersLiteral(t *testing.T) {
 		t.Errorf("non-subscriber literal = %q", got)
 	}
 }
+
+func TestGenerate_SkillsSyncInjectedWhenRepoSet(t *testing.T) {
+	cfg := baseCfg("worker", config.AgentConfig{
+		Name:      "Athena",
+		Model:     "claude-sonnet-4-6",
+		Iteration: "1m",
+		Prompt:    "do the thing",
+	})
+	cfg.SkillsRepo = "https://github.com/example/myteam-skills"
+	out := Generate(cfg, "worker")
+
+	wantSubstr := `clem sync-skills --home "$HOME" --agent-key "worker" --repo "https://github.com/example/myteam-skills"`
+	if !strings.Contains(out, wantSubstr) {
+		t.Errorf("runner missing sync-skills invocation; want substr:\n%s\ngot:\n%s", wantSubstr, out)
+	}
+}
+
+func TestGenerate_SkillsSyncAbsentWhenRepoUnset(t *testing.T) {
+	cfg := baseCfg("worker", config.AgentConfig{
+		Name:      "Athena",
+		Model:     "claude-sonnet-4-6",
+		Iteration: "1m",
+		Prompt:    "do the thing",
+	})
+	// SkillsRepo intentionally empty
+	out := Generate(cfg, "worker")
+	if strings.Contains(out, "clem sync-skills") {
+		t.Errorf("runner should not invoke sync-skills when SkillsRepo unset; got:\n%s", out)
+	}
+}
