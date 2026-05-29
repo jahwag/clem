@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/jahwag/clem/internal/agent"
 	"github.com/jahwag/clem/internal/agentdoc"
+	"github.com/jahwag/clem/internal/config"
+	"github.com/jahwag/clem/internal/proxy"
 	"github.com/jahwag/clem/internal/remote"
 	"github.com/jahwag/clem/internal/runner"
 	"github.com/jahwag/clem/internal/vault"
@@ -45,6 +48,14 @@ func runProvision(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Provisioning project: %s\n", cfg.Project)
+
+	// Phase 2: stand up the agent-vault credential proxy before the agent loop
+	// so per-agent tokens can be minted inside it. No-op unless backend active.
+	if cfg.Vault.IsAgentVault() {
+		if err := provisionAgentVaultHost(); err != nil {
+			return err
+		}
+	}
 
 	for agentKey, ac := range cfg.Agents {
 		osUser := cfg.OSUsername(agentKey)
@@ -89,17 +100,66 @@ func runProvision(cmd *cobra.Command, args []string) error {
 			}
 		} else {
 			flatSecrets := vault.FlatSecrets(secrets)
-			merged := make(map[string]string, len(flatSecrets)+len(providerEnv))
-			for k, v := range flatSecrets {
-				merged[k] = v
-			}
-			for k, v := range providerEnv {
-				merged[k] = v
+			merged := make(map[string]string, len(flatSecrets)+len(providerEnv)+12)
+			if ac.VaultBroker {
+				// agent-vault brokered: consolidate this agent's brokered secrets +
+				// their service rules into a single per-agent agent-vault vault, mint
+				// a scoped inject-only token bound to it, and write placeholders. The
+				// real upstream credentials live only inside agent-vault, never in
+				// this agent's .env. One vault per agent works around agent-vault's
+				// single-vault-context proxy (injection only resolves the URL vault).
+				addr := cfg.Vault.AddrOrDefault()
+				// Consolidated vault name must differ from the agent name — agent-vault
+				// conflates a token's vault scope when an agent and a vault share a
+				// name, and the proxy then 403s even serviced hosts.
+				consolidated := config.AgentVaultName(osUser + "-brokered")
+				brokered := map[string]bool{}
+				brokeredKV := make(map[string]string, len(ac.BrokeredSecrets))
+				for _, k := range ac.BrokeredSecrets {
+					v, ok := flatSecrets[k]
+					if !ok {
+						return fmt.Errorf("agent %s: brokered secret %q not found in its vaults", agentKey, k)
+					}
+					brokered[k] = true
+					brokeredKV[k] = v
+				}
+				svcs := brokeredServicesFor(cfg.Vault.Services, brokered, flatSecrets)
+				// seed any extra service credential keys (e.g. a basic-auth username)
+				for _, s := range svcs {
+					for _, ck := range s.CredentialKeys() {
+						if _, have := brokeredKV[ck]; !have {
+							brokeredKV[ck] = flatSecrets[ck]
+						}
+					}
+				}
+				if err := vault.SeedVault(addr, consolidated, brokeredKV); err != nil {
+					return fmt.Errorf("agent %s: seeding consolidated vault: %w", agentKey, err)
+				}
+				if err := vault.ApplyServices(addr, consolidated, svcs); err != nil {
+					return fmt.Errorf("agent %s: applying service rules: %w", agentKey, err)
+				}
+				token, terr := vault.EnsureAgentIdentity(addr, osUser, []string{consolidated})
+				if terr != nil {
+					return fmt.Errorf("agent %s: minting agent-vault token: %w", agentKey, terr)
+				}
+				merged = agent.BrokeredEnv(cfg.Vault, ac, token, consolidated, flatSecrets)
+				for k, v := range providerEnv {
+					merged[k] = v
+				}
+				fmt.Printf("  wrote %s/.env (agent-vault brokered: %d placeholder(s) in vault %s, %d service rule(s))\n",
+					homeDir, len(ac.BrokeredSecrets), consolidated, len(svcs))
+			} else {
+				for k, v := range flatSecrets {
+					merged[k] = v
+				}
+				for k, v := range providerEnv {
+					merged[k] = v
+				}
+				fmt.Printf("  wrote %s/.env (%d secrets + %d provider)\n", homeDir, len(secrets), len(providerEnv))
 			}
 			if err := agent.WriteEnvFile(osUser, homeDir, merged); err != nil {
 				return fmt.Errorf("writing .env for %s: %w", agentKey, err)
 			}
-			fmt.Printf("  wrote %s/.env (%d secrets + %d provider)\n", homeDir, len(secrets), len(providerEnv))
 
 			// If wrangler credentials are present, write the wrangler config file
 			if err := agent.WriteWranglerConfig(osUser, homeDir, secrets); err != nil {
@@ -222,6 +282,12 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// 5b. Egress containment (pipelock proxy + nftables UID firewall), host-level.
+	// Runs after the agent loop so all agent OS users exist for UID resolution.
+	if err := provisionEgress(); err != nil {
+		return err
+	}
+
 	// 6. Install watchdog
 	fmt.Printf("\n[watchdog]\n")
 	wdScript := watchdog.GenerateScript(cfg)
@@ -252,4 +318,179 @@ func runProvision(cmd *cobra.Command, args []string) error {
 func chownDir(path, username string) {
 	// best effort
 	agent.ChownPath(path, username)
+}
+
+// provisionAgentVaultHost stands up the agent-vault credential proxy: creates
+// the vault system user, installs the pinned binary, supplies the master
+// password from sops via a root-owned EnvironmentFile, starts the service,
+// waits for health, logs in (or registers) the instance owner from sops, seeds
+// all sops vaults, applies the injection (service) rules, and fetches the CA
+// cert. All admin operations ride the owner session (no admin token exists in
+// agent-vault). Only called when the agent-vault backend is active.
+func provisionAgentVaultHost() error {
+	fmt.Printf("\n[agent-vault]\n")
+	vaultUser := cfg.Vault.SystemUserOrDefault()
+	if err := agent.EnsureSystemUser(vaultUser); err != nil {
+		return fmt.Errorf("agent-vault: %w", err)
+	}
+	if err := agent.InstallAgentVault(); err != nil {
+		return fmt.Errorf("agent-vault: %w", err)
+	}
+	if err := os.MkdirAll("/etc/clem", 0755); err != nil {
+		return fmt.Errorf("agent-vault: creating /etc/clem: %w", err)
+	}
+	if err := os.MkdirAll(proxy.AgentVaultDataDir, 0700); err != nil {
+		return fmt.Errorf("agent-vault: creating data dir: %w", err)
+	}
+	agent.ChownPath(proxy.AgentVaultDataDir, vaultUser)
+
+	// Master password + owner credentials from sops (vault "clem-vault"). The
+	// master password goes into a root-owned EnvironmentFile (0600) — agent-vault
+	// has no systemd-credential support; the owner email/password are used
+	// transiently to log in and never touch any agent .env.
+	allVaults, err := vault.AllVaults()
+	if err != nil {
+		return fmt.Errorf("agent-vault: reading sops: %w", err)
+	}
+	clemVault := allVaults["clem-vault"]
+	master := clemVault["AGENT_VAULT_MASTER_PASSWORD"]
+	if master == "" {
+		return fmt.Errorf("agent-vault: set the master password: clem vault set clem-vault AGENT_VAULT_MASTER_PASSWORD=...")
+	}
+	ownerEmail := clemVault["AGENT_VAULT_OWNER_EMAIL"]
+	ownerPassword := clemVault["AGENT_VAULT_OWNER_PASSWORD"]
+	if ownerEmail == "" || ownerPassword == "" {
+		return fmt.Errorf("agent-vault: set the owner account: clem vault set clem-vault AGENT_VAULT_OWNER_EMAIL=... AGENT_VAULT_OWNER_PASSWORD=...")
+	}
+	if err := os.WriteFile(proxy.AgentVaultEnvFile,
+		[]byte("AGENT_VAULT_MASTER_PASSWORD="+master+"\n"), 0600); err != nil {
+		return fmt.Errorf("agent-vault: writing master env file: %w", err)
+	}
+
+	if err := agent.InstallServiceByName(cfg.AgentVaultServiceName(), proxy.GenerateAgentVaultService(cfg)); err != nil {
+		return fmt.Errorf("agent-vault: installing service: %w", err)
+	}
+	if err := agent.StartService(cfg.AgentVaultServiceName()); err != nil {
+		return fmt.Errorf("agent-vault: starting service: %w", err)
+	}
+	addr := cfg.Vault.AddrOrDefault()
+	if err := waitHealthy(addr, 30); err != nil {
+		return fmt.Errorf("agent-vault: %w", err)
+	}
+	if err := vault.EnsureOwner(addr, ownerEmail, ownerPassword); err != nil {
+		return fmt.Errorf("agent-vault: owner auth: %w", err)
+	}
+	if err := vault.FetchCA(addr, cfg.Vault.CACertPathOrDefault()); err != nil {
+		return fmt.Errorf("agent-vault: fetching CA: %w", err)
+	}
+	// Per-agent consolidated vaults (secrets + service rules) are seeded inside
+	// the agent loop, since each brokers a different set; see the VaultBroker
+	// branch in runProvision.
+	fmt.Printf("  agent-vault up; CA at %s\n", cfg.Vault.CACertPathOrDefault())
+	return nil
+}
+
+// brokeredServicesFor returns the subset of services applicable to an agent: a
+// service applies when it injects at least one of the agent's brokered secrets
+// and all of its credential keys are available in the agent's decrypted secrets.
+func brokeredServicesFor(services []config.Service, brokered map[string]bool, flat map[string]string) []config.Service {
+	var out []config.Service
+	for _, s := range services {
+		injectsBrokered, allAvailable := false, true
+		for _, k := range s.CredentialKeys() {
+			if brokered[k] {
+				injectsBrokered = true
+			}
+			if _, ok := flat[k]; !ok {
+				allAvailable = false
+			}
+		}
+		if injectsBrokered && allAvailable {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// waitHealthy polls agent-vault's health endpoint up to attempts times (1s apart).
+func waitHealthy(addr string, attempts int) error {
+	for i := 0; i < attempts; i++ {
+		if err := vault.Health(addr); err == nil {
+			return nil
+		}
+		time.Sleep(time.Second)
+	}
+	return fmt.Errorf("agent-vault did not become healthy at %s after %ds", addr, attempts)
+}
+
+// provisionEgress installs the host-level egress containment stack — the
+// pipelock forward proxy and the per-agent nftables UID firewall — when any
+// agent has egress containment enabled. No-op otherwise. Must run after agent
+// OS users exist, since the firewall ruleset is keyed on their UIDs.
+func provisionEgress() error {
+	anyEgress := false
+	for key := range cfg.Agents {
+		if cfg.EgressEnabledFor(key) {
+			anyEgress = true
+			break
+		}
+	}
+	if !anyEgress {
+		return nil
+	}
+
+	fmt.Printf("\n[egress]\n")
+	proxyUser := cfg.Egress.ProxyUserOrDefault()
+	if err := agent.EnsureSystemUser(proxyUser); err != nil {
+		return fmt.Errorf("egress: %w", err)
+	}
+	if err := agent.InstallPipelock(); err != nil {
+		return fmt.Errorf("egress: %w", err)
+	}
+
+	// /etc/clem holds the generated proxy config + firewall ruleset (root-owned,
+	// no secrets). /var/log/clem holds the signed audit log, written by the
+	// proxy user.
+	if err := os.MkdirAll("/etc/clem", 0755); err != nil {
+		return fmt.Errorf("egress: creating /etc/clem: %w", err)
+	}
+	if err := os.MkdirAll(proxy.AuditLogPath, 0750); err != nil {
+		return fmt.Errorf("egress: creating %s: %w", proxy.AuditLogPath, err)
+	}
+	agent.ChownPath(proxy.AuditLogPath, proxyUser)
+
+	cfgPath := proxy.PipelockConfigPath(cfg.Project)
+	if err := os.WriteFile(cfgPath, []byte(proxy.GeneratePipelockConfig(cfg)), 0644); err != nil {
+		return fmt.Errorf("egress: writing %s: %w", cfgPath, err)
+	}
+	fmt.Printf("  wrote %s\n", cfgPath)
+
+	nft, err := proxy.GenerateNftables(cfg)
+	if err != nil {
+		return fmt.Errorf("egress: %w", err)
+	}
+	nftPath := proxy.NftablesPath(cfg.Project)
+	if err := os.WriteFile(nftPath, []byte(nft), 0644); err != nil {
+		return fmt.Errorf("egress: writing %s: %w", nftPath, err)
+	}
+	fmt.Printf("  wrote %s\n", nftPath)
+
+	// Firewall first (so the proxy comes up behind a closed boundary), then the
+	// proxy. The agent units order After= both via runner.proxyUnitDeps.
+	if err := agent.InstallServiceByName(cfg.NftablesServiceName(), proxy.GenerateNftablesService(cfg)); err != nil {
+		return fmt.Errorf("egress: installing firewall service: %w", err)
+	}
+	if err := agent.StartService(cfg.NftablesServiceName()); err != nil {
+		return fmt.Errorf("egress: starting firewall: %w", err)
+	}
+	fmt.Printf("  installed + started %s\n", cfg.NftablesServiceName())
+
+	if err := agent.InstallServiceByName(cfg.PipelockServiceName(), proxy.GeneratePipelockService(cfg)); err != nil {
+		return fmt.Errorf("egress: installing pipelock service: %w", err)
+	}
+	if err := agent.StartService(cfg.PipelockServiceName()); err != nil {
+		return fmt.Errorf("egress: starting pipelock: %w", err)
+	}
+	fmt.Printf("  installed + started %s (port %d)\n", cfg.PipelockServiceName(), cfg.Egress.ProxyPortOrDefault())
+	return nil
 }

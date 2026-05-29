@@ -43,7 +43,7 @@ tail -500 "$LOGFILE" > "$LOGFILE.tmp" 2>/dev/null && mv "$LOGFILE.tmp" "$LOGFILE
 export ENABLE_CLAUDEAI_MCP_SERVERS=false
 # Skip IDE extension auto-install probe — agents run in headless tmux, no IDE.
 export CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL=1
-
+{{.ProxyExport}}
 # Load secrets (written by clem provision, never committed)
 [ -f "$HOME/.env" ] && source "$HOME/.env"
 {{.SubagentExport}}
@@ -96,19 +96,10 @@ if os.environ.get('SLACK_MCP_XOXP_TOKEN'):
             'SLACK_MCP_ADD_MESSAGE_TOOL': os.environ.get('SLACK_MCP_ADD_MESSAGE_TOOL', 'true'),
         },
     }
-# Prefect MCP (needs SSH_HOST + ES_PASSWORD)
-if os.environ.get('SSH_HOST') and os.environ.get('ES_PASSWORD'):
-    cfg['mcpServers']['prefect'] = {
-        'command': _mcp_bin('prefect-mcp'),
-        'env': {
-            'SSH_HOST': os.environ['SSH_HOST'],
-            'SSH_USER': os.environ.get('SSH_USER', 'ubuntu'),
-            'SSH_KEY_PATH': os.path.expanduser('~/.ssh/id_ed25519'),
-            'PREFECT_API_PORT': os.environ.get('PREFECT_API_PORT', '4200'),
-            'ES_USER': os.environ.get('ES_USER', 'elastic'),
-            'ES_PASSWORD': os.environ['ES_PASSWORD'],
-        }
-    }
+# The Prefect MCP (SSH_HOST/SSH_KEY/ES_PASSWORD) was removed: SSH-based MCPs
+# cannot be brokered by agent-vault (SSH is not HTTP) and are dropped under the
+# credential-proxy model. Re-add it in a project .mcp.json if a host still needs
+# it, with the understanding that its secrets stay in plaintext .env.
 # GitHub MCP and context7 are NOT registered here by default — agents use
 # the gh CLI directly (more context-efficient per Anthropic's cost docs) and
 # can opt in to context7 per-project by checking a .mcp.json into the workdir.
@@ -194,7 +185,7 @@ cd "$WORKDIR" || exit 1
 log() { echo "$(date -Iseconds) $1" | tee -a "$LOGFILE"; }
 
 tail -500 "$LOGFILE" > "$LOGFILE.tmp" 2>/dev/null && mv "$LOGFILE.tmp" "$LOGFILE" 2>/dev/null
-
+{{.ProxyExport}}
 [ -f "$HOME/.env" ] && source "$HOME/.env"
 {{.SubagentExport}}
 # Write opencode.json with Ollama provider + discord-bot MCP (if token is set).
@@ -305,7 +296,7 @@ After=network.target
 # start, so without a Wants here a "systemctl start" of the agent leaves the
 # terminal dead until provision re-enables it.
 Wants=clem-ttyd-{{.Project}}-{{.AgentKey}}.service
-
+{{.ProxyUnitDeps}}
 [Service]
 Type=forking
 User={{.OSUser}}
@@ -318,33 +309,19 @@ Restart=no
 WantedBy=multi-user.target
 `
 
-// egressDirectives is the systemd IP firewall block injected when
-// egress_restriction_experimental is enabled. Allows GitHub (git + API),
-// Anthropic/Discord (via Cloudflare), and localhost (Ollama, MCP unix sockets).
-//
-// KNOWN LIMITATIONS — see AgentConfig.EgressRestrictionExperimental doc for full detail:
-//   - DNS: only works with systemd-resolved (127.0.0.53); external resolvers fail.
-//   - Cloudflare CIDRs cover millions of CF-hosted sites, not just Anthropic/Discord.
-//   - CIDRs are hardcoded and will drift. Refresh with:
-//       curl https://api.github.com/meta | jq '[.web[], .api[], .git[]] | unique[]'
-//   - DNS exfil (base64 in subdomain labels) is NOT blocked by IP-level filtering.
-const egressDirectives = `# Egress restriction (egress_restriction_experimental: true)
-# EXPERIMENTAL: see clem.yaml AgentConfig docs for known limitations.
+// egressDirectives is the systemd IP-firewall block injected when egress
+// containment is enabled for an agent. It is intentionally loopback-only:
+// hard enforcement (and the domain allowlist) lives in the clem-nftables UID
+// firewall + pipelock proxy. This systemd block is a cheap second kernel layer
+// that blocks all direct internet egress even if the nftables ruleset is
+// flushed. There are no hardcoded CIDRs to drift — the agent reaches the
+// internet only via the loopback pipelock proxy.
+const egressDirectives = `# Egress containment (egress: enabled). Hard enforcement + domain allowlist
+# live in the clem-nftables UID firewall and the pipelock proxy. This block is
+# a second kernel layer blocking direct internet egress.
 IPAddressDeny=any
-IPAddressAllow=localhost
 IPAddressAllow=127.0.0.0/8
 IPAddressAllow=::1/128
-# GitHub (web + API + git)
-IPAddressAllow=140.82.112.0/20
-IPAddressAllow=185.199.108.0/22
-IPAddressAllow=192.30.252.0/22
-IPAddressAllow=143.55.64.0/20
-# Anthropic API + Discord (both served via Cloudflare)
-IPAddressAllow=104.16.0.0/13
-IPAddressAllow=104.24.0.0/14
-IPAddressAllow=172.64.0.0/13
-# Discord own ASN (AS36459)
-IPAddressAllow=66.22.192.0/20
 `
 
 const ttydServiceTemplate = `[Unit]
@@ -389,6 +366,12 @@ type RunnerParams struct {
 	EgressDirectives    string
 	HardeningDirectives string
 	ResourceDirectives  string
+	// ProxyExport is the HTTPS_PROXY/NO_PROXY export block injected into the
+	// runner when egress containment is enabled for the agent. Empty otherwise.
+	ProxyExport string
+	// ProxyUnitDeps is the After=/Wants= block tying the agent service to the
+	// pipelock + nftables units when egress containment is enabled.
+	ProxyUnitDeps string
 	// WatchChannelIDs is the comma-separated list of Discord channel IDs the
 	// MCP server's gateway watcher should observe. Empty disables the watcher
 	// even when DISCORD_TOKEN is set, preserving the original tool-only mode.
@@ -447,6 +430,7 @@ func Generate(cfg *config.Config, agentKey string) string {
 		AlertChannel:    alertChannel,
 		AlertCurl:       alertCurl,
 		WatchChannelIDs: discordWatchChannels(cfg),
+		ProxyExport:     proxyExportBlock(cfg, agentKey),
 	}
 	switch ac.RuntimeKind() {
 	case "opencode":
@@ -503,6 +487,34 @@ func buildHardeningDirectives(homeDir, _ string) string {
 	)
 }
 
+// proxyExportBlock returns the HTTPS_PROXY/NO_PROXY export injected into the
+// runner when egress containment is enabled for the agent. Exported before
+// sourcing $HOME/.env so an operator can still override per-host. Empty when
+// containment is disabled. NO_PROXY keeps loopback (Ollama, MCP sockets) direct.
+func proxyExportBlock(cfg *config.Config, agentKey string) string {
+	if !cfg.EgressEnabledFor(agentKey) {
+		return ""
+	}
+	port := cfg.Egress.ProxyPortOrDefault()
+	return fmt.Sprintf(`# Egress containment: route HTTP(S) through the pipelock proxy. The nftables
+# UID firewall blocks all other egress, so this loopback proxy is the only way
+# out. NO_PROXY keeps loopback (Ollama, MCP sockets) direct.
+export HTTPS_PROXY=http://127.0.0.1:%d
+export HTTP_PROXY=http://127.0.0.1:%d
+export NO_PROXY=127.0.0.1,localhost,::1`, port, port)
+}
+
+// proxyUnitDeps returns the [Unit] dependency block tying the agent service to
+// the egress stack. The nftables firewall is a hard Requires= (fail-CLOSED: if
+// the firewall fails to load, the agent must not start unconfined). The
+// pipelock proxy is a soft Wants= — losing it costs connectivity, not
+// containment. After= orders the agent behind both so the boundary is up first.
+func proxyUnitDeps(cfg *config.Config) string {
+	return fmt.Sprintf("Requires=%s\nWants=%s\nAfter=%s %s\n",
+		cfg.NftablesServiceName(), cfg.PipelockServiceName(),
+		cfg.PipelockServiceName(), cfg.NftablesServiceName())
+}
+
 // GenerateService renders the systemd service unit content for an agent.
 // Returns an error if the agent OS user does not exist on the host.
 func GenerateService(cfg *config.Config, agentKey string) (string, error) {
@@ -513,8 +525,10 @@ func GenerateService(cfg *config.Config, agentKey string) (string, error) {
 		return "", fmt.Errorf("generating service for agent %s: %w", agentKey, err)
 	}
 	egress := ""
-	if ac.EgressRestrictionExperimental {
+	proxyDeps := ""
+	if cfg.EgressEnabledFor(agentKey) {
 		egress = egressDirectives
+		proxyDeps = proxyUnitDeps(cfg)
 	}
 	p := RunnerParams{
 		Project:             cfg.Project,
@@ -525,6 +539,7 @@ func GenerateService(cfg *config.Config, agentKey string) (string, error) {
 		EgressDirectives:    egress,
 		HardeningDirectives: buildHardeningDirectives(homeDir, cfg.Project),
 		ResourceDirectives:  ac.ResourceLimits.Directives(),
+		ProxyUnitDeps:       proxyDeps,
 	}
 	return renderTemplate(serviceTemplate, p), nil
 }
@@ -569,6 +584,8 @@ func renderTemplate(tmpl string, p RunnerParams) string {
 		"{{.HardeningDirectives}}", p.HardeningDirectives,
 		"{{.ResourceDirectives}}", p.ResourceDirectives,
 		"{{.WatchChannelIDs}}", p.WatchChannelIDs,
+		"{{.ProxyExport}}", p.ProxyExport,
+		"{{.ProxyUnitDeps}}", p.ProxyUnitDeps,
 	)
 	return r.Replace(tmpl)
 }

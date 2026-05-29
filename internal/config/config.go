@@ -17,6 +17,23 @@ var validName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
 // snowflakeRe matches a Discord snowflake ID: 17–19 decimal digits.
 var snowflakeRe = regexp.MustCompile(`^[0-9]{17,19}$`)
 
+// serviceNameRe matches an agent-vault service slug: 3–64 lowercase
+// alphanumeric/hyphen characters (agent-vault's own constraint).
+var serviceNameRe = regexp.MustCompile(`^[a-z0-9-]{3,64}$`)
+
+// avNameInvalid matches characters not allowed in an agent-vault vault name.
+var avNameInvalid = regexp.MustCompile(`[^a-z0-9-]+`)
+
+// AgentVaultName maps a clem/sops vault name to an agent-vault-compatible vault
+// name: lowercased, with any run of characters outside [a-z0-9-] collapsed to a
+// single hyphen. sops vault names may contain '_' (e.g. dev_to) or uppercase,
+// which agent-vault rejects (names are lowercase alphanumeric/hyphen). Used
+// everywhere clem hands a vault name to agent-vault so e.g. dev_to -> dev-to
+// consistently across seed, token mint, service rules, and the agent proxy env.
+func AgentVaultName(sopsVault string) string {
+	return avNameInvalid.ReplaceAllString(strings.ToLower(sopsVault), "-")
+}
+
 // githubLoginRe matches a valid GitHub username per GitHub's own rules.
 var githubLoginRe = regexp.MustCompile(`^[a-zA-Z0-9-]{1,39}$`)
 
@@ -182,7 +199,224 @@ type Config struct {
 	PrimaryMilestone string                 `yaml:"primary_milestone"`
 	Coordination     Coordination           `yaml:"coordination"`
 	Operator         OperatorConfig         `yaml:"operator"`
+	Egress           EgressConfig           `yaml:"egress"`
+	Vault            VaultBackend           `yaml:"vault"`
 	Agents           map[string]AgentConfig `yaml:"agents"`
+}
+
+// VaultBackend selects how agent secrets are materialized (Phase 2). Default
+// "env" preserves the legacy flow: secrets decrypted from sops are written
+// verbatim into each agent's .env. "agent-vault" routes HTTP-brokerable
+// credentials through an Infisical agent-vault credential proxy so the real
+// secret never reaches the agent — the agent holds only a placeholder and a
+// scoped, inject-only token. sops remains the git-committable source of truth
+// and seeds agent-vault at provision time.
+type VaultBackend struct {
+	// Backend is "env" (default) or "agent-vault".
+	Backend string `yaml:"backend"`
+	// SystemUser is the dedicated non-login user that owns the vault store and
+	// runs agent-vault. Default "clem-vault".
+	SystemUser string `yaml:"system_user"`
+	// Addr is the agent-vault management API the provisioner seeds/mints against.
+	// Default "http://127.0.0.1:14321".
+	Addr string `yaml:"addr"`
+	// ProxyHost is the host:port of agent-vault's TLS-MITM proxy that agents
+	// point HTTPS_PROXY at. Default "127.0.0.1:14322".
+	ProxyHost string `yaml:"proxy_host"`
+	// CACertPath is where agent-vault's CA cert is written for agents to trust
+	// the intercepted TLS. Default "/etc/clem/agent-vault-ca.pem".
+	CACertPath string `yaml:"ca_cert_path"`
+	// Services are the global injection rules. agent-vault matches outbound
+	// requests by host and swaps in the real credential, so a brokered agent
+	// egresses with the real value while its .env holds only a placeholder. Each
+	// service names credential KEYS (token_key etc.); at provision clem applies
+	// every service whose keys an agent brokers into that agent's consolidated
+	// vault. A brokered secret with no matching service egresses as a placeholder.
+	Services []Service `yaml:"services"`
+}
+
+// Service is one agent-vault injection rule: for requests to Host, attach the
+// credential(s) named below using the AuthType scheme. Services are not bound to
+// a vault — clem applies each one into the consolidated vault of every agent
+// that brokers the referenced credential keys. Mirrors `agent-vault vault
+// service add` flags 1:1.
+type Service struct {
+	// Name is the service slug (3-64 lowercase alphanumeric/hyphen chars).
+	Name string `yaml:"name"`
+	// Host is the target: a bare host (api.x.com), one-level wildcard
+	// (*.x.com), or inline path form (slack.com/api/*).
+	Host string `yaml:"host"`
+	// AuthType is bearer | basic | api-key | custom | passthrough.
+	AuthType string `yaml:"auth_type"`
+	// TokenKey is the credential key for bearer auth.
+	TokenKey string `yaml:"token_key"`
+	// UsernameKey / PasswordKey are the credential keys for basic auth.
+	UsernameKey string `yaml:"username_key"`
+	PasswordKey string `yaml:"password_key"`
+	// APIKeyKey is the credential key for api-key auth; APIKeyHeader (default
+	// Authorization) and APIKeyPrefix (e.g. "Bot ") shape the injected header.
+	APIKeyKey    string `yaml:"api_key_key"`
+	APIKeyHeader string `yaml:"api_key_header"`
+	APIKeyPrefix string `yaml:"api_key_prefix"`
+}
+
+// CredentialKeys returns the credential keys this service injects, per auth type.
+func (s Service) CredentialKeys() []string {
+	switch s.AuthType {
+	case "bearer":
+		return []string{s.TokenKey}
+	case "basic":
+		return []string{s.UsernameKey, s.PasswordKey}
+	case "api-key":
+		return []string{s.APIKeyKey}
+	}
+	return nil
+}
+
+// ValidAuthTypes are the agent-vault service auth schemes clem accepts.
+var ValidAuthTypes = map[string]bool{
+	"bearer": true, "basic": true, "api-key": true, "custom": true, "passthrough": true,
+}
+
+// UnbrokerableSecrets are credential keys that agent-vault cannot broker over
+// HTTP and must therefore stay as real values in .env: the Discord gateway
+// token (sent in a post-upgrade WebSocket frame, not an HTTP header) and the
+// SSH/Elasticsearch creds (not HTTP at all). Listing any of these in
+// brokered_secrets is a hard config error.
+var UnbrokerableSecrets = map[string]bool{
+	"DISCORD_TOKEN": true,
+	"SSH_HOST":      true,
+	"SSH_USER":      true,
+	"SSH_KEY_PATH":  true,
+	"ES_USER":       true,
+	"ES_PASSWORD":   true,
+}
+
+// IsAgentVault reports whether the agent-vault backend is selected.
+func (v VaultBackend) IsAgentVault() bool { return v.Backend == "agent-vault" }
+
+// SystemUserOrDefault returns the vault system user, default clem-vault.
+func (v VaultBackend) SystemUserOrDefault() string {
+	if v.SystemUser == "" {
+		return "clem-vault"
+	}
+	return v.SystemUser
+}
+
+// AddrOrDefault returns the management API address, default localhost:14321.
+func (v VaultBackend) AddrOrDefault() string {
+	if v.Addr == "" {
+		return "http://127.0.0.1:14321"
+	}
+	return v.Addr
+}
+
+// ProxyHostOrDefault returns the MITM proxy host:port, default 127.0.0.1:14322.
+func (v VaultBackend) ProxyHostOrDefault() string {
+	if v.ProxyHost == "" {
+		return "127.0.0.1:14322"
+	}
+	return v.ProxyHost
+}
+
+// CACertPathOrDefault returns the CA cert path, default under /etc/clem.
+func (v VaultBackend) CACertPathOrDefault() string {
+	if v.CACertPath == "" {
+		return "/etc/clem/agent-vault-ca.pem"
+	}
+	return v.CACertPath
+}
+
+// EgressConfig configures hard egress containment via pipelock + a per-agent
+// nftables UID firewall. When enabled, each agent's outbound traffic is forced
+// through a single pipelock forward proxy (run as a dedicated non-login system
+// user) on loopback; everything else is rejected by the kernel firewall, so a
+// compromised agent cannot reach the network except via the proxy.
+//
+// This supersedes the per-agent EgressRestrictionExperimental flag, which used
+// systemd IPAddressAllow with hardcoded CIDRs. The CIDR approach is replaced by
+// domain allowlisting in pipelock + a loopback-only systemd block as a second
+// kernel layer.
+type EgressConfig struct {
+	// Enabled turns on pipelock + the per-agent UID firewall for every agent
+	// that does not individually override via AgentConfig.Egress.
+	Enabled bool `yaml:"enabled"`
+	// Posture maps to pipelock's mode: "strict" (allowlist-only), "balanced"
+	// (block known-bad, default), or "audit" (log-only, block nothing).
+	Posture string `yaml:"posture"`
+	// Domains is the outbound allowlist written into pipelock's api_allowlist.
+	// Hostnames, no scheme. pipelock wildcard "*.example.com" also matches the
+	// apex. Empty falls back to DefaultEgressDomains.
+	Domains []string `yaml:"domains"`
+	// ProxyPort is the loopback port pipelock's forward proxy listens on.
+	// Default 8888.
+	ProxyPort int `yaml:"proxy_port"`
+	// ProxyUser is the dedicated non-login system user that runs pipelock.
+	// Default "clem-proxy".
+	ProxyUser string `yaml:"proxy_user"`
+	// TLSIntercept enables pipelock body/response scanning, which requires
+	// distributing the pipelock CA into each agent's trust stores. Default
+	// false — CONNECT-only (SNI/host allowlist + audit) needs no CA.
+	TLSIntercept bool `yaml:"tls_intercept"`
+	// AllowLocalhostPorts are loopback ports the agent UID may reach besides
+	// the proxy (e.g. 11434 for Ollama). The proxy port is always allowed.
+	//
+	// WARNING: any daemon listening on an allowed loopback port runs as a
+	// non-contained UID and egresses freely, so it is an SSRF pivot — only
+	// list services that cannot be coerced into making outbound requests on
+	// the agent's behalf.
+	AllowLocalhostPorts []int `yaml:"allow_localhost_ports"`
+}
+
+// DefaultEgressDomains is the allowlist applied when egress is enabled but no
+// domains are configured: the minimum an agent needs to reach Anthropic and
+// GitHub. pipelock wildcards match the apex too.
+var DefaultEgressDomains = []string{"*.anthropic.com", "github.com", "*.githubusercontent.com"}
+
+// PostureOrDefault returns the configured pipelock mode, defaulting to balanced.
+func (e EgressConfig) PostureOrDefault() string {
+	if e.Posture == "" {
+		return "balanced"
+	}
+	return e.Posture
+}
+
+// ProxyPortOrDefault returns the configured proxy port, defaulting to 8888.
+func (e EgressConfig) ProxyPortOrDefault() int {
+	if e.ProxyPort == 0 {
+		return 8888
+	}
+	return e.ProxyPort
+}
+
+// ProxyUserOrDefault returns the configured proxy system user, default clem-proxy.
+func (e EgressConfig) ProxyUserOrDefault() string {
+	if e.ProxyUser == "" {
+		return "clem-proxy"
+	}
+	return e.ProxyUser
+}
+
+// DomainsOrDefault returns the configured allowlist or DefaultEgressDomains.
+func (e EgressConfig) DomainsOrDefault() []string {
+	if len(e.Domains) == 0 {
+		return DefaultEgressDomains
+	}
+	return e.Domains
+}
+
+// EgressEnabledFor reports whether egress containment applies to an agent.
+// Resolution order: explicit per-agent override, then the deprecated per-agent
+// egress_restriction_experimental flag, then the top-level egress.enabled.
+func (c *Config) EgressEnabledFor(agentKey string) bool {
+	ac := c.Agents[agentKey]
+	if ac.Egress != nil {
+		return *ac.Egress
+	}
+	if ac.EgressRestrictionExperimental {
+		return true
+	}
+	return c.Egress.Enabled
 }
 
 type Coordination struct {
@@ -247,8 +481,28 @@ type AgentConfig struct {
 	// For high-stakes constraints, add a PreToolUse hook in addition to or
 	// instead of deny patterns.
 	Permissions PermissionsConfig `yaml:"permissions"`
-	// EgressRestrictionExperimental adds systemd IPAddressDeny=any + IPAddressAllow
-	// rules to the agent service unit. EXPERIMENTAL — known limitations:
+	// Egress overrides the top-level egress.enabled for this agent. nil =
+	// inherit. Set false to exclude one agent from containment, or true to
+	// opt a single agent in while the top-level block is off.
+	Egress *bool `yaml:"egress"`
+	// VaultBroker opts this agent into agent-vault credential brokering
+	// (Phase 2). Requires vault.backend: agent-vault. When false (default) the
+	// agent uses the legacy .env flow unchanged — making the whole feature
+	// per-agent opt-in so a research-preview proxy outage can't take down
+	// agents that never enrolled.
+	VaultBroker bool `yaml:"vault_broker"`
+	// BrokeredSecrets lists which vault keys are HTTP-brokered (placeholder in
+	// .env, real value only inside agent-vault). Keys NOT listed fall back to
+	// .env materialization — this is how DISCORD_TOKEN (gateway, unbrokerable)
+	// stays real while ANTHROPIC_API_KEY/Slack/Typefully/GH_TOKEN are brokered.
+	BrokeredSecrets []string `yaml:"brokered_secrets"`
+	// EgressRestrictionExperimental is DEPRECATED — superseded by the top-level
+	// egress block (pipelock + nftables). When set true it still opts the agent
+	// into egress containment (treated like egress: true) but Load logs a
+	// deprecation warning. The old hardcoded-CIDR systemd allowlist is gone.
+	//
+	// Historical note — the original approach added systemd IPAddressDeny=any +
+	// IPAddressAllow rules with the following known limitations:
 	//
 	//   DNS: only works if the host uses systemd-resolved (127.0.0.53). Hosts
 	//   using an external resolver (1.1.1.1, 8.8.8.8, corporate DNS) will fail
@@ -404,6 +658,36 @@ func (c *Config) TtydServiceName(agentKey string) string {
 	return fmt.Sprintf("clem-ttyd-%s-%s.service", c.Project, agentKey)
 }
 
+// PipelockServiceName returns the systemd service name for the egress proxy.
+func (c *Config) PipelockServiceName() string {
+	return fmt.Sprintf("clem-pipelock-%s.service", c.Project)
+}
+
+// NftablesServiceName returns the systemd service name for the egress firewall.
+func (c *Config) NftablesServiceName() string {
+	return fmt.Sprintf("clem-nftables-%s.service", c.Project)
+}
+
+// AgentVaultServiceName returns the systemd service name for the agent-vault
+// credential proxy.
+func (c *Config) AgentVaultServiceName() string {
+	return fmt.Sprintf("clem-agent-vault-%s.service", c.Project)
+}
+
+// IsBrokered reports whether a secret key is HTTP-brokered for this agent
+// (placeholder in .env, real value only inside agent-vault).
+func (ac AgentConfig) IsBrokered(key string) bool {
+	if !ac.VaultBroker {
+		return false
+	}
+	for _, k := range ac.BrokeredSecrets {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
 // envVarRe matches ${VAR} or ${VAR:-default} for env interpolation in clem.yaml.
 // Names are conservative on purpose: [A-Z_][A-Z0-9_]* — no silent expansion of
 // arbitrary shell constructs.
@@ -454,7 +738,34 @@ func Load(path string) (*Config, error) {
 	if err := cfg.Operator.validate(); err != nil {
 		return nil, err
 	}
+	switch cfg.Egress.Posture {
+	case "", "strict", "balanced", "audit":
+		// valid
+	default:
+		return nil, fmt.Errorf("egress.posture must be strict, balanced, or audit, got %q", cfg.Egress.Posture)
+	}
+	if cfg.Egress.ProxyPort != 0 && (cfg.Egress.ProxyPort < 1024 || cfg.Egress.ProxyPort > 65535) {
+		return nil, fmt.Errorf("egress.proxy_port must be 1024-65535, got %d", cfg.Egress.ProxyPort)
+	}
+	// Out-of-range entries would land verbatim in the nftables `tcp dport` set
+	// and make `nft -f` reject the whole ruleset (→ agents fail to start, since
+	// the firewall unit is a hard Requires=).
+	for _, p := range cfg.Egress.AllowLocalhostPorts {
+		if p < 1 || p > 65535 {
+			return nil, fmt.Errorf("egress.allow_localhost_ports: %d out of range 1-65535", p)
+		}
+	}
+	switch cfg.Vault.Backend {
+	case "", "env", "agent-vault":
+		// valid
+	default:
+		return nil, fmt.Errorf("vault.backend must be env or agent-vault, got %q", cfg.Vault.Backend)
+	}
 	usedPorts := make(map[int]string)
+	// Reserve the egress proxy port so no agent's web terminal collides with it.
+	if cfg.Egress.Enabled {
+		usedPorts[cfg.Egress.ProxyPortOrDefault()] = "egress.proxy_port"
+	}
 	for key, ac := range cfg.Agents {
 		if !validName.MatchString(key) {
 			return nil, fmt.Errorf("agent key must match ^[a-z][a-z0-9-]{0,30}$, got: %q", key)
@@ -486,13 +797,115 @@ func Load(path string) (*Config, error) {
 		default:
 			return nil, fmt.Errorf("agent %s: effort must be low, medium, high, xhigh, or max, got %q", key, ac.Effort)
 		}
+		if ac.EgressRestrictionExperimental {
+			fmt.Fprintf(os.Stderr, "warning: agent %s: egress_restriction_experimental is deprecated — use the top-level egress: block (pipelock + nftables containment)\n", key)
+		}
+		if ac.VaultBroker {
+			if !cfg.Vault.IsAgentVault() {
+				return nil, fmt.Errorf("agent %s: vault_broker requires vault.backend: agent-vault", key)
+			}
+			// Brokering and pipelock egress containment are NOT composable in
+			// v1: a brokered agent's HTTPS_PROXY points at agent-vault (which
+			// agent-vault cannot chain through pipelock), so enabling both would
+			// silently route the agent's traffic around pipelock's allowlist and
+			// audit log. Reject the combination rather than weaken containment.
+			if cfg.EgressEnabledFor(key) {
+				return nil, fmt.Errorf("agent %s: vault_broker and egress containment cannot both be enabled (agent-vault cannot chain through pipelock); pick one per agent", key)
+			}
+			for _, s := range ac.BrokeredSecrets {
+				if UnbrokerableSecrets[s] {
+					return nil, fmt.Errorf("agent %s: %q cannot be brokered by agent-vault (gateway/SSH/non-HTTP); keep it in .env (remove from brokered_secrets)", key, s)
+				}
+			}
+			// Brokered secrets are consolidated into a single per-agent agent-vault
+			// vault at provision (see vault.SeedVault/cmd provision), so they may
+			// span multiple sops vaults — no first-vault constraint.
+		}
 		ac.normalizeSubagentModel()
 		if err := ac.validateExtensions(key); err != nil {
 			return nil, err
 		}
 		cfg.Agents[key] = ac
 	}
+	if err := cfg.validateVaultServices(); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
+}
+
+// validateVaultServices checks the agent-vault injection rules. Services are
+// global (not vault-bound): clem applies each into the consolidated vault of any
+// agent that brokers the referenced credential keys. Warns on services no agent
+// can use and on brokered secrets with no service to inject them.
+func (cfg *Config) validateVaultServices() error {
+	if len(cfg.Vault.Services) == 0 {
+		return nil
+	}
+	if !cfg.Vault.IsAgentVault() {
+		return fmt.Errorf("vault.services requires vault.backend: agent-vault")
+	}
+	// All credential keys brokered by some agent.
+	allBrokered := map[string]bool{}
+	for _, ac := range cfg.Agents {
+		if !ac.VaultBroker {
+			continue
+		}
+		for _, s := range ac.BrokeredSecrets {
+			allBrokered[s] = true
+		}
+	}
+	serviceKeys := map[string]bool{}
+	for i, s := range cfg.Vault.Services {
+		where := fmt.Sprintf("vault.services[%d]", i)
+		if s.Name != "" {
+			where = "vault.services " + s.Name
+		}
+		if !serviceNameRe.MatchString(s.Name) {
+			return fmt.Errorf("%s: name must be 3-64 lowercase alphanumeric/hyphen chars", where)
+		}
+		if s.Host == "" {
+			return fmt.Errorf("%s: host is required", where)
+		}
+		if !ValidAuthTypes[s.AuthType] {
+			return fmt.Errorf("%s: auth_type must be bearer, basic, api-key, custom, or passthrough, got %q", where, s.AuthType)
+		}
+		switch s.AuthType {
+		case "bearer":
+			if s.TokenKey == "" {
+				return fmt.Errorf("%s: auth_type bearer requires token_key", where)
+			}
+		case "basic":
+			if s.UsernameKey == "" || s.PasswordKey == "" {
+				return fmt.Errorf("%s: auth_type basic requires username_key and password_key", where)
+			}
+		case "api-key":
+			if s.APIKeyKey == "" {
+				return fmt.Errorf("%s: auth_type api-key requires api_key_key", where)
+			}
+		}
+		anyBrokered := false
+		for _, k := range s.CredentialKeys() {
+			serviceKeys[k] = true
+			if allBrokered[k] {
+				anyBrokered = true
+			}
+		}
+		if len(allBrokered) > 0 && !anyBrokered {
+			fmt.Fprintf(os.Stderr, "warning: %s references credential keys no agent brokers — it will not be applied\n", where)
+		}
+	}
+	// Warn on any brokered secret with no service to inject it.
+	for key, ac := range cfg.Agents {
+		if !ac.VaultBroker {
+			continue
+		}
+		for _, s := range ac.BrokeredSecrets {
+			if !serviceKeys[s] {
+				fmt.Fprintf(os.Stderr, "warning: agent %s: brokered secret %q has no matching vault.service — it would egress as a placeholder\n", key, s)
+			}
+		}
+	}
+	return nil
 }
 
 // validate checks that all discord_ids and github_logins are well-formed.

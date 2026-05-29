@@ -1181,3 +1181,161 @@ func TestWriteHostManagedSettings_Idempotent(t *testing.T) {
 		t.Errorf("WriteHostManagedSettings not idempotent:\nfirst=%s\nsecond=%s", first, second)
 	}
 }
+
+func TestEnsureSystemUser_CreatesWithSystemFlags(t *testing.T) {
+	stub := withStub(t)
+	stub.failOn = "id" // user does not exist yet
+	if err := EnsureSystemUser("clem-proxy"); err != nil {
+		t.Fatalf("EnsureSystemUser: %v", err)
+	}
+	var useradd []string
+	for _, c := range stub.calls {
+		if c[0] == "useradd" {
+			useradd = c
+		}
+	}
+	if useradd == nil {
+		t.Fatal("expected useradd to be called")
+	}
+	joined := strings.Join(useradd, " ")
+	for _, want := range []string{"--system", "--no-create-home", "/usr/sbin/nologin", "clem-proxy"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("useradd missing %q: %v", want, useradd)
+		}
+	}
+}
+
+func TestEnsureSystemUser_SkipsWhenExists(t *testing.T) {
+	stub := withStub(t) // id succeeds (no failOn) => user exists
+	if err := EnsureSystemUser("clem-proxy"); err != nil {
+		t.Fatalf("EnsureSystemUser: %v", err)
+	}
+	for _, c := range stub.calls {
+		if c[0] == "useradd" {
+			t.Fatalf("should not call useradd when user exists: %v", stub.calls)
+		}
+	}
+}
+
+func TestInstallPipelock_PinnedDownloadWhenAbsent(t *testing.T) {
+	// Default stub returns empty output for the version-check bash call, so the
+	// pinned version is not detected and the download proceeds.
+	stub := withStub(t)
+	if err := InstallPipelock(); err != nil {
+		t.Fatalf("InstallPipelock: %v", err)
+	}
+	var script string
+	for _, c := range stub.calls {
+		if c[0] == "bash" && len(c) >= 3 && strings.Contains(c[2], "releases/download") {
+			script = c[2]
+		}
+	}
+	if script == "" {
+		t.Fatal("expected bash install (download) script to run")
+	}
+	for _, want := range []string{
+		PipelockVersion,
+		"releases/download",
+		"sha256sum -c -",
+		"no checksum line for", // empty-grep guard
+		"install -m 0755 pipelock /usr/local/bin/pipelock",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("install script missing %q:\n%s", want, script)
+		}
+	}
+}
+
+func TestInstallPipelock_SkipsWhenPinnedPresent(t *testing.T) {
+	orig := sys
+	t.Cleanup(func() { sys = orig })
+	// The version-check bash call reports the pinned version → no download.
+	rec := &versionStub{version: PipelockVersion}
+	sys = rec
+	if err := InstallPipelock(); err != nil {
+		t.Fatalf("InstallPipelock: %v", err)
+	}
+	if rec.downloaded {
+		t.Fatal("should not download when pinned version already present")
+	}
+}
+
+// versionStub reports the pinned version for the version-check bash invocation
+// and records whether a download (bash script referencing the release) ran.
+type versionStub struct {
+	version    string
+	downloaded bool
+}
+
+func (v *versionStub) Run(name string, args ...string) ([]byte, error) {
+	if name == "bash" && len(args) >= 2 {
+		script := args[1]
+		if strings.Contains(script, "releases/download") {
+			v.downloaded = true
+			return nil, nil
+		}
+		if strings.Contains(script, "--version") {
+			return []byte("pipelock " + strings.TrimPrefix(v.version, "v")), nil
+		}
+	}
+	return nil, nil
+}
+
+func TestBrokeredEnv_PlaceholdersAndConnection(t *testing.T) {
+	av := config.VaultBackend{Backend: "agent-vault"}
+	ac := config.AgentConfig{
+		VaultBroker:     true,
+		BrokeredSecrets: []string{"ANTHROPIC_API_KEY", "SLACK_MCP_XOXP_TOKEN"},
+	}
+	flat := map[string]string{
+		"ANTHROPIC_API_KEY":    "sk-ant-REAL",
+		"SLACK_MCP_XOXP_TOKEN": "xoxp-REAL",
+		"DISCORD_TOKEN":        "discord-REAL",
+	}
+	env := BrokeredEnv(av, ac, "av_agt_tok", "anthropic", flat)
+
+	// Brokered keys → placeholders; real secret must NOT appear.
+	if env["ANTHROPIC_API_KEY"] != "__anthropic_api_key__" {
+		t.Errorf("ANTHROPIC_API_KEY=%q, want placeholder", env["ANTHROPIC_API_KEY"])
+	}
+	if env["SLACK_MCP_XOXP_TOKEN"] != "__slack_mcp_xoxp_token__" {
+		t.Errorf("SLACK placeholder wrong: %q", env["SLACK_MCP_XOXP_TOKEN"])
+	}
+	// Non-brokered secret keeps real value (Discord gateway is unbrokerable).
+	if env["DISCORD_TOKEN"] != "discord-REAL" {
+		t.Errorf("DISCORD_TOKEN should stay real, got %q", env["DISCORD_TOKEN"])
+	}
+	for k, v := range env {
+		if v == "sk-ant-REAL" || v == "xoxp-REAL" {
+			t.Errorf("real brokered secret leaked into env key %s", k)
+		}
+	}
+	// Connection + CA trust.
+	if env["HTTPS_PROXY"] != "https://av_agt_tok:anthropic@127.0.0.1:14322" {
+		t.Errorf("HTTPS_PROXY=%q", env["HTTPS_PROXY"])
+	}
+	if env["AGENT_VAULT_TOKEN"] != "av_agt_tok" || env["AGENT_VAULT_VAULT"] != "anthropic" {
+		t.Errorf("AGENT_VAULT_* wrong: %v", env)
+	}
+	if env["NODE_EXTRA_CA_CERTS"] != "/etc/clem/agent-vault-ca.pem" {
+		t.Errorf("NODE_EXTRA_CA_CERTS=%q", env["NODE_EXTRA_CA_CERTS"])
+	}
+}
+
+func TestInstallAgentVault_PinnedDownload(t *testing.T) {
+	stub := withStub(t)
+	if err := InstallAgentVault(); err != nil {
+		t.Fatalf("InstallAgentVault: %v", err)
+	}
+	var script string
+	for _, c := range stub.calls {
+		if c[0] == "bash" && len(c) >= 3 && strings.Contains(c[2], "releases/download") {
+			script = c[2]
+		}
+	}
+	for _, want := range []string{AgentVaultVersion, "Infisical/agent-vault", "install -m 0755 agent-vault /usr/local/bin/agent-vault"} {
+		if !strings.Contains(script, want) {
+			t.Errorf("agent-vault install script missing %q:\n%s", want, script)
+		}
+	}
+}

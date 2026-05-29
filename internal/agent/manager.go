@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -105,6 +107,198 @@ func EnsureUser(username string) error {
 		return fmt.Errorf("useradd %s: %w\n%s", username, err, out)
 	}
 	return nil
+}
+
+// EnsureSystemUser creates a dedicated non-login system user (no home, nologin
+// shell) used to run a host service such as the pipelock egress proxy. Keeping
+// it distinct from the agent users is what lets the nftables UID firewall allow
+// the proxy to egress while rejecting every agent UID. Idempotent.
+func EnsureSystemUser(username string) error {
+	if _, err := sys.Run("id", username); err == nil {
+		fmt.Printf("  system user %s already exists\n", username)
+		return nil
+	}
+	fmt.Printf("  creating system user %s\n", username)
+	out, err := sys.Run("useradd",
+		"--system",
+		"--no-create-home",
+		"--shell", "/usr/sbin/nologin",
+		"--comment", "clem egress proxy",
+		username,
+	)
+	if err != nil {
+		return fmt.Errorf("useradd --system %s: %w\n%s", username, err, out)
+	}
+	return nil
+}
+
+// PipelockVersion is the pinned pipelock release clem installs. Bump
+// deliberately; the binary is a security boundary (the egress firewall/DLP).
+const PipelockVersion = "v2.5.0"
+
+// InstallPipelock installs the pinned pipelock release to /usr/local/bin,
+// verifying the download against the release's checksums.txt. Idempotent:
+// skips when the pinned version is already present. We do NOT use the
+// `curl | sh` installer or `go install` (the latter needs Go 1.25+ and yields
+// a community-only binary) for a security-critical component.
+//
+// SUPPLY-CHAIN SCOPE: this verifies INTEGRITY (the tarball matches the
+// checksums.txt shipped in the same release) but not AUTHENTICITY against an
+// out-of-band trust root — an attacker who can replace the release asset can
+// replace checksums.txt too (TOFU). Hardening to a clem-pinned digest or a
+// cosign signature is a tracked follow-up.
+//
+// Asset naming follows the goreleaser default the project ships:
+// pipelock_<version-no-v>_linux_<arch>.tar.gz. Bump PipelockVersion to upgrade.
+func InstallPipelock() error {
+	// Accept either `pipelock --version` (flag) or `pipelock version`
+	// (subcommand) so the idempotency check doesn't force a re-download.
+	verCheck := "/usr/local/bin/pipelock --version 2>/dev/null || /usr/local/bin/pipelock version 2>/dev/null"
+	if out, err := sys.Run("bash", "-c", verCheck); err == nil &&
+		strings.Contains(string(out), strings.TrimPrefix(PipelockVersion, "v")) {
+		fmt.Printf("  pipelock %s already installed\n", PipelockVersion)
+		return nil
+	}
+
+	var arch string
+	switch runtime.GOARCH {
+	case "amd64":
+		arch = "amd64"
+	case "arm64":
+		arch = "arm64"
+	default:
+		return fmt.Errorf("unsupported arch %q for pipelock install", runtime.GOARCH)
+	}
+
+	ver := PipelockVersion
+	verNoV := strings.TrimPrefix(ver, "v")
+	// Download tarball + checksums, verify sha256, extract the binary. set -e so
+	// any failed step (download, checksum mismatch, extract) aborts non-zero.
+	// The explicit empty-line guard prevents `sha256sum -c` from succeeding on
+	// empty stdin when the asset name doesn't match a checksums.txt line.
+	script := fmt.Sprintf(`set -euo pipefail
+VER=%q; VNV=%q; ARCH=%q
+TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT; cd "$TMP"
+BASE="https://github.com/luckyPipewrench/pipelock/releases/download/${VER}"
+ASSET="pipelock_${VNV}_linux_${ARCH}.tar.gz"
+curl -fsSL -o "$ASSET" "${BASE}/${ASSET}"
+curl -fsSL -o checksums.txt "${BASE}/checksums.txt"
+LINE=$(grep " ${ASSET}\$" checksums.txt || true)
+[ -n "$LINE" ] || { echo "no checksum line for ${ASSET} in checksums.txt" >&2; exit 1; }
+printf '%%s\n' "$LINE" | sha256sum -c -
+tar -xzf "$ASSET" pipelock
+install -m 0755 pipelock /usr/local/bin/pipelock`, ver, verNoV, arch)
+
+	fmt.Printf("  installing pipelock %s (%s)\n", ver, arch)
+	if out, err := sys.Run("bash", "-c", script); err != nil {
+		return fmt.Errorf("installing pipelock %s: %w\n%s", ver, err, out)
+	}
+	return nil
+}
+
+// AgentVaultVersion is the pinned agent-vault release clem installs.
+const AgentVaultVersion = "v0.22.0"
+
+// InstallAgentVault installs the pinned agent-vault release to /usr/local/bin,
+// verifying against the release checksums.txt (integrity; same TOFU caveat as
+// InstallPipelock — pin a digest/signature before production). Idempotent.
+func InstallAgentVault() error {
+	verCheck := "/usr/local/bin/agent-vault --version 2>/dev/null || /usr/local/bin/agent-vault version 2>/dev/null"
+	if out, err := sys.Run("bash", "-c", verCheck); err == nil &&
+		strings.Contains(string(out), strings.TrimPrefix(AgentVaultVersion, "v")) {
+		fmt.Printf("  agent-vault %s already installed\n", AgentVaultVersion)
+		return nil
+	}
+	var arch string
+	switch runtime.GOARCH {
+	case "amd64":
+		arch = "amd64"
+	case "arm64":
+		arch = "arm64"
+	default:
+		return fmt.Errorf("unsupported arch %q for agent-vault install", runtime.GOARCH)
+	}
+	ver := AgentVaultVersion
+	verNoV := strings.TrimPrefix(ver, "v")
+	script := fmt.Sprintf(`set -euo pipefail
+VER=%q; VNV=%q; ARCH=%q
+TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT; cd "$TMP"
+BASE="https://github.com/Infisical/agent-vault/releases/download/${VER}"
+ASSET="agent-vault_${VNV}_linux_${ARCH}.tar.gz"
+curl -fsSL -o "$ASSET" "${BASE}/${ASSET}"
+curl -fsSL -o checksums.txt "${BASE}/checksums.txt"
+LINE=$(grep " ${ASSET}\$" checksums.txt || true)
+[ -n "$LINE" ] || { echo "no checksum line for ${ASSET} in checksums.txt" >&2; exit 1; }
+printf '%%s\n' "$LINE" | sha256sum -c -
+tar -xzf "$ASSET" agent-vault
+install -m 0755 agent-vault /usr/local/bin/agent-vault`, ver, verNoV, arch)
+
+	fmt.Printf("  installing agent-vault %s (%s)\n", ver, arch)
+	if out, err := sys.Run("bash", "-c", script); err != nil {
+		return fmt.Errorf("installing agent-vault %s: %w\n%s", ver, err, out)
+	}
+	return nil
+}
+
+// BrokeredEnv builds the .env contents for an agent-vault-brokered agent: each
+// brokered secret becomes a placeholder (the real value lives only in
+// agent-vault and is injected on egress), non-brokered secrets keep their real
+// value, and the agent-vault connection + CA-trust env is added. The agent
+// holds only a scoped, inject-only token — not the upstream credentials.
+//
+// HTTPS_PROXY points at agent-vault (overriding any Phase-1 pipelock export,
+// since .env is sourced after that export). vaultName selects the proxy's
+// active vault context (the agent's first vault).
+//
+// INJECTION: emitting the placeholder is necessary but not sufficient —
+// agent-vault must also be told to swap it. That mapping is an agent-vault
+// "service" rule (host-matched, auth.type). clem generates those rules at
+// provision from vault.services (see config.Service / vault.ApplyServices), so a
+// brokered request reaches upstream with the real credential while .env holds
+// only the placeholder. A brokered secret with no matching service is flagged at
+// config-load and would egress as a placeholder.
+func BrokeredEnv(av config.VaultBackend, ac config.AgentConfig, token, vaultName string, flat map[string]string) map[string]string {
+	// Match the agent-vault-side vault name (sops names may contain '_'/uppercase
+	// which agent-vault rejects; see config.AgentVaultName).
+	vaultName = config.AgentVaultName(vaultName)
+	env := make(map[string]string, len(flat)+12)
+	for k, v := range flat {
+		if ac.IsBrokered(k) {
+			env[k] = "__" + strings.ToLower(k) + "__"
+		} else {
+			env[k] = v
+		}
+	}
+	ca := av.CACertPathOrDefault()
+	// url.UserPassword percent-encodes token/vault so reserved chars (@ : / #)
+	// in a minted token can't corrupt the proxy URL.
+	proxyURL := (&url.URL{
+		Scheme: "https",
+		User:   url.UserPassword(token, vaultName),
+		Host:   av.ProxyHostOrDefault(),
+	}).String()
+	// SECURITY NOTE: a brokered agent has egress containment disabled (the two are
+	// mutually exclusive — see config validation), so it can reach the agent-vault
+	// management API at AGENT_VAULT_ADDR directly. The inject-only guarantee
+	// therefore rests entirely on the minted token being instance-role no-access +
+	// vault-role proxy ONLY (enforced in vault.EnsureAgentIdentity): that token
+	// cannot read credentials or mutate vaults/services. Do not widen the token's
+	// role, and do not expose role config to operators. Hardening follow-up:
+	// firewall the management port off the agent UID even when brokering.
+	env["AGENT_VAULT_ADDR"] = av.AddrOrDefault()
+	env["AGENT_VAULT_TOKEN"] = token
+	env["AGENT_VAULT_VAULT"] = vaultName
+	env["HTTPS_PROXY"] = proxyURL
+	env["HTTP_PROXY"] = proxyURL
+	env["NO_PROXY"] = "127.0.0.1,localhost,::1"
+	// claude-code (Node) ignores the system trust store; the others honor their
+	// own bundle vars. All point at agent-vault's CA so intercepted TLS verifies.
+	env["NODE_EXTRA_CA_CERTS"] = ca
+	env["SSL_CERT_FILE"] = ca
+	env["REQUESTS_CA_BUNDLE"] = ca
+	env["CURL_CA_BUNDLE"] = ca
+	env["GIT_SSL_CAINFO"] = ca
+	return env
 }
 
 // WriteEnvFile writes decrypted secrets to <homeDir>/.env with mode 0600.

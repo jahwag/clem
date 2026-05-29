@@ -105,6 +105,113 @@ func TestCavemanLevel_InvalidStringRejectsAtLoad(t *testing.T) {
 	}
 }
 
+// vaultServicesYAML builds a config with an agent-vault backend, the given
+// services block, and one agent granted the "gw" vault.
+func vaultServicesYAML(servicesBlock string) string {
+	return `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+operator:
+  discord_ids: ["277434478803156993"]
+vault:
+  backend: agent-vault
+` + servicesBlock + `
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+    vaults: [gw]
+`
+}
+
+func TestLoad_VaultServices_ValidBearer(t *testing.T) {
+	path := writeYAML(t, vaultServicesYAML(`  services:
+    - name: gateway
+      host: openrouter.ai
+      auth_type: bearer
+      token_key: OR_KEY`))
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("valid bearer service should load: %v", err)
+	}
+	if len(cfg.Vault.Services) != 1 || cfg.Vault.Services[0].TokenKey != "OR_KEY" {
+		t.Errorf("service not parsed: %+v", cfg.Vault.Services)
+	}
+}
+
+func TestLoad_VaultServices_InvalidAuthType(t *testing.T) {
+	path := writeYAML(t, vaultServicesYAML(`  services:
+    - name: gateway
+      host: openrouter.ai
+      auth_type: wat
+      token_key: OR_KEY`))
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for invalid auth_type")
+	}
+}
+
+func TestLoad_VaultServices_BearerMissingTokenKey(t *testing.T) {
+	path := writeYAML(t, vaultServicesYAML(`  services:
+    - name: gateway
+      host: openrouter.ai
+      auth_type: bearer`))
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for bearer without token_key")
+	}
+}
+
+func TestLoad_VaultServices_BasicMissingPassword(t *testing.T) {
+	path := writeYAML(t, vaultServicesYAML(`  services:
+    - name: github
+      host: github.com
+      auth_type: basic
+      username_key: U`))
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for basic without password_key")
+	}
+}
+
+func TestLoad_VaultServices_BadNameSlug(t *testing.T) {
+	path := writeYAML(t, vaultServicesYAML(`  services:
+    - name: "Bad Name"
+      host: openrouter.ai
+      auth_type: bearer
+      token_key: OR_KEY`))
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for invalid service name slug")
+	}
+}
+
+func TestLoad_VaultServices_RequiresAgentVaultBackend(t *testing.T) {
+	// Same services but backend left at default (env).
+	y := `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+operator:
+  discord_ids: ["277434478803156993"]
+vault:
+  services:
+    - name: gateway
+      host: openrouter.ai
+      auth_type: bearer
+      token_key: OR_KEY
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+    vaults: [gw]
+`
+	if _, err := Load(writeYAML(t, y)); err == nil {
+		t.Fatal("expected error: vault.services without agent-vault backend")
+	}
+}
+
 func TestLoad_PrimaryMilestoneParsed(t *testing.T) {
 	path := writeYAML(t, `
 project: myteam
@@ -825,3 +932,342 @@ agents:
 	}
 }
 
+
+func TestLoad_EgressParsed(t *testing.T) {
+	path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+egress:
+  enabled: true
+  posture: strict
+  proxy_port: 9000
+  proxy_user: clem-proxy
+  domains:
+    - "*.anthropic.com"
+    - github.com
+  allow_localhost_ports: [11434]
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Egress.Enabled {
+		t.Error("egress.enabled not parsed")
+	}
+	if cfg.Egress.Posture != "strict" {
+		t.Errorf("posture=%q, want strict", cfg.Egress.Posture)
+	}
+	if cfg.Egress.ProxyPortOrDefault() != 9000 {
+		t.Errorf("proxy_port=%d, want 9000", cfg.Egress.ProxyPortOrDefault())
+	}
+	if len(cfg.Egress.Domains) != 2 {
+		t.Errorf("domains=%v, want 2 entries", cfg.Egress.Domains)
+	}
+	if !cfg.EgressEnabledFor("lead") {
+		t.Error("EgressEnabledFor(lead) = false, want true")
+	}
+}
+
+func TestEgress_Defaults(t *testing.T) {
+	var e EgressConfig
+	if e.PostureOrDefault() != "balanced" {
+		t.Errorf("PostureOrDefault=%q, want balanced", e.PostureOrDefault())
+	}
+	if e.ProxyPortOrDefault() != 8888 {
+		t.Errorf("ProxyPortOrDefault=%d, want 8888", e.ProxyPortOrDefault())
+	}
+	if e.ProxyUserOrDefault() != "clem-proxy" {
+		t.Errorf("ProxyUserOrDefault=%q, want clem-proxy", e.ProxyUserOrDefault())
+	}
+}
+
+func TestEgressEnabledFor_PerAgentOverride(t *testing.T) {
+	path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+egress:
+  enabled: true
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+  loner:
+    name: "Loner"
+    model: "claude-sonnet-4-6"
+    egress: false
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.EgressEnabledFor("lead") {
+		t.Error("lead should inherit enabled=true")
+	}
+	if cfg.EgressEnabledFor("loner") {
+		t.Error("loner overrode egress: false, should be disabled")
+	}
+}
+
+func TestEgressEnabledFor_DeprecatedFlagOptsIn(t *testing.T) {
+	path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+    egress_restriction_experimental: true
+  worker:
+    name: "Worker"
+    model: "claude-sonnet-4-6"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.EgressEnabledFor("lead") {
+		t.Error("deprecated egress_restriction_experimental should opt lead in")
+	}
+	if cfg.EgressEnabledFor("worker") {
+		t.Error("worker without flag and no top-level egress should be disabled")
+	}
+}
+
+func TestLoad_EgressInvalidPostureRejects(t *testing.T) {
+	path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+egress:
+  enabled: true
+  posture: paranoid
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+`)
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for invalid posture, got nil")
+	}
+}
+
+func TestLoad_EgressProxyPortCollidesWithWebTerminal(t *testing.T) {
+	path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+egress:
+  enabled: true
+  proxy_port: 7681
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+    web_terminal_port: 7681
+`)
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for proxy_port colliding with web_terminal_port, got nil")
+	}
+}
+
+func TestLoad_EgressProxyPortOutOfRange(t *testing.T) {
+	path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+egress:
+  enabled: true
+  proxy_port: 80
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+`)
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for proxy_port < 1024, got nil")
+	}
+}
+
+func TestLoad_EgressAllowLocalhostPortOutOfRange(t *testing.T) {
+	path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+egress:
+  enabled: true
+  allow_localhost_ports: [0]
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+`)
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for allow_localhost_ports out of range, got nil")
+	}
+}
+
+func TestLoad_VaultBackendParsed(t *testing.T) {
+	path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+vault:
+  backend: agent-vault
+  system_user: clem-vault
+  addr: http://127.0.0.1:14321
+  proxy_host: 127.0.0.1:14322
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+    vaults: [anthropic, slack]
+    vault_broker: true
+    brokered_secrets: [ANTHROPIC_API_KEY, SLACK_MCP_XOXP_TOKEN]
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Vault.IsAgentVault() {
+		t.Error("backend not parsed as agent-vault")
+	}
+	if cfg.Vault.ProxyHostOrDefault() != "127.0.0.1:14322" {
+		t.Errorf("proxy_host=%q", cfg.Vault.ProxyHostOrDefault())
+	}
+	lead := cfg.Agents["lead"]
+	if !lead.IsBrokered("ANTHROPIC_API_KEY") {
+		t.Error("ANTHROPIC_API_KEY should be brokered")
+	}
+	if lead.IsBrokered("DISCORD_TOKEN") {
+		t.Error("DISCORD_TOKEN not listed → not brokered")
+	}
+}
+
+func TestVaultBackend_Defaults(t *testing.T) {
+	var v VaultBackend
+	if v.IsAgentVault() {
+		t.Error("empty backend should not be agent-vault")
+	}
+	if v.SystemUserOrDefault() != "clem-vault" {
+		t.Errorf("system_user default=%q", v.SystemUserOrDefault())
+	}
+	if v.AddrOrDefault() != "http://127.0.0.1:14321" {
+		t.Errorf("addr default=%q", v.AddrOrDefault())
+	}
+	if v.CACertPathOrDefault() != "/etc/clem/agent-vault-ca.pem" {
+		t.Errorf("ca default=%q", v.CACertPathOrDefault())
+	}
+}
+
+func TestIsBrokered_FalseWhenBrokerDisabled(t *testing.T) {
+	ac := AgentConfig{VaultBroker: false, BrokeredSecrets: []string{"ANTHROPIC_API_KEY"}}
+	if ac.IsBrokered("ANTHROPIC_API_KEY") {
+		t.Error("IsBrokered must be false when vault_broker is off")
+	}
+}
+
+func TestLoad_VaultBrokerRequiresAgentVaultBackend(t *testing.T) {
+	path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+    vault_broker: true
+    brokered_secrets: [ANTHROPIC_API_KEY]
+`)
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error: vault_broker without agent-vault backend")
+	}
+}
+
+func TestLoad_BrokeringDiscordTokenRejected(t *testing.T) {
+	path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+vault:
+  backend: agent-vault
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+    vault_broker: true
+    brokered_secrets: [DISCORD_TOKEN]
+`)
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error: DISCORD_TOKEN is unbrokerable")
+	}
+}
+
+func TestLoad_UnknownVaultBackendRejected(t *testing.T) {
+	path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+vault:
+  backend: hashicorp
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+`)
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for unknown vault backend")
+	}
+}
+
+func TestLoad_VaultBrokerAndEgressMutuallyExclusive(t *testing.T) {
+	path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+egress:
+  enabled: true
+vault:
+  backend: agent-vault
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+    vaults: [anthropic]
+    vault_broker: true
+    brokered_secrets: [ANTHROPIC_API_KEY]
+`)
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error: vault_broker + egress containment on same agent")
+	}
+}

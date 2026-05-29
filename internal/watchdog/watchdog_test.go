@@ -134,3 +134,58 @@ func TestGenerateScript_OOMCheckPresent(t *testing.T) {
 		t.Errorf("marker write must appear after journalctl scan (markerWrite=%d journalctl=%d)", markerWriteIdx, journalIdx)
 	}
 }
+
+func TestGenerateScript_EgressCheckPresentWhenEnabled(t *testing.T) {
+	cfg := baseCfg()
+	cfg.Egress.Enabled = true
+	s := GenerateScript(cfg)
+	for _, want := range []string{
+		"check_egress()",
+		"/var/log/clem/pipelock-test-audit.jsonl",
+		"blocked/DLP event(s)",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("expected %q in watchdog script:\n%s", want, s)
+		}
+	}
+	// check_egress must be defined before it is invoked.
+	defIdx := strings.Index(s, "check_egress()")
+	callIdx := strings.LastIndex(s, "check_egress")
+	if defIdx == -1 || callIdx <= defIdx {
+		t.Errorf("check_egress must be defined then invoked (def=%d call=%d)", defIdx, callIdx)
+	}
+}
+
+func TestGenerateScript_NoEgressCheckWhenDisabled(t *testing.T) {
+	s := GenerateScript(baseCfg())
+	if strings.Contains(s, "check_egress") {
+		t.Errorf("expected no check_egress when egress disabled:\n%s", s)
+	}
+}
+
+func TestGenerateScript_AgentVaultHealthWhenBackendActive(t *testing.T) {
+	cfg := baseCfg()
+	cfg.Vault.Backend = "agent-vault"
+	s := GenerateScript(cfg)
+	for _, want := range []string{
+		"check_agent_vault()",
+		"clem-agent-vault-test.service",
+		"http://127.0.0.1:14321/health",
+		"agent-vault DOWN",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("expected %q in watchdog script:\n%s", want, s)
+		}
+	}
+	defIdx := strings.Index(s, "check_agent_vault()")
+	callIdx := strings.LastIndex(s, "check_agent_vault")
+	if defIdx == -1 || callIdx <= defIdx {
+		t.Errorf("check_agent_vault must be defined then invoked (def=%d call=%d)", defIdx, callIdx)
+	}
+}
+
+func TestGenerateScript_NoAgentVaultCheckWhenEnvBackend(t *testing.T) {
+	if strings.Contains(GenerateScript(baseCfg()), "check_agent_vault") {
+		t.Error("no agent-vault check expected under default env backend")
+	}
+}

@@ -213,17 +213,20 @@ func TestGenerate_McpBinResolverPrefersPipx(t *testing.T) {
 	if !strings.Contains(out, "'/usr/local/bin/' + name") {
 		t.Error("_mcp_bin must fall back to /usr/local/bin/<name>")
 	}
-	for _, mcp := range []string{"mcp-discord", "prefect-mcp", "social-mcp", "slack-mcp-server"} {
+	// prefect-mcp was removed (SSH-based MCPs are dropped under agent-vault).
+	for _, mcp := range []string{"mcp-discord", "social-mcp", "slack-mcp-server"} {
 		want := "_mcp_bin('" + mcp + "')"
 		if !strings.Contains(out, want) {
 			t.Errorf("runner must resolve %s via _mcp_bin, expected substring %q", mcp, want)
 		}
 	}
+	if strings.Contains(out, "prefect-mcp") {
+		t.Error("prefect-mcp should have been removed from the runner template")
+	}
 	// Hardcoded /usr/local/bin/<mcp> calls outside _mcp_bin would defeat
 	// the fallback. Pin them out so a future copy-paste cannot regress.
 	for _, banned := range []string{
 		"'command': '/usr/local/bin/mcp-discord'",
-		"'command': '/usr/local/bin/prefect-mcp'",
 		"'command': '/usr/local/bin/social-mcp'",
 	} {
 		if strings.Contains(out, banned) {
@@ -232,7 +235,38 @@ func TestGenerate_McpBinResolverPrefersPipx(t *testing.T) {
 	}
 }
 
-func TestGenerateService_EgressRestrictionEnabled(t *testing.T) {
+func TestGenerateService_EgressEnabledLoopbackOnly(t *testing.T) {
+	mockHome(t, "/home/test-lead")
+	cfg := baseCfg("lead", config.AgentConfig{
+		Name:      "Lead",
+		Model:     "claude-opus-4-7",
+		Iteration: "1m",
+		Prompt:    "do the thing",
+	})
+	cfg.Egress.Enabled = true
+
+	out, err := GenerateService(cfg, "lead")
+	if err != nil {
+		t.Fatalf("GenerateService: %v", err)
+	}
+	// Loopback-only block + pipelock/nftables unit ordering, no hardcoded CIDRs.
+	for _, want := range []string{
+		"IPAddressDeny=any",
+		"IPAddressAllow=127.0.0.0/8",
+		"After=clem-pipelock-test.service clem-nftables-test.service",
+		"Wants=clem-pipelock-test.service",
+		"Requires=clem-nftables-test.service", // firewall is fail-closed
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in service unit, got:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "104.16.0.0/13") || strings.Contains(out, "140.82.112.0/20") {
+		t.Errorf("hardcoded CIDR allowlist should be gone, got:\n%s", out)
+	}
+}
+
+func TestGenerateService_DeprecatedFlagStillEnables(t *testing.T) {
 	mockHome(t, "/home/test-lead")
 	cfg := baseCfg("lead", config.AgentConfig{
 		Name:                          "Lead",
@@ -246,14 +280,12 @@ func TestGenerateService_EgressRestrictionEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateService: %v", err)
 	}
-	for _, want := range []string{"IPAddressDeny=any", "IPAddressAllow=localhost", "IPAddressAllow=140.82.112.0/20"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("expected %q in service unit, got:\n%s", want, out)
-		}
+	if !strings.Contains(out, "IPAddressDeny=any") {
+		t.Errorf("deprecated egress_restriction_experimental should still enable containment, got:\n%s", out)
 	}
 }
 
-func TestGenerateService_EgressRestrictionDisabled(t *testing.T) {
+func TestGenerateService_EgressDisabled(t *testing.T) {
 	mockHome(t, "/home/test-lead")
 	cfg := baseCfg("lead", config.AgentConfig{
 		Name:      "Lead",
@@ -267,7 +299,42 @@ func TestGenerateService_EgressRestrictionDisabled(t *testing.T) {
 		t.Fatalf("GenerateService: %v", err)
 	}
 	if strings.Contains(out, "IPAddressDeny") {
-		t.Fatalf("expected no IPAddressDeny when egress_restriction unset, got:\n%s", out)
+		t.Fatalf("expected no IPAddressDeny when egress unset, got:\n%s", out)
+	}
+	if strings.Contains(out, "clem-pipelock") {
+		t.Fatalf("expected no pipelock unit deps when egress unset, got:\n%s", out)
+	}
+}
+
+func TestGenerate_ProxyExportPresentWhenEgressEnabled(t *testing.T) {
+	cfg := baseCfg("worker", config.AgentConfig{
+		Name:      "Worker",
+		Model:     "claude-opus-4-7",
+		Iteration: "1m",
+		Prompt:    "do the thing",
+	})
+	cfg.Egress = config.EgressConfig{Enabled: true, ProxyPort: 9001}
+
+	out := Generate(cfg, "worker")
+	if !strings.Contains(out, "export HTTPS_PROXY=http://127.0.0.1:9001") {
+		t.Errorf("expected HTTPS_PROXY export at configured port, got:\n%s", out)
+	}
+	if !strings.Contains(out, "export NO_PROXY=127.0.0.1,localhost,::1") {
+		t.Errorf("expected NO_PROXY export, got:\n%s", out)
+	}
+}
+
+func TestGenerate_NoProxyExportWhenEgressDisabled(t *testing.T) {
+	cfg := baseCfg("worker", config.AgentConfig{
+		Name:      "Worker",
+		Model:     "claude-opus-4-7",
+		Iteration: "1m",
+		Prompt:    "do the thing",
+	})
+
+	out := Generate(cfg, "worker")
+	if strings.Contains(out, "HTTPS_PROXY") {
+		t.Errorf("expected no HTTPS_PROXY export when egress disabled, got:\n%s", out)
 	}
 }
 

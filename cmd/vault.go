@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/jahwag/clem/internal/vault"
@@ -65,7 +66,49 @@ var vaultDeleteCmd = &cobra.Command{
 	},
 }
 
+var vaultMigrateAddr string
+
+var vaultMigrateCmd = &cobra.Command{
+	Use:   "migrate",
+	Short: "Seed all sops vaults into a running agent-vault instance",
+	Long: "Decrypts secrets.sops.yaml and pushes every vault into agent-vault,\n" +
+		"then applies the injection (service) rules from clem.yaml.\n" +
+		"sops remains the source of truth; agent-vault is derived, reproducible state.\n" +
+		"Authenticates as the instance owner using AGENT_VAULT_OWNER_EMAIL/PASSWORD\n" +
+		"from the sops clem-vault (logs in, or registers the owner on a fresh instance).\n" +
+		"Address precedence: --addr, then AGENT_VAULT_ADDR, then http://127.0.0.1:14321.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		addr := vaultMigrateAddr
+		if addr == "" {
+			addr = os.Getenv("AGENT_VAULT_ADDR")
+		}
+		if addr == "" {
+			addr = "http://127.0.0.1:14321"
+		}
+		allVaults, err := vault.AllVaults()
+		if err != nil {
+			return fmt.Errorf("reading sops: %w", err)
+		}
+		clemVault := allVaults["clem-vault"]
+		email := clemVault["AGENT_VAULT_OWNER_EMAIL"]
+		password := clemVault["AGENT_VAULT_OWNER_PASSWORD"]
+		if email == "" || password == "" {
+			return fmt.Errorf("set the owner account: clem vault set clem-vault AGENT_VAULT_OWNER_EMAIL=... AGENT_VAULT_OWNER_PASSWORD=...")
+		}
+		if err := vault.Health(addr); err != nil {
+			return fmt.Errorf("agent-vault not reachable at %s: %w", addr, err)
+		}
+		if err := vault.EnsureOwner(addr, email, password); err != nil {
+			return fmt.Errorf("owner auth: %w", err)
+		}
+		// Mirror every sops vault into agent-vault. Per-agent brokering vaults +
+		// service rules are set up by `clem provision`, not here.
+		return vault.Migrate(addr)
+	},
+}
+
 func init() {
-	vaultCmd.AddCommand(vaultInitCmd, vaultSetCmd, vaultGetCmd, vaultListCmd, vaultDeleteCmd)
+	vaultMigrateCmd.Flags().StringVar(&vaultMigrateAddr, "addr", "", "agent-vault management API address")
+	vaultCmd.AddCommand(vaultInitCmd, vaultSetCmd, vaultGetCmd, vaultListCmd, vaultDeleteCmd, vaultMigrateCmd)
 	rootCmd.AddCommand(vaultCmd)
 }
