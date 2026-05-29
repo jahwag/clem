@@ -113,6 +113,7 @@ An autonomous agent is an untrusted workload: prompt injection, a poisoned depen
 Honest about the parts that are borrowed: the egress proxy and credential broker are battle-tested OSS primitives ([pipelock](https://github.com/luckyPipewrench/pipelock), [Infisical agent-vault](https://github.com/Infisical/agent-vault)). clem's contribution is the **OS-level composition** — per-agent UID identity + kernel firewall + secret supply, wired so the agent literally cannot route around either.
 
 → Full threat model, guarantees, and known limitations: **[docs/threat-model.md](docs/threat-model.md)**.
+→ Worked reference config: **[samples/secure-fleet/](samples/secure-fleet/)**.
 
 Both layers are **opt-in and default-off**; existing fleets are unaffected until you enable `egress:` / `vault.backend: agent-vault`.
 
