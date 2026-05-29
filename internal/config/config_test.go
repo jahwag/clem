@@ -1271,3 +1271,93 @@ agents:
 		t.Fatal("expected error: vault_broker + egress containment on same agent")
 	}
 }
+
+// --- mcp_sidecars (privileged sidecar) schema/validation ---
+
+func sidecarYAML(block string) string {
+	return `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+operator:
+  discord_ids: ["277434478803156993"]
+` + block + `
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+    sidecars: [es-ro]
+`
+}
+
+func TestLoad_Sidecar_Valid(t *testing.T) {
+	cfg, err := Load(writeYAML(t, sidecarYAML(`mcp_sidecars:
+  servers:
+    - name: es-ro
+      identity: shared
+      command: /usr/local/bin/clem-mcp-http
+      secrets: [ES_USER, ES_PASSWORD]
+      secrets_vault: clem-vault`)))
+	if err != nil {
+		t.Fatalf("valid sidecar should load: %v", err)
+	}
+	s := cfg.MCPSidecars.Servers[0]
+	if cfg.MCPSidecars.SystemUserOrDefault() != "clem-mcp" || cfg.MCPSidecars.BasePortOrDefault() != 14500 {
+		t.Errorf("defaults wrong: %q %d", cfg.MCPSidecars.SystemUserOrDefault(), cfg.MCPSidecars.BasePortOrDefault())
+	}
+	if s.IdentityKind() != "shared" || s.TransportKind() != "http" || s.ToolName() != "es-ro" {
+		t.Errorf("normalizers wrong: %q %q %q", s.IdentityKind(), s.TransportKind(), s.ToolName())
+	}
+}
+
+func TestLoad_Sidecar_UndefinedSubscriptionRejected(t *testing.T) {
+	// agent subscribes to es-ro but no servers defined
+	if _, err := Load(writeYAML(t, sidecarYAML(``))); err == nil {
+		t.Fatal("expected error: agent subscribes to undefined sidecar")
+	}
+}
+
+func TestLoad_Sidecar_RequiresCommandAndSecret(t *testing.T) {
+	if _, err := Load(writeYAML(t, sidecarYAML(`mcp_sidecars:
+  servers:
+    - name: es-ro
+      command: /bin/x`))); err == nil {
+		t.Fatal("expected error: sidecar with no secrets")
+	}
+	if _, err := Load(writeYAML(t, sidecarYAML(`mcp_sidecars:
+  servers:
+    - name: es-ro
+      secrets: [ES_USER]`))); err == nil {
+		t.Fatal("expected error: sidecar with no command")
+	}
+}
+
+func TestLoad_Sidecar_BadIdentityRejected(t *testing.T) {
+	if _, err := Load(writeYAML(t, sidecarYAML(`mcp_sidecars:
+  servers:
+    - name: es-ro
+      identity: wat
+      command: /bin/x
+      secrets: [ES_USER]`))); err == nil {
+		t.Fatal("expected error: bad identity")
+	}
+}
+
+func TestLoad_Sidecar_PerAgentAndToolOverride(t *testing.T) {
+	cfg, err := Load(writeYAML(t, sidecarYAML(`mcp_sidecars:
+  servers:
+    - name: es-ro
+      identity: per-agent
+      command: /bin/x
+      secrets: [DISCORD_TOKEN]
+      tool: discord-bot`)))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	s := cfg.MCPSidecars.Servers[0]
+	if s.IdentityKind() != "per-agent" || s.ToolName() != "discord-bot" {
+		t.Errorf("got %q / %q", s.IdentityKind(), s.ToolName())
+	}
+}
