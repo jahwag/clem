@@ -1320,6 +1320,13 @@ func TestBrokeredEnv_PlaceholdersAndConnection(t *testing.T) {
 	if env["NODE_EXTRA_CA_CERTS"] != "/etc/clem/agent-vault-ca.pem" {
 		t.Errorf("NODE_EXTRA_CA_CERTS=%q", env["NODE_EXTRA_CA_CERTS"])
 	}
+	// git tunnels through the TLS proxy, so it must trust the agent-vault CA for
+	// the proxy connection too (http.proxySSLCAInfo) — else every git op fails.
+	if env["GIT_CONFIG_COUNT"] != "1" || env["GIT_CONFIG_KEY_0"] != "http.proxySSLCAInfo" ||
+		env["GIT_CONFIG_VALUE_0"] != "/etc/clem/agent-vault-ca.pem" {
+		t.Errorf("git proxy CA config missing/wrong: COUNT=%q KEY_0=%q VALUE_0=%q",
+			env["GIT_CONFIG_COUNT"], env["GIT_CONFIG_KEY_0"], env["GIT_CONFIG_VALUE_0"])
+	}
 }
 
 func TestInstallAgentVault_PinnedDownload(t *testing.T) {
