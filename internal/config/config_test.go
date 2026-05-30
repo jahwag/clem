@@ -1452,6 +1452,67 @@ func TestLoad_Sidecar_PortCollidesWithWebTerminal(t *testing.T) {
 	}
 }
 
+func TestSidecarListeners_SharedAndUnsubscribed(t *testing.T) {
+	cfg := &Config{
+		Project:     "myteam",
+		MCPSidecars: MCPSidecarsConfig{BasePort: 14500, Servers: []SidecarServer{
+			{Name: "es-ro", Identity: "shared", Command: "/bin/x", Secrets: []string{"K"}},
+			{Name: "unused", Identity: "shared", Command: "/bin/x", Secrets: []string{"K"}},
+		}},
+		Agents: map[string]AgentConfig{
+			"worker": {Name: "W", Sidecars: []string{"es-ro"}},
+			"lead":   {Name: "L", Sidecars: []string{"es-ro"}},
+		},
+	}
+	ls := cfg.SidecarListeners()
+	if len(ls) != 1 { // "unused" has no subscriber → no listener
+		t.Fatalf("want 1 listener, got %d", len(ls))
+	}
+	if ls[0].Port != 14500 || ls[0].AgentKey != "" {
+		t.Errorf("shared listener wrong: port=%d agentKey=%q", ls[0].Port, ls[0].AgentKey)
+	}
+	if len(ls[0].Subscribers) != 2 || ls[0].Subscribers[0] != "lead" || ls[0].Subscribers[1] != "worker" {
+		t.Errorf("subscribers not sorted/complete: %v", ls[0].Subscribers)
+	}
+}
+
+func TestSidecarListeners_PerAgentOnePortEach(t *testing.T) {
+	cfg := &Config{
+		Project:     "myteam",
+		MCPSidecars: MCPSidecarsConfig{BasePort: 14500, Servers: []SidecarServer{
+			{Name: "disc", Identity: "per-agent", Command: "/bin/x", Secrets: []string{"DISCORD_TOKEN"}},
+		}},
+		Agents: map[string]AgentConfig{
+			"worker": {Name: "W", Sidecars: []string{"disc"}},
+			"lead":   {Name: "L", Sidecars: []string{"disc"}},
+		},
+	}
+	ls := cfg.SidecarListeners()
+	if len(ls) != 2 {
+		t.Fatalf("want 2 per-agent listeners, got %d", len(ls))
+	}
+	// Sorted subscribers: lead@14500, worker@14501.
+	if ls[0].AgentKey != "lead" || ls[0].Port != 14500 {
+		t.Errorf("listener[0] = %q@%d", ls[0].AgentKey, ls[0].Port)
+	}
+	if ls[1].AgentKey != "worker" || ls[1].Port != 14501 {
+		t.Errorf("listener[1] = %q@%d", ls[1].AgentKey, ls[1].Port)
+	}
+}
+
+func TestSidecarServiceNames(t *testing.T) {
+	c := &Config{Project: "cdev"}
+	if got := c.SidecarServiceName("es-ro", ""); got != "clem-mcp-cdev-es-ro.service" {
+		t.Errorf("shared service name: %q", got)
+	}
+	if got := c.SidecarServiceName("disc", "lead"); got != "clem-mcp-cdev-disc-lead.service" {
+		t.Errorf("per-agent service name: %q", got)
+	}
+	if got := c.SidecarNftablesServiceName(); got != "clem-sidecar-nft-cdev.service" {
+		t.Errorf("sidecar nft service name: %q", got)
+	}
+}
+
 func TestSidecarPort_Deterministic(t *testing.T) {
 	m := MCPSidecarsConfig{BasePort: 14500}
 	if m.SidecarPort(0) != 14500 || m.SidecarPort(3) != 14503 {

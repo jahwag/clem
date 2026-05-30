@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -786,6 +787,84 @@ func (c *Config) AgentVaultServiceName() string {
 	return fmt.Sprintf("clem-agent-vault-%s.service", c.Project)
 }
 
+// SidecarServiceName returns the systemd service name for a sidecar listener.
+// For a per-agent sidecar there is one listener per subscriber, so the agent
+// key disambiguates; shared sidecars pass an empty agentKey.
+func (c *Config) SidecarServiceName(name, agentKey string) string {
+	if agentKey != "" {
+		return fmt.Sprintf("clem-mcp-%s-%s-%s.service", c.Project, name, agentKey)
+	}
+	return fmt.Sprintf("clem-mcp-%s-%s.service", c.Project, name)
+}
+
+// SidecarNftablesServiceName returns the systemd service name for the sidecar
+// loopback firewall (distinct from the egress firewall; sidecar isolation must
+// hold even on hosts with no egress containment).
+func (c *Config) SidecarNftablesServiceName() string {
+	return fmt.Sprintf("clem-sidecar-nft-%s.service", c.Project)
+}
+
+// SidecarListener is one concrete loopback listener clem provisions for a
+// privileged MCP sidecar. A shared sidecar yields one listener (Subscribers =
+// every subscribing agent, AgentKey = ""); a per-agent sidecar yields one
+// listener per subscriber (Subscribers = [that agent], AgentKey = that agent).
+type SidecarListener struct {
+	Server      SidecarServer
+	Port        int
+	Subscribers []string // sorted agent keys allowed to reach this listener
+	AgentKey    string   // subscriber key for per-agent identity; "" when shared
+}
+
+// SidecarListeners returns the deterministic listener layout for all subscribed
+// sidecars: the single source of truth for port allocation shared by config
+// validation, the systemd/nftables generators, provisioning, and the runner.
+// Servers are taken in config order; per-agent subscribers in sorted order;
+// ports allocated upward from base_port. Unsubscribed servers yield no listener.
+func (c *Config) SidecarListeners() []SidecarListener {
+	var out []SidecarListener
+	idx := 0
+	for _, s := range c.MCPSidecars.Servers {
+		subs := c.sidecarSubscribers(s.Name)
+		if len(subs) == 0 {
+			continue
+		}
+		if s.IdentityKind() == "per-agent" {
+			for _, ak := range subs {
+				out = append(out, SidecarListener{
+					Server:      s,
+					Port:        c.MCPSidecars.SidecarPort(idx),
+					Subscribers: []string{ak},
+					AgentKey:    ak,
+				})
+				idx++
+			}
+			continue
+		}
+		out = append(out, SidecarListener{
+			Server:      s,
+			Port:        c.MCPSidecars.SidecarPort(idx),
+			Subscribers: subs,
+		})
+		idx++
+	}
+	return out
+}
+
+// sidecarSubscribers returns the sorted agent keys subscribing to a sidecar.
+func (c *Config) sidecarSubscribers(name string) []string {
+	var subs []string
+	for ak, ac := range c.Agents {
+		for _, n := range ac.Sidecars {
+			if n == name {
+				subs = append(subs, ak)
+				break
+			}
+		}
+	}
+	sort.Strings(subs)
+	return subs
+}
+
 // IsBrokered reports whether a secret key is HTTP-brokered for this agent
 // (placeholder in .env, real value only inside agent-vault).
 func (ac AgentConfig) IsBrokered(key string) bool {
@@ -1017,28 +1096,14 @@ func (cfg *Config) validateMCPSidecars() error {
 			}
 		}
 	}
-	// Deterministic loopback-port allocation. A shared sidecar listens once; a
-	// per-agent sidecar listens once per subscribing agent. Allocated upward from
-	// base_port — check the range fits below 65535 and never collides with an
-	// agent's web_terminal_port (both bind loopback on the same host).
-	listeners := 0
-	for _, s := range cfg.MCPSidecars.Servers {
-		if s.IdentityKind() == "per-agent" {
-			for _, ac := range cfg.Agents {
-				for _, name := range ac.Sidecars {
-					if name == s.Name {
-						listeners++
-						break
-					}
-				}
-			}
-		} else if subscribedTo(cfg, s.Name) {
-			listeners++
-		}
-	}
+	// Deterministic loopback-port allocation (SidecarListeners is the single
+	// source of truth). A shared sidecar listens once; a per-agent sidecar once
+	// per subscribing agent. Check the range fits below 65535 and never collides
+	// with an agent's web_terminal_port (both bind loopback on the same host).
+	listeners := cfg.SidecarListeners()
 	base := cfg.MCPSidecars.BasePortOrDefault()
-	if listeners > 0 && base+listeners-1 > 65535 {
-		return fmt.Errorf("mcp_sidecars: %d listeners from base_port %d overflow past 65535", listeners, base)
+	if n := len(listeners); n > 0 && base+n-1 > 65535 {
+		return fmt.Errorf("mcp_sidecars: %d listeners from base_port %d overflow past 65535", n, base)
 	}
 	webPorts := map[int]string{}
 	for key, ac := range cfg.Agents {
@@ -1046,24 +1111,12 @@ func (cfg *Config) validateMCPSidecars() error {
 			webPorts[ac.WebTerminalPort] = key
 		}
 	}
-	for i := 0; i < listeners; i++ {
-		if key, clash := webPorts[base+i]; clash {
-			return fmt.Errorf("mcp_sidecars: sidecar port %d collides with agent %s web_terminal_port", base+i, key)
+	for _, l := range listeners {
+		if key, clash := webPorts[l.Port]; clash {
+			return fmt.Errorf("mcp_sidecars: sidecar %q port %d collides with agent %s web_terminal_port", l.Server.Name, l.Port, key)
 		}
 	}
 	return nil
-}
-
-// subscribedTo reports whether any agent subscribes to the named sidecar.
-func subscribedTo(cfg *Config, name string) bool {
-	for _, ac := range cfg.Agents {
-		for _, n := range ac.Sidecars {
-			if n == name {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // validateVaultServices checks the agent-vault injection rules. Services are

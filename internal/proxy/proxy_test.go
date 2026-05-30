@@ -228,6 +228,126 @@ func TestGenerateNftables_BrokeredAgentAllowsAgentVaultPort(t *testing.T) {
 	}
 }
 
+// sidecarCfg builds a project with one shared sidecar (es-ro) subscribed by
+// both agents and a custom base_port.
+func sidecarCfg() *config.Config {
+	return &config.Config{
+		Project: "myteam",
+		MCPSidecars: config.MCPSidecarsConfig{
+			BasePort: 14500,
+			Servers: []config.SidecarServer{{
+				Name:         "es-ro",
+				Identity:     "shared",
+				Command:      "/usr/local/bin/es-mcp",
+				Args:         []string{"--read-only"},
+				Secrets:      []string{"ES_USER", "ES_PASSWORD"},
+				SecretsVault: "infra",
+			}},
+		},
+		Agents: map[string]config.AgentConfig{
+			"lead":   {Name: "Lead", Sidecars: []string{"es-ro"}},
+			"worker": {Name: "Worker", Sidecars: []string{"es-ro"}},
+		},
+	}
+}
+
+func TestGenerateSidecarService(t *testing.T) {
+	cfg := sidecarCfg()
+	l := cfg.SidecarListeners()[0]
+	out := GenerateSidecarService(cfg, l)
+	for _, want := range []string{
+		"Description=clem MCP sidecar es-ro (myteam)",
+		"User=clem-mcp",
+		"Environment=HOME=/var/lib/clem-mcp",
+		"EnvironmentFile=/etc/clem/clem-mcp-myteam-es-ro.env",
+		"ExecStart=/opt/pipx/bin/mcp-proxy --host 127.0.0.1 --port 14500 --stateless --pass-environment -- /usr/local/bin/es-mcp --read-only",
+		"ReadWritePaths=/var/lib/clem-mcp",
+		"After=network-online.target clem-sidecar-nft-myteam.service",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("sidecar service missing %q\n---\n%s", want, out)
+		}
+	}
+	// The secret must never appear on the command line (argv is world-readable).
+	if strings.Contains(out, "ES_PASSWORD=") {
+		t.Errorf("secret leaked into the unit:\n%s", out)
+	}
+}
+
+func TestGenerateSidecarNftables(t *testing.T) {
+	stubUIDs(t, map[string]int{"myteam-lead": 1001, "myteam-worker": 1002})
+	cfg := sidecarCfg()
+	out, err := GenerateSidecarNftables(cfg)
+	if err != nil {
+		t.Fatalf("GenerateSidecarNftables: %v", err)
+	}
+	for _, want := range []string{
+		"table inet clem_sidecar_myteam {",
+		"delete table inet clem_sidecar_myteam",
+		"type filter hook output priority 0; policy accept;",
+		// Only the two subscriber UIDs may reach port 14500; everyone else dropped.
+		"ip daddr 127.0.0.1 tcp dport 14500 meta skuid != { 1001, 1002 } drop",
+		"ip6 daddr ::1 tcp dport 14500 meta skuid != { 1001, 1002 } drop",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("sidecar nftables missing %q\n---\n%s", want, out)
+		}
+	}
+}
+
+func TestGenerateSidecarNftables_PerAgentDistinctPortsAndUIDs(t *testing.T) {
+	stubUIDs(t, map[string]int{"myteam-lead": 1001, "myteam-worker": 1002})
+	cfg := sidecarCfg()
+	cfg.MCPSidecars.Servers[0].Identity = "per-agent"
+	out, err := GenerateSidecarNftables(cfg)
+	if err != nil {
+		t.Fatalf("GenerateSidecarNftables: %v", err)
+	}
+	// per-agent → one listener per subscriber on successive ports, each locked to
+	// that single subscriber's UID. Sorted subscribers: lead(14500), worker(14501).
+	for _, want := range []string{
+		"tcp dport 14500 meta skuid != { 1001 } drop",
+		"tcp dport 14501 meta skuid != { 1002 } drop",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("per-agent sidecar nftables missing %q\n---\n%s", want, out)
+		}
+	}
+}
+
+func TestGenerateSidecarNftablesService(t *testing.T) {
+	cfg := sidecarCfg()
+	out := GenerateSidecarNftablesService(cfg)
+	for _, want := range []string{
+		"Type=oneshot",
+		"ExecStart=/usr/sbin/nft -f /etc/clem/clem-sidecar-myteam.nft",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("sidecar nft service missing %q\n---\n%s", want, out)
+		}
+	}
+}
+
+// A contained agent that subscribes to a sidecar must be allowed (by the egress
+// firewall) to reach the sidecar's loopback port, or egress's per-UID reject
+// would block it before the sidecar firewall even applies.
+func TestGenerateNftables_AllowsSidecarPortForContainedSubscriber(t *testing.T) {
+	stubUIDs(t, map[string]int{"clem-proxy": 900, "myteam-lead": 1001})
+	cfg := sidecarCfg()
+	cfg.Egress = config.EgressConfig{Enabled: true, Posture: "strict", ProxyPort: 8888}
+	cfg.Agents = map[string]config.AgentConfig{
+		"lead": {Name: "Lead", Sidecars: []string{"es-ro"}},
+	}
+	out, err := GenerateNftables(cfg)
+	if err != nil {
+		t.Fatalf("GenerateNftables: %v", err)
+	}
+	want := "meta skuid 1001 ip daddr 127.0.0.1 tcp dport { 8888, 14500 } accept"
+	if !strings.Contains(out, want) {
+		t.Errorf("contained subscriber should be allowed to its sidecar port\nwant %q\n---\n%s", want, out)
+	}
+}
+
 func TestPortOf(t *testing.T) {
 	cases := []struct{ in, def, want string }{
 		{"http://127.0.0.1:14321", "x", "14321"},

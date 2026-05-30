@@ -109,6 +109,11 @@ if os.environ.get('TYPEFULLY_API_KEY'):
         'command': _mcp_bin('social-mcp'),
         'env': {'TYPEFULLY_API_KEY': os.environ['TYPEFULLY_API_KEY']}
     }
+# Privileged MCP sidecars: reached over loopback streamable-HTTP (never stdio),
+# so the upstream secret stays in the separate-UID mcp-proxy process, never here.
+# A kernel nftables rule restricts each port to this agent's UID.
+for _name, _port in {{.SidecarServers}}:
+    cfg['mcpServers'][_name] = {'type': 'http', 'url': 'http://127.0.0.1:%d/mcp' % _port}
 print(json.dumps(cfg, indent=2))
 " > "$WORKDIR/.mcp.json"
 
@@ -376,6 +381,9 @@ type RunnerParams struct {
 	// MCP server's gateway watcher should observe. Empty disables the watcher
 	// even when DISCORD_TOKEN is set, preserving the original tool-only mode.
 	WatchChannelIDs   string
+	// SidecarServers is a Python/JSON list literal of [toolName, port] pairs for
+	// the privileged MCP sidecars this agent subscribes to. "[]" when none.
+	SidecarServers string
 }
 
 // Generate renders the runner.sh content for an agent. Dispatches on the
@@ -431,6 +439,7 @@ func Generate(cfg *config.Config, agentKey string) string {
 		AlertCurl:       alertCurl,
 		WatchChannelIDs: discordWatchChannels(cfg),
 		ProxyExport:     proxyExportBlock(cfg, agentKey),
+		SidecarServers:  sidecarServersLiteral(cfg, agentKey),
 	}
 	switch ac.RuntimeKind() {
 	case "opencode":
@@ -586,8 +595,25 @@ func renderTemplate(tmpl string, p RunnerParams) string {
 		"{{.WatchChannelIDs}}", p.WatchChannelIDs,
 		"{{.ProxyExport}}", p.ProxyExport,
 		"{{.ProxyUnitDeps}}", p.ProxyUnitDeps,
+		"{{.SidecarServers}}", p.SidecarServers,
 	)
 	return r.Replace(tmpl)
+}
+
+// sidecarServersLiteral renders the Python list literal of [toolName, port]
+// pairs for the sidecars this agent subscribes to — consumed by the .mcp.json
+// generator in the runner template. "[]" when the agent subscribes to none.
+func sidecarServersLiteral(cfg *config.Config, agentKey string) string {
+	var parts []string
+	for _, l := range cfg.SidecarListeners() {
+		for _, ak := range l.Subscribers {
+			if ak == agentKey {
+				parts = append(parts, fmt.Sprintf("[%q, %d]", l.Server.ToolName(), l.Port))
+				break
+			}
+		}
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
 }
 
 // discordWatchChannels returns a deterministic comma-separated list of

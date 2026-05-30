@@ -1346,3 +1346,34 @@ func TestInstallAgentVault_PinnedDownload(t *testing.T) {
 		}
 	}
 }
+
+func TestWriteSystemdEnvFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sidecar.env")
+	if err := WriteSystemdEnvFile(path, map[string]string{
+		"ES_PASSWORD": "p@ss:w/rd",
+		"ES_USER":     "elastic",
+	}); err != nil {
+		t.Fatalf("WriteSystemdEnvFile: %v", err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sorted, literal KEY=value (no export, no quoting), one per line.
+	want := "ES_PASSWORD=p@ss:w/rd\nES_USER=elastic\n"
+	if string(b) != want {
+		t.Errorf("content = %q, want %q", string(b), want)
+	}
+	info, _ := os.Stat(path)
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("mode = %v, want 0600", info.Mode().Perm())
+	}
+}
+
+func TestWriteSystemdEnvFile_RejectsNewline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x.env")
+	if err := WriteSystemdEnvFile(path, map[string]string{"K": "a\nb"}); err == nil {
+		t.Fatal("expected error for newline in secret value")
+	}
+}

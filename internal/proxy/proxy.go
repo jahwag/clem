@@ -61,6 +61,38 @@ func nftTableName(project string) string {
 	return "clem_egress_" + strings.ReplaceAll(project, "-", "_")
 }
 
+// sidecarNftTableName returns the nftables table identifier for a project's
+// sidecar loopback firewall (separate from the egress table so it applies even
+// on hosts with no egress containment).
+func sidecarNftTableName(project string) string {
+	return "clem_sidecar_" + strings.ReplaceAll(project, "-", "_")
+}
+
+// SidecarNftablesPath returns the path to a project's sidecar firewall ruleset.
+func SidecarNftablesPath(project string) string {
+	return fmt.Sprintf("/etc/clem/clem-sidecar-%s.nft", project)
+}
+
+// SidecarEnvFile returns the root-owned (0600) EnvironmentFile holding a sidecar
+// listener's upstream secret(s). systemd reads it as root and injects it into
+// the service env before dropping to the mcp user; the secret never reaches an
+// agent .env and never appears in the process argv.
+func SidecarEnvFile(project, name, agentKey string) string {
+	if agentKey != "" {
+		return fmt.Sprintf("/etc/clem/clem-mcp-%s-%s-%s.env", project, name, agentKey)
+	}
+	return fmt.Sprintf("/etc/clem/clem-mcp-%s-%s.env", project, name)
+}
+
+// MCPProxyBin is the stdio→streamable-HTTP bridge clem installs (pipx-global,
+// reachable by the mcp user). Sidecar listeners run a wrapped stdio MCP server
+// behind it on loopback.
+const MCPProxyBin = "/opt/pipx/bin/mcp-proxy"
+
+// SidecarStateDir is the writable HOME/scratch dir for the mcp user, so wrapped
+// stdio servers (node/python) that touch a cache dir work under ProtectSystem=strict.
+const SidecarStateDir = "/var/lib/clem-mcp"
+
 // GeneratePipelockConfig renders pipelock.yaml for a project. Phase 1 is
 // CONNECT-only (tls_interception off) so no CA distribution is needed; the
 // forward proxy still enforces the api_allowlist by SNI/CONNECT host and writes
@@ -243,16 +275,31 @@ func GenerateNftables(cfg *config.Config) (string, error) {
 	basePorts = append(basePorts, cfg.Egress.AllowLocalhostPorts...)
 	avPort := agentVaultPort(cfg) // 0 unless agent-vault backend active
 
+	// Sidecar loopback ports each agent subscribes to. A contained agent reaches
+	// its sidecar over loopback, so those ports must be in its allowed set or the
+	// per-UID reject below would block them. (Cross-agent isolation on those
+	// ports is enforced separately by GenerateSidecarNftables.)
+	sidecarPortsByAgent := map[string][]int{}
+	for _, l := range cfg.SidecarListeners() {
+		for _, ak := range l.Subscribers {
+			sidecarPortsByAgent[ak] = append(sidecarPortsByAgent[ak], l.Port)
+		}
+	}
+
 	// portListFor returns the deduped, sorted "p1, p2" loopback port set for an
 	// agent: the base ports, plus agent-vault's MITM port for brokered agents
-	// (their HTTPS_PROXY points at agent-vault, not pipelock).
-	portListFor := func(ac config.AgentConfig) string {
+	// (their HTTPS_PROXY points at agent-vault, not pipelock), plus any sidecar
+	// ports the agent subscribes to.
+	portListFor := func(key string, ac config.AgentConfig) string {
 		set := map[int]struct{}{}
 		for _, p := range basePorts {
 			set[p] = struct{}{}
 		}
 		if avPort > 0 && ac.VaultBroker {
 			set[avPort] = struct{}{}
+		}
+		for _, p := range sidecarPortsByAgent[key] {
+			set[p] = struct{}{}
 		}
 		ports := make([]int, 0, len(set))
 		for p := range set {
@@ -314,7 +361,7 @@ func GenerateNftables(cfg *config.Config) (string, error) {
 		if ac.WebTerminalPort > 0 {
 			fmt.Fprintf(&b, "\t\tmeta skuid %d tcp sport %d ct state established,related accept\n", a.uid, ac.WebTerminalPort)
 		}
-		portList := portListFor(ac)
+		portList := portListFor(a.key, ac)
 		fmt.Fprintf(&b, "\t\tmeta skuid %d ip daddr 127.0.0.1 tcp dport { %s } accept\n", a.uid, portList)
 		fmt.Fprintf(&b, "\t\tmeta skuid %d ip6 daddr ::1 tcp dport { %s } accept\n", a.uid, portList)
 		fmt.Fprintf(&b, "\t\tmeta skuid %d reject with icmpx type admin-prohibited\n", a.uid)
@@ -322,4 +369,124 @@ func GenerateNftables(cfg *config.Config) (string, error) {
 	b.WriteString("\t}\n")
 	b.WriteString("}\n")
 	return b.String(), nil
+}
+
+const sidecarServiceTemplate = `[Unit]
+Description=clem MCP sidecar {{.Name}} ({{.Project}})
+After=network-online.target {{.SidecarNftService}}
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{.MCPUser}}
+# clem-mcp has no home; point HOME at a writable scratch dir so node/python
+# wrapped servers can use their cache under ProtectSystem=strict.
+Environment=HOME={{.StateDir}}
+# Upstream secret(s) loaded root-side, injected into the spawned stdio server
+# via --pass-environment. Never on the command line (argv is world-readable).
+EnvironmentFile={{.EnvFile}}
+ExecStart={{.ExecStart}}
+Restart=always
+RestartSec=2
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths={{.StateDir}}
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
+`
+
+// GenerateSidecarService renders the systemd unit running one sidecar listener:
+// mcp-proxy exposes the wrapped stdio MCP server over loopback streamable-HTTP
+// on the listener's port, as the dedicated mcp system user. The upstream secret
+// arrives via EnvironmentFile + --pass-environment, so it is neither in any
+// agent .env nor in the process argv.
+func GenerateSidecarService(cfg *config.Config, l config.SidecarListener) string {
+	args := []string{
+		MCPProxyBin,
+		"--host", "127.0.0.1",
+		"--port", strconv.Itoa(l.Port),
+		"--stateless",
+		"--pass-environment",
+		"--",
+		l.Server.Command,
+	}
+	args = append(args, l.Server.Args...)
+	r := strings.NewReplacer(
+		"{{.Name}}", l.Server.Name,
+		"{{.Project}}", cfg.Project,
+		"{{.MCPUser}}", cfg.MCPSidecars.SystemUserOrDefault(),
+		"{{.StateDir}}", SidecarStateDir,
+		"{{.EnvFile}}", SidecarEnvFile(cfg.Project, l.Server.Name, l.AgentKey),
+		"{{.ExecStart}}", strings.Join(args, " "),
+		"{{.SidecarNftService}}", cfg.SidecarNftablesServiceName(),
+	)
+	return r.Replace(sidecarServiceTemplate)
+}
+
+// GenerateSidecarNftables renders the loopback firewall for sidecar listeners:
+// for each listener's port, only the subscribing agent UID(s) may open a
+// connection; every other UID (including other agents and root) is dropped.
+// This is the containment boundary on hosts without egress firewalling, where
+// agents would otherwise reach each other's sidecar ports freely on loopback.
+// Idempotent reload: ensure-then-delete-then-create the table.
+func GenerateSidecarNftables(cfg *config.Config) (string, error) {
+	listeners := cfg.SidecarListeners()
+	table := sidecarNftTableName(cfg.Project)
+	var b strings.Builder
+	b.WriteString("#!/usr/sbin/nft -f\n")
+	b.WriteString("# Generated by clem provision — sidecar loopback containment for " + cfg.Project + ".\n")
+	b.WriteString("# Each sidecar port is reachable only by its subscribing agent UID(s).\n")
+	fmt.Fprintf(&b, "table inet %s { }\n", table)
+	fmt.Fprintf(&b, "delete table inet %s\n", table)
+	fmt.Fprintf(&b, "table inet %s {\n", table)
+	b.WriteString("\tchain output {\n")
+	b.WriteString("\t\ttype filter hook output priority 0; policy accept;\n")
+	for _, l := range listeners {
+		uids := make([]int, 0, len(l.Subscribers))
+		for _, ak := range l.Subscribers {
+			uid, err := userUIDLookup(cfg.OSUsername(ak))
+			if err != nil {
+				return "", fmt.Errorf("resolving sidecar %s subscriber %s: %w", l.Server.Name, ak, err)
+			}
+			uids = append(uids, uid)
+		}
+		sort.Ints(uids)
+		strs := make([]string, len(uids))
+		for i, u := range uids {
+			strs[i] = strconv.Itoa(u)
+		}
+		set := strings.Join(strs, ", ")
+		fmt.Fprintf(&b, "\t\t# sidecar %s on port %d — subscribers: %s\n", l.Server.Name, l.Port, strings.Join(l.Subscribers, ", "))
+		fmt.Fprintf(&b, "\t\tip daddr 127.0.0.1 tcp dport %d meta skuid != { %s } drop\n", l.Port, set)
+		fmt.Fprintf(&b, "\t\tip6 daddr ::1 tcp dport %d meta skuid != { %s } drop\n", l.Port, set)
+	}
+	b.WriteString("\t}\n")
+	b.WriteString("}\n")
+	return b.String(), nil
+}
+
+const sidecarNftablesServiceTemplate = `[Unit]
+Description=clem sidecar loopback firewall (nftables) for {{.Project}}
+After=nftables.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f {{.NftPath}}
+
+[Install]
+WantedBy=multi-user.target
+`
+
+// GenerateSidecarNftablesService renders the oneshot unit that applies the
+// sidecar firewall ruleset (before agent + sidecar units, which order After it).
+func GenerateSidecarNftablesService(cfg *config.Config) string {
+	r := strings.NewReplacer(
+		"{{.Project}}", cfg.Project,
+		"{{.NftPath}}", SidecarNftablesPath(cfg.Project),
+	)
+	return r.Replace(sidecarNftablesServiceTemplate)
 }

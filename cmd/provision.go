@@ -288,6 +288,13 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// 5c. Privileged MCP sidecars: stand up mcp-proxy listeners under a dedicated
+	// system user so secrets that can't be HTTP-brokered stay out of agent .envs.
+	// Also after the agent loop — the loopback firewall keys on subscriber UIDs.
+	if err := provisionMCPSidecars(); err != nil {
+		return err
+	}
+
 	// 6. Install watchdog
 	fmt.Printf("\n[watchdog]\n")
 	wdScript := watchdog.GenerateScript(cfg)
@@ -493,4 +500,113 @@ func provisionEgress() error {
 	}
 	fmt.Printf("  installed + started %s (port %d)\n", cfg.PipelockServiceName(), cfg.Egress.ProxyPortOrDefault())
 	return nil
+}
+
+// provisionMCPSidecars stands up the privileged MCP sidecar stack: the dedicated
+// mcp system user, the pinned mcp-proxy bridge, one loopback listener per
+// subscribed sidecar (mcp-proxy fronting the wrapped stdio MCP server, with the
+// upstream secret supplied root-side via EnvironmentFile), and a loopback
+// nftables firewall that lets only each listener's subscribing agent UID(s)
+// reach its port. No-op when no agent subscribes to a sidecar. Must run after
+// the agent loop so subscriber UIDs resolve.
+func provisionMCPSidecars() error {
+	listeners := cfg.SidecarListeners()
+	if len(listeners) == 0 {
+		return nil
+	}
+	fmt.Printf("\n[mcp-sidecars]\n")
+	mcpUser := cfg.MCPSidecars.SystemUserOrDefault()
+	if err := agent.EnsureSystemUser(mcpUser); err != nil {
+		return fmt.Errorf("mcp-sidecars: %w", err)
+	}
+	if err := agent.InstallMCPProxy(); err != nil {
+		return fmt.Errorf("mcp-sidecars: %w", err)
+	}
+	if err := os.MkdirAll("/etc/clem", 0755); err != nil {
+		return fmt.Errorf("mcp-sidecars: creating /etc/clem: %w", err)
+	}
+	if err := agent.EnsureOwnedDir(proxy.SidecarStateDir, mcpUser); err != nil {
+		return fmt.Errorf("mcp-sidecars: state dir: %w", err)
+	}
+
+	allVaults, err := vault.AllVaults()
+	if err != nil {
+		return fmt.Errorf("mcp-sidecars: reading sops: %w", err)
+	}
+
+	// Write each listener's root-owned secret env + systemd unit (not started
+	// until the firewall is up).
+	for _, l := range listeners {
+		secretEnv, err := sidecarSecretEnv(l, allVaults)
+		if err != nil {
+			return fmt.Errorf("mcp-sidecars: sidecar %s: %w", l.Server.Name, err)
+		}
+		envPath := proxy.SidecarEnvFile(cfg.Project, l.Server.Name, l.AgentKey)
+		if err := agent.WriteSystemdEnvFile(envPath, secretEnv); err != nil {
+			return fmt.Errorf("mcp-sidecars: sidecar %s: %w", l.Server.Name, err)
+		}
+		svcName := cfg.SidecarServiceName(l.Server.Name, l.AgentKey)
+		if err := agent.InstallServiceByName(svcName, proxy.GenerateSidecarService(cfg, l)); err != nil {
+			return fmt.Errorf("mcp-sidecars: installing %s: %w", svcName, err)
+		}
+		fmt.Printf("  wrote %s + installed %s (port %d, %d secret(s))\n", envPath, svcName, l.Port, len(secretEnv))
+	}
+
+	// Loopback firewall first (fail-closed: subscribers only), then the listeners.
+	nft, err := proxy.GenerateSidecarNftables(cfg)
+	if err != nil {
+		return fmt.Errorf("mcp-sidecars: %w", err)
+	}
+	nftPath := proxy.SidecarNftablesPath(cfg.Project)
+	if err := os.WriteFile(nftPath, []byte(nft), 0644); err != nil {
+		return fmt.Errorf("mcp-sidecars: writing %s: %w", nftPath, err)
+	}
+	if err := agent.InstallServiceByName(cfg.SidecarNftablesServiceName(), proxy.GenerateSidecarNftablesService(cfg)); err != nil {
+		return fmt.Errorf("mcp-sidecars: installing firewall service: %w", err)
+	}
+	if err := agent.StartService(cfg.SidecarNftablesServiceName()); err != nil {
+		return fmt.Errorf("mcp-sidecars: starting firewall: %w", err)
+	}
+	fmt.Printf("  installed + started %s\n", cfg.SidecarNftablesServiceName())
+
+	for _, l := range listeners {
+		svcName := cfg.SidecarServiceName(l.Server.Name, l.AgentKey)
+		if err := agent.StartService(svcName); err != nil {
+			return fmt.Errorf("mcp-sidecars: starting %s: %w", svcName, err)
+		}
+	}
+	fmt.Printf("  started %d sidecar listener(s)\n", len(listeners))
+	return nil
+}
+
+// sidecarSecretEnv resolves the upstream secret values for a listener. A shared
+// listener reads the named sops vault (secrets_vault); a per-agent listener
+// reads the subscribing agent's own vaults (the value differs per agent).
+func sidecarSecretEnv(l config.SidecarListener, allVaults map[string]map[string]string) (map[string]string, error) {
+	var source map[string]string
+	if l.AgentKey != "" {
+		ac := cfg.Agents[l.AgentKey]
+		sec, err := vault.DecryptForAgent(l.AgentKey, ac.Vaults)
+		if err != nil {
+			return nil, fmt.Errorf("decrypting secrets for %s: %w", l.AgentKey, err)
+		}
+		source = vault.FlatSecrets(sec)
+	} else {
+		if l.Server.SecretsVault == "" {
+			return nil, fmt.Errorf("shared sidecar requires secrets_vault")
+		}
+		source = allVaults[l.Server.SecretsVault]
+		if source == nil {
+			return nil, fmt.Errorf("secrets_vault %q not found in sops", l.Server.SecretsVault)
+		}
+	}
+	out := make(map[string]string, len(l.Server.Secrets))
+	for _, k := range l.Server.Secrets {
+		v, ok := source[k]
+		if !ok || v == "" {
+			return nil, fmt.Errorf("secret %q not found in source vault", k)
+		}
+		out[k] = v
+	}
+	return out, nil
 }

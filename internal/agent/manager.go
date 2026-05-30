@@ -240,6 +240,66 @@ install -m 0755 agent-vault /usr/local/bin/agent-vault`, ver, verNoV, arch)
 	return nil
 }
 
+// MCPProxyVersion is the pinned mcp-proxy (sparfenyuk/mcp-proxy) release clem
+// installs as the sidecar stdio→streamable-HTTP bridge. Bump deliberately — it
+// fronts a privileged, credential-holding stdio MCP process.
+const MCPProxyVersion = "0.12.0"
+
+// InstallMCPProxy installs the pinned mcp-proxy into a pipx-global venv at
+// /opt/pipx (binary at /opt/pipx/bin/mcp-proxy, which must match
+// proxy.MCPProxyBin), made world-readable/executable so the dedicated mcp
+// system user can run it. Idempotent: skips when the pinned version is present.
+// pipx isolates the bridge's dependency tree from system Python — the same
+// rationale as the operator-installed Python MCP servers (see README). Same
+// PyPI TOFU caveat as InstallPipelock/InstallAgentVault applies.
+func InstallMCPProxy() error {
+	const bin = "/opt/pipx/bin/mcp-proxy" // keep in sync with proxy.MCPProxyBin
+	verCheck := bin + " --version 2>/dev/null"
+	if out, err := sys.Run("bash", "-c", verCheck); err == nil &&
+		strings.Contains(string(out), MCPProxyVersion) {
+		fmt.Printf("  mcp-proxy %s already installed\n", MCPProxyVersion)
+		return nil
+	}
+	script := fmt.Sprintf(`set -euo pipefail
+command -v pipx >/dev/null 2>&1 || { echo "pipx not found; install it first (e.g. apt-get install -y pipx)" >&2; exit 1; }
+export PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/opt/pipx/bin
+pipx install --force "mcp-proxy==%s"
+# The mcp user runs the bridge: grant traverse/read + preserve exec bits.
+chmod -R a+rX /opt/pipx`, MCPProxyVersion)
+	fmt.Printf("  installing mcp-proxy %s (pipx-global)\n", MCPProxyVersion)
+	if out, err := sys.Run("bash", "-c", script); err != nil {
+		return fmt.Errorf("installing mcp-proxy %s: %w\n%s", MCPProxyVersion, err, out)
+	}
+	return nil
+}
+
+// WriteSystemdEnvFile writes a root-owned (0600) systemd EnvironmentFile of
+// KEY=value lines. Unlike WriteEnvFile this is NOT shell-sourced — systemd
+// parses it literally, so no `export`/quoting. Used for sidecar upstream
+// secrets, which systemd injects into the listener service env (never an agent
+// .env, never the process argv). Keys are sorted for stable diffs.
+func WriteSystemdEnvFile(path string, env map[string]string) error {
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var sb strings.Builder
+	for _, k := range keys {
+		// systemd EnvironmentFile values are taken literally to end-of-line and
+		// may not contain a newline. API tokens (the only expected values) are
+		// newline-free.
+		if strings.ContainsAny(env[k], "\n\r") {
+			return fmt.Errorf("sidecar secret %q contains a newline; unsupported in EnvironmentFile", k)
+		}
+		sb.WriteString(k + "=" + env[k] + "\n")
+	}
+	if err := os.WriteFile(path, []byte(sb.String()), 0600); err != nil {
+		return fmt.Errorf("writing systemd env file %s: %w", path, err)
+	}
+	return nil
+}
+
 // BrokeredEnv builds the .env contents for an agent-vault-brokered agent: each
 // brokered secret becomes a placeholder (the real value lives only in
 // agent-vault and is injected on egress), non-brokered secrets keep their real

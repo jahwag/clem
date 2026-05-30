@@ -565,3 +565,53 @@ func TestGenerateService_MissingUserFails(t *testing.T) {
 		t.Fatal("expected error for missing user, got nil")
 	}
 }
+
+func sidecarRunnerCfg() *config.Config {
+	cfg := baseCfg("lead", config.AgentConfig{
+		Name: "Lead", Model: "claude-opus-4-8", Iteration: "1m", Prompt: "go",
+		Sidecars: []string{"es-ro"},
+	})
+	cfg.Agents["solo"] = config.AgentConfig{ // subscribes to nothing
+		Name: "Solo", Model: "claude-opus-4-8", Iteration: "1m", Prompt: "go",
+	}
+	cfg.MCPSidecars = config.MCPSidecarsConfig{
+		BasePort: 14500,
+		Servers: []config.SidecarServer{{
+			Name: "es-ro", Identity: "shared", Command: "/bin/x",
+			Secrets: []string{"K"}, SecretsVault: "infra",
+		}},
+	}
+	return cfg
+}
+
+func TestGenerate_SidecarHTTPEntryForSubscriber(t *testing.T) {
+	cfg := sidecarRunnerCfg()
+	out := Generate(cfg, "lead")
+	for _, want := range []string{
+		`for _name, _port in [["es-ro", 14500]]:`,
+		`'type': 'http'`,
+		`'url': 'http://127.0.0.1:%d/mcp' % _port`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("subscriber runner missing %q\n---\n%s", want, out)
+		}
+	}
+}
+
+func TestGenerate_NoSidecarEntryForNonSubscriber(t *testing.T) {
+	cfg := sidecarRunnerCfg()
+	out := Generate(cfg, "solo")
+	if !strings.Contains(out, `for _name, _port in []:`) {
+		t.Errorf("non-subscriber should get an empty sidecar list\n---\n%s", out)
+	}
+}
+
+func TestSidecarServersLiteral(t *testing.T) {
+	cfg := sidecarRunnerCfg()
+	if got := sidecarServersLiteral(cfg, "lead"); got != `[["es-ro", 14500]]` {
+		t.Errorf("subscriber literal = %q", got)
+	}
+	if got := sidecarServersLiteral(cfg, "solo"); got != `[]` {
+		t.Errorf("non-subscriber literal = %q", got)
+	}
+}
