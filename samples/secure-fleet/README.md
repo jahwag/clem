@@ -22,9 +22,14 @@ Every credential gets one of four **dispositions**:
 ```sh
 cp samples/secure-fleet/clem.yaml clem.yaml
 clem vault init
-# bootstrap agent-vault + the brokered/real secrets (see the header comments in clem.yaml)
-clem vault set clem-vault AGENT_VAULT_MASTER_PASSWORD=... AGENT_VAULT_OWNER_EMAIL=... AGENT_VAULT_OWNER_PASSWORD=...
+# bootstrap agent-vault + the brokered/real secrets — one KEY=value per call
+# (clem vault set takes exactly 2 args; see the header comments in clem.yaml):
+clem vault set clem-vault AGENT_VAULT_MASTER_PASSWORD=...
+clem vault set clem-vault AGENT_VAULT_OWNER_EMAIL=...
+clem vault set clem-vault AGENT_VAULT_OWNER_PASSWORD=...
 clem vault set anthropic ANTHROPIC_API_KEY=sk-ant-...   # a paid API key — subscription OAuth is single-tool/ToS-limited for fleets
+clem vault set discord-lead   DISCORD_TOKEN=...
+clem vault set discord-worker DISCORD_TOKEN=...          # the worker references discord-worker
 sudo clem provision
 ```
 
