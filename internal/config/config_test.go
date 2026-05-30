@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -1352,12 +1353,111 @@ func TestLoad_Sidecar_PerAgentAndToolOverride(t *testing.T) {
       identity: per-agent
       command: /bin/x
       secrets: [DISCORD_TOKEN]
-      tool: discord-bot`)))
+      tool: discord-gw`)))
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	s := cfg.MCPSidecars.Servers[0]
-	if s.IdentityKind() != "per-agent" || s.ToolName() != "discord-bot" {
+	if s.IdentityKind() != "per-agent" || s.ToolName() != "discord-gw" {
 		t.Errorf("got %q / %q", s.IdentityKind(), s.ToolName())
+	}
+}
+
+func TestLoad_Sidecar_RelativeCommandRejected(t *testing.T) {
+	if _, err := Load(writeYAML(t, sidecarYAML(`mcp_sidecars:
+  servers:
+    - name: es-ro
+      command: clem-mcp-http
+      secrets: [ES_USER]`))); err == nil {
+		t.Fatal("expected error: command must be absolute path")
+	}
+}
+
+func TestLoad_Sidecar_ToolNameCollidesWithBuiltin(t *testing.T) {
+	for _, builtin := range []string{"discord-bot", "slack-mcp", "social", "browser-render"} {
+		if _, err := Load(writeYAML(t, sidecarYAML(`mcp_sidecars:
+  servers:
+    - name: es-ro
+      command: /bin/x
+      secrets: [ES_USER]
+      tool: `+builtin))); err == nil {
+			t.Fatalf("expected error: tool %q collides with builtin", builtin)
+		}
+	}
+}
+
+func TestLoad_Sidecar_BadToolNameRejected(t *testing.T) {
+	if _, err := Load(writeYAML(t, sidecarYAML(`mcp_sidecars:
+  servers:
+    - name: es-ro
+      command: /bin/x
+      secrets: [ES_USER]
+      tool: ES_RO`))); err == nil {
+		t.Fatal("expected error: tool name must match slug pattern")
+	}
+}
+
+func TestLoad_Sidecar_BadSecretKeyRejected(t *testing.T) {
+	if _, err := Load(writeYAML(t, sidecarYAML(`mcp_sidecars:
+  servers:
+    - name: es-ro
+      command: /bin/x
+      secrets: ["es-user"]`))); err == nil {
+		t.Fatal("expected error: secret key with hyphen is not a valid env-var name")
+	}
+}
+
+// portYAML builds a config with one sidecar and one agent whose web_terminal_port
+// and the sidecar base_port can be set to provoke overflow/collision.
+func portYAML(basePort, webPort int, identity string) string {
+	return fmt.Sprintf(`
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+operator:
+  discord_ids: ["277434478803156993"]
+mcp_sidecars:
+  base_port: %d
+  servers:
+    - name: es-ro
+      identity: %s
+      command: /bin/x
+      secrets: [ES_USER]
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+    web_terminal_port: %d
+    sidecars: [es-ro]
+  worker:
+    name: "Worker"
+    model: "claude-sonnet-4-6"
+    sidecars: [es-ro]
+`, basePort, identity, webPort)
+}
+
+func TestLoad_Sidecar_PortOverflow(t *testing.T) {
+	// per-agent sidecar with 2 subscribers at base_port 65535 → 2 listeners overflow.
+	if _, err := Load(writeYAML(t, portYAML(65535, 7681, "per-agent"))); err == nil {
+		t.Fatal("expected error: sidecar listener ports overflow past 65535")
+	}
+}
+
+func TestLoad_Sidecar_PortCollidesWithWebTerminal(t *testing.T) {
+	// shared sidecar at base_port 14500, agent web_terminal_port 14500 → collision.
+	if _, err := Load(writeYAML(t, portYAML(14500, 14500, "shared"))); err == nil {
+		t.Fatal("expected error: sidecar port collides with web_terminal_port")
+	}
+}
+
+func TestSidecarPort_Deterministic(t *testing.T) {
+	m := MCPSidecarsConfig{BasePort: 14500}
+	if m.SidecarPort(0) != 14500 || m.SidecarPort(3) != 14503 {
+		t.Errorf("got %d %d", m.SidecarPort(0), m.SidecarPort(3))
+	}
+	if (MCPSidecarsConfig{}).SidecarPort(0) != 14500 {
+		t.Errorf("default base wrong: %d", (MCPSidecarsConfig{}).SidecarPort(0))
 	}
 }

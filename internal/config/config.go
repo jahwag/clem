@@ -40,6 +40,17 @@ var githubLoginRe = regexp.MustCompile(`^[a-zA-Z0-9-]{1,39}$`)
 // vaultRefRe matches ${vault:BUCKET.KEY} in MCP server env values.
 var vaultRefRe = regexp.MustCompile(`\$\{vault:([^.}]+)\.([^}]+)\}`)
 
+// reservedMCPNames are MCP server names clem's runner hardcodes (runner.go); a
+// sidecar's tool name must not collide with them or it would shadow/duplicate a
+// builtin in the agent's .mcp.json.
+var reservedMCPNames = map[string]bool{
+	"discord-bot": true, "slack-mcp": true, "social": true, "browser-render": true,
+}
+
+// secretKeyRe matches an env-var-style credential key (what a sidecar's secrets
+// and the vault keys look like).
+var secretKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // extensionNameRe allows alphanumeric names with dots, hyphens, and underscores.
 // Rejects semicolons, spaces, backticks, and other shell-special characters.
 var extensionNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
@@ -295,6 +306,11 @@ func (s SidecarServer) ToolName() string {
 	}
 	return s.Name
 }
+
+// SidecarPort returns the deterministic loopback port for the i-th sidecar
+// listener (allocated upward from base_port). Stable across provisions so
+// re-provision yields minimal nftables/.mcp.json diffs.
+func (m MCPSidecarsConfig) SidecarPort(i int) int { return m.BasePortOrDefault() + i }
 
 // VaultBackend selects how agent secrets are materialized (Phase 2). Default
 // "env" preserves the legacy flow: secrets decrypted from sops are written
@@ -966,6 +982,21 @@ func (cfg *Config) validateMCPSidecars() error {
 		if len(s.Secrets) == 0 {
 			return fmt.Errorf("%s: at least one secret is required (a sidecar with no secret to hide should be a normal MCP server)", where)
 		}
+		if !strings.HasPrefix(s.Command, "/") {
+			return fmt.Errorf("%s: command must be an absolute path, got %q", where, s.Command)
+		}
+		tn := s.ToolName()
+		if !validName.MatchString(tn) {
+			return fmt.Errorf("%s: tool name %q must match %s (set `tool:` to override)", where, tn, validName.String())
+		}
+		if reservedMCPNames[tn] {
+			return fmt.Errorf("%s: tool name %q collides with a builtin MCP server (%v); set a distinct `tool:`", where, tn, []string{"discord-bot", "slack-mcp", "social", "browser-render"})
+		}
+		for _, k := range s.Secrets {
+			if !secretKeyRe.MatchString(k) {
+				return fmt.Errorf("%s: secret key %q must match %s", where, k, secretKeyRe.String())
+			}
+		}
 		switch s.Identity {
 		case "", "shared", "per-agent":
 		default:
@@ -986,7 +1017,53 @@ func (cfg *Config) validateMCPSidecars() error {
 			}
 		}
 	}
+	// Deterministic loopback-port allocation. A shared sidecar listens once; a
+	// per-agent sidecar listens once per subscribing agent. Allocated upward from
+	// base_port — check the range fits below 65535 and never collides with an
+	// agent's web_terminal_port (both bind loopback on the same host).
+	listeners := 0
+	for _, s := range cfg.MCPSidecars.Servers {
+		if s.IdentityKind() == "per-agent" {
+			for _, ac := range cfg.Agents {
+				for _, name := range ac.Sidecars {
+					if name == s.Name {
+						listeners++
+						break
+					}
+				}
+			}
+		} else if subscribedTo(cfg, s.Name) {
+			listeners++
+		}
+	}
+	base := cfg.MCPSidecars.BasePortOrDefault()
+	if listeners > 0 && base+listeners-1 > 65535 {
+		return fmt.Errorf("mcp_sidecars: %d listeners from base_port %d overflow past 65535", listeners, base)
+	}
+	webPorts := map[int]string{}
+	for key, ac := range cfg.Agents {
+		if ac.WebTerminalPort != 0 {
+			webPorts[ac.WebTerminalPort] = key
+		}
+	}
+	for i := 0; i < listeners; i++ {
+		if key, clash := webPorts[base+i]; clash {
+			return fmt.Errorf("mcp_sidecars: sidecar port %d collides with agent %s web_terminal_port", base+i, key)
+		}
+	}
 	return nil
+}
+
+// subscribedTo reports whether any agent subscribes to the named sidecar.
+func subscribedTo(cfg *Config, name string) bool {
+	for _, ac := range cfg.Agents {
+		for _, n := range ac.Sidecars {
+			if n == name {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // validateVaultServices checks the agent-vault injection rules. Services are
