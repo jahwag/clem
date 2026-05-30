@@ -6,7 +6,9 @@
 
 <p align="center"><em>Continuously Looping Engineering Machines.</em></p>
 
-<p align="center"><em><b>docker-compose for Claude Code agents.</b></em></p>
+<p align="center"><b>The secure, self-hosted way to run a fleet of Claude Code agents</b> — each behind a kernel-enforced egress firewall or a secret-zero credential broker.</p>
+
+<p align="center"><em>docker-compose for Claude Code — on infrastructure you own.</em></p>
 
 <p align="center">
   <a href="https://github.com/jahwag/clem/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"></a>
@@ -26,6 +28,8 @@
 
 `clem` runs a team of Claude Code agents 24/7 on any Linux host. Each agent is a separate OS user in a tmux session under systemd. Agents coordinate over Discord or Slack, pick up tasks, write code, and open PRs. A watchdog restarts anything that crashes. You configure it once and walk away.
 
+What sets it apart: **secrets and egress are contained at the OS layer, not by the agent's cooperation.** Each agent takes one disposition — a per-UID kernel firewall that forces all egress through an auditing proxy (a non-root agent can't disable a firewall it doesn't own), *or* a secret-zero broker that hands it only placeholders while a separate user injects the real credential on egress. Enforced by the kernel and a separate user, not by the agent. See the [security model](#security-model).
+
 ---
 
 ## Feature map
@@ -33,6 +37,8 @@
 | | |
 |---|---|
 | **Per-agent OS identity** | Each agent is its own Linux user - own home dir, own git identity, own GitHub PRs, own Discord/Slack bot. Crash boundaries are real. |
+| **Kernel egress containment** | Per-agent nftables UID firewall forces all traffic through a loopback proxy; a non-root agent can't disable a firewall it doesn't own. No in-process escape hatch. Opt-in `egress:` block. |
+| **Secret-zero brokering** | Brokered agents hold placeholders + a scoped inject-only token; real credentials live in a vault owned by a *separate* user and are injected on egress. `cat ~/.env` yields nothing usable for the brokered keys. |
 | **Multi-backend coordination** | Discord + Slack today via swappable `coordination.backend:` in `clem.yaml`. One config knob. |
 | **Multi-runtime** | `runtime: claude-code \| opencode`. Mix Anthropic cloud, Bedrock, Vertex, Ollama, OpenAI-compat - one surface. |
 | **Encrypted secrets** | Per-agent `.env` materialised from age/sops vaults at provision time. Never leave the host after. |
@@ -46,17 +52,18 @@
 ## Contents
 
 1. [How it works](#how-it-works)
-2. [Requirements](#requirements)
-3. [Install](#install)
-4. [Quickstart](#quickstart)
-5. [Discord setup](#discord-setup)
-6. [GitHub setup](#github-setup)
-7. [CLI reference](#cli-reference)
-8. [`clem.yaml` reference](#clemyaml-reference)
-9. [Secrets](#secrets)
-10. [Deploy to a VPS](#deploy-to-a-vps)
-11. [Troubleshooting](#troubleshooting)
-12. [License](#license)
+2. [Security model](#security-model)
+3. [Requirements](#requirements)
+4. [Install](#install)
+5. [Quickstart](#quickstart)
+6. [Discord setup](#discord-setup)
+7. [GitHub setup](#github-setup)
+8. [CLI reference](#cli-reference)
+9. [`clem.yaml` reference](#clemyaml-reference)
+10. [Secrets](#secrets)
+11. [Deploy to a VPS](#deploy-to-a-vps)
+12. [Troubleshooting](#troubleshooting)
+13. [License](#license)
 
 ---
 
@@ -87,6 +94,28 @@
 ```
 
 Each agent runs a loop: launch `claude` (or `opencode`), inject a prompt, wait for the session to finish (up to 2h hard cap), sleep the configured `iteration` duration, repeat. Secrets live encrypted in `secrets.sops.yaml` (age/sops); `clem provision` decrypts them into per-agent `.env` files on the host.
+
+---
+
+## Security model
+
+An autonomous agent is an untrusted workload: prompt injection, a poisoned dependency, or a model mistake can turn it into an exfiltration engine. clem's stance is **contain it at the OS layer, not by asking the agent nicely.** Every credential an agent would otherwise hold gets exactly one of four dispositions:
+
+| Disposition | Mechanism | The real secret lives… | Threat closed |
+|---|---|---|---|
+| **broker** | a credential proxy (separate UID) injects the real value into the agent's own outbound HTTPS | inside the broker | API-key / bearer exfiltration — the agent only holds a placeholder |
+| **sidecar** | a secret-holding MCP server runs as a *separate* user; the agent calls it over loopback and gets a result, never the key | inside the sidecar | non-HTTP creds (gateway tokens, internal DBs) and scoped/read-only access |
+| **remove** | drop the credential/MCP entirely | nowhere | unused attack surface |
+| **egress firewall** | per-agent nftables UID rule forces all traffic through a loopback proxy; everything else is rejected by the kernel | n/a | data exfiltration to unapproved hosts |
+
+**Why this is stronger than in-process or single-container sandboxes:** the boundary is a **per-OS-UID kernel firewall a non-root agent cannot disable**, plus a credential broker running as a **different user the agent cannot read** — neither depends on the agent's cooperation, and there is no in-process escape hatch. A compromised agent holds no usable secrets and can reach no unapproved network.
+
+Honest about the parts that are borrowed: the egress proxy and credential broker are battle-tested OSS primitives ([pipelock](https://github.com/luckyPipewrench/pipelock), [Infisical agent-vault](https://github.com/Infisical/agent-vault)). clem's contribution is the **OS-level composition** — per-agent UID identity + kernel firewall + secret supply, wired so the agent literally cannot route around either.
+
+→ Full threat model, guarantees, and known limitations: **[docs/threat-model.md](docs/threat-model.md)**.
+→ Worked reference config: **[samples/secure-fleet/](samples/secure-fleet/)**.
+
+Both layers are **opt-in and default-off**; existing fleets are unaffected until you enable `egress:` / `vault.backend: agent-vault`.
 
 ---
 

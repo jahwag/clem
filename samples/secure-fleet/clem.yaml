@@ -1,0 +1,105 @@
+# Sample clem.yaml — the SECURE FLEET reference.
+#
+# Demonstrates clem's full least-privilege model: a compromised agent holds no
+# usable secrets and can reach no unapproved network — both enforced by the
+# kernel and separate OS users, not by the agent's cooperation.
+# See ../../docs/threat-model.md for the full model.
+#
+# Every credential gets one of four dispositions:
+#   broker         — agent's own outbound HTTP; real value injected on egress     (vault.services + brokered_secrets)
+#   sidecar        — non-HTTP / gateway-identity / scoped-internal creds          (mcp_sidecars — coming; see threat-model)
+#   remove         — unused; simply not provisioned                               (omit it)
+#   egress firewall— data containment: all egress forced through a loopback proxy (egress:)
+#
+# Prerequisites:
+#   clem vault init
+#   clem vault set clem-vault AGENT_VAULT_MASTER_PASSWORD=...   # one KEY=value per call (vault set takes exactly 2 args)
+#   clem vault set clem-vault AGENT_VAULT_OWNER_EMAIL=...
+#   clem vault set clem-vault AGENT_VAULT_OWNER_PASSWORD=...
+#   clem vault set anthropic  ANTHROPIC_API_KEY=sk-ant-...      # paid API key (NOT subscription OAuth) for a fleet
+#   clem vault set github     GH_TOKEN=ghp_...
+#   clem vault set llm-gateway GATEWAY_API_KEY=...
+#   clem vault set discord-lead   DISCORD_TOKEN=...
+#   clem vault set discord-worker DISCORD_TOKEN=...
+
+project: secure
+
+coordination:
+  backend: discord
+  server_id: "${DISCORD_SERVER_ID}"
+  channels:
+    general: "${DISCORD_GENERAL_CHANNEL}"
+    tasks:   "${DISCORD_TASKS_CHANNEL}"
+    alerts:  "${DISCORD_ALERTS_CHANNEL}"
+
+operator:
+  discord_ids: ["100000000000000000"]   # your Discord user id
+  github_logins: ["your-github-login"]
+
+# ── BROKER ──────────────────────────────────────────────────────────────────
+# agent-vault runs as a separate UID, holds the real secrets, and injects them
+# into the agent's own outbound HTTPS by host-matched service rule. The agent
+# holds only placeholders + a scoped, inject-only token (instance role
+# no-access + vault role proxy). sops stays the git source of truth.
+vault:
+  backend: agent-vault
+  services:
+    - name: anthropic                  # API-key agents: x-api-key swap (skip for OAuth agents — no static key)
+      host: api.anthropic.com
+      auth_type: api-key
+      api_key_key: ANTHROPIC_API_KEY
+      api_key_header: x-api-key
+    - name: llm-gateway                # e.g. litellm / OpenRouter — your inference gateway
+      host: gateway.internal.example.com
+      auth_type: bearer
+      token_key: GATEWAY_API_KEY
+    - name: github                     # bearer covers the gh REST API; git-over-HTTPS basic-auth is a separate rule
+      host: api.github.com
+      auth_type: bearer
+      token_key: GH_TOKEN
+
+# ── EGRESS FIREWALL ──────────────────────────────────────────────────────────
+# Per-agent nftables UID firewall: all egress is rejected except the loopback
+# proxy. A non-root agent cannot disable a firewall it does not own. DNS/raw
+# sockets blocked; the proxy resolves on the agent's behalf.
+egress:
+  enabled: true
+  posture: balanced
+  domains: ["*.anthropic.com", "github.com", "*.githubusercontent.com", "gateway.internal.example.com"]
+
+# NOTE: brokering and egress containment are mutually exclusive PER AGENT in v1
+# (a brokered agent's proxy points at agent-vault, which does not chain through
+# pipelock). Below, the lead is brokered; the worker is egress-contained — pick
+# the disposition that fits each agent. (A future release unifies them.)
+
+agents:
+  lead:
+    name: "Amara"
+    role: "Lead"
+    model: "claude-sonnet-4-6"
+    provider: anthropic
+    iteration: 5m
+    vaults: [clem-vault, anthropic, github, llm-gateway, discord-lead]
+    egress: false                      # opt out of the global egress block: this agent is brokered instead
+    # BROKER: these never appear in this agent's .env as real values.
+    vault_broker: true
+    brokered_secrets: [ANTHROPIC_API_KEY, GATEWAY_API_KEY, GH_TOKEN]
+    # SIDECAR (coming): DISCORD_TOKEN can't be brokered (WS gateway) and a stdio
+    # MCP would leak it (same UID). A privileged sidecar (clem-mcp user, loopback
+    # HTTP MCP) will hold it; until then it stays a real value in .env.
+    prompt: >-
+      Act as {{agent.name}}. Coordinate in #general; advance the top actionable task.
+      When done, run: kill $PPID
+
+  worker:
+    name: "Athena"
+    role: "Engineer"
+    model: "claude-sonnet-4-6"
+    provider: anthropic
+    iteration: 5m
+    vaults: [anthropic, github, discord-worker]
+    # EGRESS-CONTAINED instead of brokered: hard kernel boundary, all egress via
+    # the loopback proxy, audited. (egress: block above applies to this agent.)
+    prompt: >-
+      Act as {{agent.name}}. Pick up an assigned task, implement it, open a PR.
+      When done, run: kill $PPID
