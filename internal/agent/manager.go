@@ -298,6 +298,14 @@ func BrokeredEnv(av config.VaultBackend, ac config.AgentConfig, token, vaultName
 	env["REQUESTS_CA_BUNDLE"] = ca
 	env["CURL_CA_BUNDLE"] = ca
 	env["GIT_SSL_CAINFO"] = ca
+	// HTTPS_PROXY is an HTTPS (TLS) proxy, so git tunnels to it over TLS and must
+	// trust the agent-vault CA for the PROXY connection too — not just the
+	// upstream (GIT_SSL_CAINFO). git has no env var for http.proxySSLCAInfo, so
+	// inject it via GIT_CONFIG_*. Without this, EVERY git operation through the
+	// broker (push/pull/clone to any host) fails proxy certificate verification.
+	env["GIT_CONFIG_COUNT"] = "1"
+	env["GIT_CONFIG_KEY_0"] = "http.proxySSLCAInfo"
+	env["GIT_CONFIG_VALUE_0"] = ca
 	return env
 }
 
