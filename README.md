@@ -4,8 +4,6 @@
 
 <h1 align="center">clem</h1>
 
-<p align="center"><em>Continuously Looping Engineering Machines.</em></p>
-
 <p align="center"><b>The secure, self-hosted way to run a fleet of Claude Code agents</b> — each behind a kernel-enforced egress firewall or a secret-zero credential broker.</p>
 
 <p align="center"><em>docker-compose for Claude Code — on infrastructure you own.</em></p>
@@ -26,7 +24,7 @@
   <a href="https://discord.gg/pR4qeMH4u4">Discord</a>
 </p>
 
-`clem` runs a team of Claude Code agents 24/7 on any Linux host. Each agent is a separate OS user in a tmux session under systemd. Agents coordinate over Discord or Slack, pick up tasks, write code, and open PRs. A watchdog restarts anything that crashes. You configure it once and walk away.
+`clem` runs a team of Claude Code agents 24/7 on any Linux host. Each agent is a separate OS user in a tmux session under systemd. Agents coordinate over Discord or Slack, pick up tasks, write code, and open PRs. A watchdog restarts anything that crashes. You write one clem.yaml; clem provisions the OS users and keeps them running.
 
 What sets it apart: **secrets and egress are contained at the OS layer, not by the agent's cooperation.** Each agent takes one disposition — a per-UID kernel firewall that forces all egress through an auditing proxy (a non-root agent can't disable a firewall it doesn't own), *or* a secret-zero broker that hands it only placeholders while a separate user injects the real credential on egress. Enforced by the kernel and a separate user, not by the agent. See the [security model](#security-model).
 
@@ -138,7 +136,16 @@ Both layers are **opt-in and default-off**; existing fleets are unaffected until
 
 ## Install
 
-Build from source:
+Download the latest release (Linux):
+
+```bash
+# x86-64
+curl -fsSL https://github.com/jahwag/clem/releases/latest/download/clem_linux_amd64 -o /usr/local/bin/clem && sudo chmod +x /usr/local/bin/clem
+# arm64: swap clem_linux_amd64 -> clem_linux_arm64
+clem --version
+```
+
+Or build from source:
 
 ```bash
 git clone https://github.com/jahwag/clem.git
@@ -148,7 +155,7 @@ sudo install -m 0755 clem /usr/local/bin/clem
 clem --version
 ```
 
-To upgrade later, once releases are published:
+To upgrade:
 
 ```bash
 sudo clem update
