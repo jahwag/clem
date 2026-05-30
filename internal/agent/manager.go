@@ -927,6 +927,18 @@ func StartService(serviceName string) error {
 	return nil
 }
 
+// RestartService (re)starts a systemd service. Unlike StartService, this
+// re-execs an already-running unit so a regenerated ExecStart (e.g. a changed
+// sidecar port or wrapped command) takes effect on re-provision; for a oneshot
+// firewall unit it re-applies the ruleset.
+func RestartService(serviceName string) error {
+	out, err := sys.Run("systemctl", "restart", serviceName)
+	if err != nil {
+		return fmt.Errorf("systemctl restart %s: %w\n%s", serviceName, err, out)
+	}
+	return nil
+}
+
 // StopService stops a systemd service.
 func StopService(serviceName string) error {
 	out, err := sys.Run("systemctl", "stop", serviceName)

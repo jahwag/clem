@@ -1088,6 +1088,11 @@ func (cfg *Config) validateMCPSidecars() error {
 		default:
 			return fmt.Errorf("%s: transport must be http or sse, got %q", where, s.Transport)
 		}
+		// A shared sidecar's one credential set comes from a named sops vault;
+		// per-agent reads each subscriber's own vaults at provision, so it needs none.
+		if s.IdentityKind() == "shared" && s.SecretsVault == "" {
+			return fmt.Errorf("%s: a shared sidecar requires secrets_vault (the sops vault to read its secrets from)", where)
+		}
 	}
 	for key, ac := range cfg.Agents {
 		for _, name := range ac.Sidecars {
@@ -1095,25 +1100,48 @@ func (cfg *Config) validateMCPSidecars() error {
 				return fmt.Errorf("agent %s: sidecar %q is not defined in mcp_sidecars.servers", key, name)
 			}
 		}
+		// The runner only emits the http MCP entry into the claude-code .mcp.json;
+		// an opencode agent would get the listener + firewall but never the config,
+		// a silent no-op. Reject rather than mislead.
+		if len(ac.Sidecars) > 0 && ac.RuntimeKind() == "opencode" {
+			return fmt.Errorf("agent %s: sidecars are not supported with runtime opencode", key)
+		}
 	}
 	// Deterministic loopback-port allocation (SidecarListeners is the single
 	// source of truth). A shared sidecar listens once; a per-agent sidecar once
 	// per subscribing agent. Check the range fits below 65535 and never collides
-	// with an agent's web_terminal_port (both bind loopback on the same host).
+	// with another loopback port clem binds on the same host.
 	listeners := cfg.SidecarListeners()
 	base := cfg.MCPSidecars.BasePortOrDefault()
 	if n := len(listeners); n > 0 && base+n-1 > 65535 {
 		return fmt.Errorf("mcp_sidecars: %d listeners from base_port %d overflow past 65535", n, base)
 	}
-	webPorts := map[int]string{}
+	reserved := map[int]string{}
 	for key, ac := range cfg.Agents {
 		if ac.WebTerminalPort != 0 {
-			webPorts[ac.WebTerminalPort] = key
+			reserved[ac.WebTerminalPort] = "agent " + key + " web_terminal_port"
 		}
 	}
+	egressInUse := cfg.Egress.Enabled
+	for key := range cfg.Agents {
+		if cfg.EgressEnabledFor(key) {
+			egressInUse = true
+		}
+	}
+	if egressInUse {
+		reserved[cfg.Egress.ProxyPortOrDefault()] = "egress proxy_port"
+		for _, p := range cfg.Egress.AllowLocalhostPorts {
+			reserved[p] = "egress allow_localhost_ports"
+		}
+	}
+	if cfg.Vault.IsAgentVault() {
+		// Default mgmt/MITM ports; a custom vault address near base_port is not parsed here.
+		reserved[14321] = "agent-vault management port"
+		reserved[14322] = "agent-vault MITM port"
+	}
 	for _, l := range listeners {
-		if key, clash := webPorts[l.Port]; clash {
-			return fmt.Errorf("mcp_sidecars: sidecar %q port %d collides with agent %s web_terminal_port", l.Server.Name, l.Port, key)
+		if owner, clash := reserved[l.Port]; clash {
+			return fmt.Errorf("mcp_sidecars: sidecar %q port %d collides with %s", l.Server.Name, l.Port, owner)
 		}
 	}
 	return nil

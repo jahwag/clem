@@ -373,6 +373,11 @@ func GenerateNftables(cfg *config.Config) (string, error) {
 
 const sidecarServiceTemplate = `[Unit]
 Description=clem MCP sidecar {{.Name}} ({{.Project}})
+# Fail-closed: the loopback firewall is the ONLY thing keeping non-subscriber
+# agents off this credential-holding port (mcp-proxy has no incoming auth), so a
+# listener must NOT start if the firewall failed to load — mirrors the egress
+# agent unit's Requires= on its nftables service.
+Requires={{.SidecarNftService}}
 After=network-online.target {{.SidecarNftService}}
 Wants=network-online.target
 
@@ -443,7 +448,10 @@ func GenerateSidecarNftables(cfg *config.Config) (string, error) {
 	fmt.Fprintf(&b, "delete table inet %s\n", table)
 	fmt.Fprintf(&b, "table inet %s {\n", table)
 	b.WriteString("\tchain output {\n")
-	b.WriteString("\t\ttype filter hook output priority 0; policy accept;\n")
+	// priority -10 evaluates before the egress table (priority 0) so the
+	// cross-UID drop is guaranteed to run first rather than relying on the
+	// undefined ordering between two base chains at the same hook+priority.
+	b.WriteString("\t\ttype filter hook output priority -10; policy accept;\n")
 	for _, l := range listeners {
 		uids := make([]int, 0, len(l.Subscribers))
 		for _, ak := range l.Subscribers {

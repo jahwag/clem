@@ -534,25 +534,40 @@ func provisionMCPSidecars() error {
 		return fmt.Errorf("mcp-sidecars: reading sops: %w", err)
 	}
 
-	// Write each listener's root-owned secret env + systemd unit (not started
-	// until the firewall is up).
+	// Pre-flight: resolve EVERY listener's secrets before touching any unit. A
+	// missing secret must abort while the system is still untouched — never
+	// half-installed with a credential-holding listener left behind a stale or
+	// absent firewall (the firewall is the only cross-UID boundary on hosts
+	// without egress containment).
+	type resolved struct {
+		l   config.SidecarListener
+		env map[string]string
+	}
+	pending := make([]resolved, 0, len(listeners))
 	for _, l := range listeners {
 		secretEnv, err := sidecarSecretEnv(l, allVaults)
 		if err != nil {
 			return fmt.Errorf("mcp-sidecars: sidecar %s: %w", l.Server.Name, err)
 		}
-		envPath := proxy.SidecarEnvFile(cfg.Project, l.Server.Name, l.AgentKey)
-		if err := agent.WriteSystemdEnvFile(envPath, secretEnv); err != nil {
-			return fmt.Errorf("mcp-sidecars: sidecar %s: %w", l.Server.Name, err)
-		}
-		svcName := cfg.SidecarServiceName(l.Server.Name, l.AgentKey)
-		if err := agent.InstallServiceByName(svcName, proxy.GenerateSidecarService(cfg, l)); err != nil {
-			return fmt.Errorf("mcp-sidecars: installing %s: %w", svcName, err)
-		}
-		fmt.Printf("  wrote %s + installed %s (port %d, %d secret(s))\n", envPath, svcName, l.Port, len(secretEnv))
+		pending = append(pending, resolved{l, secretEnv})
 	}
 
-	// Loopback firewall first (fail-closed: subscribers only), then the listeners.
+	// Write each listener's root-owned secret env + (re)install its unit.
+	for _, r := range pending {
+		envPath := proxy.SidecarEnvFile(cfg.Project, r.l.Server.Name, r.l.AgentKey)
+		if err := agent.WriteSystemdEnvFile(envPath, r.env); err != nil {
+			return fmt.Errorf("mcp-sidecars: sidecar %s: %w", r.l.Server.Name, err)
+		}
+		svcName := cfg.SidecarServiceName(r.l.Server.Name, r.l.AgentKey)
+		if err := agent.InstallServiceByName(svcName, proxy.GenerateSidecarService(cfg, r.l)); err != nil {
+			return fmt.Errorf("mcp-sidecars: installing %s: %w", svcName, err)
+		}
+		fmt.Printf("  wrote %s + installed %s (port %d, %d secret(s))\n", envPath, svcName, r.l.Port, len(r.env))
+	}
+
+	// Apply the loopback firewall (and REAPPLY on re-provision) BEFORE starting
+	// listeners, so a listener is never reachable on a port the firewall has not
+	// yet locked to its subscribers.
 	nft, err := proxy.GenerateSidecarNftables(cfg)
 	if err != nil {
 		return fmt.Errorf("mcp-sidecars: %w", err)
@@ -564,18 +579,22 @@ func provisionMCPSidecars() error {
 	if err := agent.InstallServiceByName(cfg.SidecarNftablesServiceName(), proxy.GenerateSidecarNftablesService(cfg)); err != nil {
 		return fmt.Errorf("mcp-sidecars: installing firewall service: %w", err)
 	}
-	if err := agent.StartService(cfg.SidecarNftablesServiceName()); err != nil {
-		return fmt.Errorf("mcp-sidecars: starting firewall: %w", err)
+	// restart (not start) so a re-provision re-runs `nft -f` and the updated
+	// ruleset takes effect; only after this succeeds do we (re)start listeners.
+	if err := agent.RestartService(cfg.SidecarNftablesServiceName()); err != nil {
+		return fmt.Errorf("mcp-sidecars: applying firewall: %w", err)
 	}
-	fmt.Printf("  installed + started %s\n", cfg.SidecarNftablesServiceName())
+	fmt.Printf("  installed + applied %s\n", cfg.SidecarNftablesServiceName())
 
-	for _, l := range listeners {
-		svcName := cfg.SidecarServiceName(l.Server.Name, l.AgentKey)
-		if err := agent.StartService(svcName); err != nil {
+	// restart (not start) so a changed ExecStart (port/command) takes effect and
+	// the listener comes up behind the freshly-applied firewall.
+	for _, r := range pending {
+		svcName := cfg.SidecarServiceName(r.l.Server.Name, r.l.AgentKey)
+		if err := agent.RestartService(svcName); err != nil {
 			return fmt.Errorf("mcp-sidecars: starting %s: %w", svcName, err)
 		}
 	}
-	fmt.Printf("  started %d sidecar listener(s)\n", len(listeners))
+	fmt.Printf("  started %d sidecar listener(s)\n", len(pending))
 	return nil
 }
 

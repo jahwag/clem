@@ -1425,6 +1425,7 @@ mcp_sidecars:
       identity: %s
       command: /bin/x
       secrets: [ES_USER]
+      secrets_vault: infra
 agents:
   lead:
     name: "Lead"
@@ -1449,6 +1450,45 @@ func TestLoad_Sidecar_PortCollidesWithWebTerminal(t *testing.T) {
 	// shared sidecar at base_port 14500, agent web_terminal_port 14500 → collision.
 	if _, err := Load(writeYAML(t, portYAML(14500, 14500, "shared"))); err == nil {
 		t.Fatal("expected error: sidecar port collides with web_terminal_port")
+	}
+}
+
+func TestLoad_Sidecar_SharedRequiresSecretsVault(t *testing.T) {
+	if _, err := Load(writeYAML(t, sidecarYAML(`mcp_sidecars:
+  servers:
+    - name: es-ro
+      command: /bin/x
+      secrets: [ES_USER]`))); err == nil {
+		t.Fatal("expected error: shared sidecar requires secrets_vault")
+	}
+}
+
+func TestValidateMCPSidecars_OpencodeRejected(t *testing.T) {
+	cfg := &Config{
+		Project: "t",
+		MCPSidecars: MCPSidecarsConfig{Servers: []SidecarServer{
+			{Name: "es-ro", Identity: "shared", Command: "/bin/x", Secrets: []string{"K"}, SecretsVault: "infra"},
+		}},
+		Agents: map[string]AgentConfig{
+			"lead": {Name: "L", Runtime: "opencode", Sidecars: []string{"es-ro"}},
+		},
+	}
+	if err := cfg.validateMCPSidecars(); err == nil {
+		t.Fatal("expected error: sidecars unsupported with runtime opencode")
+	}
+}
+
+func TestValidateMCPSidecars_AgentVaultPortCollision(t *testing.T) {
+	cfg := &Config{
+		Project: "t",
+		Vault:   VaultBackend{Backend: "agent-vault"},
+		MCPSidecars: MCPSidecarsConfig{BasePort: 14321, Servers: []SidecarServer{
+			{Name: "es-ro", Identity: "shared", Command: "/bin/x", Secrets: []string{"K"}, SecretsVault: "infra"},
+		}},
+		Agents: map[string]AgentConfig{"lead": {Name: "L", Sidecars: []string{"es-ro"}}},
+	}
+	if err := cfg.validateMCPSidecars(); err == nil {
+		t.Fatal("expected error: sidecar port collides with agent-vault management port")
 	}
 }
 

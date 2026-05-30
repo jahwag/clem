@@ -284,7 +284,7 @@ func TestGenerateSidecarNftables(t *testing.T) {
 	for _, want := range []string{
 		"table inet clem_sidecar_myteam {",
 		"delete table inet clem_sidecar_myteam",
-		"type filter hook output priority 0; policy accept;",
+		"type filter hook output priority -10; policy accept;",
 		// Only the two subscriber UIDs may reach port 14500; everyone else dropped.
 		"ip daddr 127.0.0.1 tcp dport 14500 meta skuid != { 1001, 1002 } drop",
 		"ip6 daddr ::1 tcp dport 14500 meta skuid != { 1001, 1002 } drop",
