@@ -34,6 +34,11 @@ func init() {
 	provisionCmd.Flags().StringVar(&provisionGHToken, "gh-token", "", "GitHub token for cloning the repo on the remote (falls back to GH_TOKEN env)")
 }
 
+// decryptForAgent is the vault decryption entry point used by provisioning.
+// A package-level seam (same pattern as agent.sys / runner.userHomeLookup) so
+// tests can exercise the env-construction logic without sops on PATH.
+var decryptForAgent = vault.DecryptForAgent
+
 func runProvision(cmd *cobra.Command, args []string) error {
 	if provisionRemote != "" {
 		token := provisionGHToken
@@ -58,244 +63,297 @@ func runProvision(cmd *cobra.Command, args []string) error {
 	}
 
 	for agentKey, ac := range cfg.Agents {
-		osUser := cfg.OSUsername(agentKey)
-		homeDir := fmt.Sprintf("/home/%s", osUser)
-		fmt.Printf("\n[%s] %s (%s)\n", agentKey, ac.Name, osUser)
-
-		// 1. Create OS user
-		if err := agent.EnsureUser(osUser); err != nil {
-			return fmt.Errorf("agent %s: %w", agentKey, err)
-		}
-
-		// 1a. Install the agent's runtime (claude-code or opencode) into the
-		// user's home so self-update works and the runner always invokes a
-		// binary owned by the agent user.
-		runtimeKind := ac.RuntimeKind()
-		fmt.Printf("  installing runtime %s for %s\n", runtimeKind, osUser)
-		if err := agent.InstallRuntime(osUser, runtimeKind); err != nil {
-			return fmt.Errorf("installing %s for %s: %w", runtimeKind, osUser, err)
-		}
-
-		// 2. Decrypt and write .env (merged with provider env vars)
-		providerEnv, pErr := ac.ProviderEnv()
-		if pErr != nil {
-			return fmt.Errorf("agent %s: %w", agentKey, pErr)
-		}
-		if ac.Provider != "" && ac.Provider != "anthropic" {
-			fmt.Printf("  provider: %s\n", ac.Provider)
-		}
-
-		var ghToken string
-		secrets, err := vault.DecryptForAgent(agentKey, ac.Vaults)
-		if err != nil {
-			fmt.Printf("  warning: could not decrypt secrets for %s: %v\n", agentKey, err)
-			if len(providerEnv) > 0 {
-				// still write provider env so agents can run without vault
-				if err := agent.WriteEnvFile(osUser, homeDir, providerEnv); err != nil {
-					return fmt.Errorf("writing .env for %s: %w", agentKey, err)
-				}
-				fmt.Printf("  wrote %s/.env (provider only, no vault)\n", homeDir)
-			} else {
-				fmt.Println("  skipping .env — run clem vault init and set secrets first")
-			}
-		} else {
-			flatSecrets := vault.FlatSecrets(secrets)
-			merged := make(map[string]string, len(flatSecrets)+len(providerEnv)+12)
-			if ac.VaultBroker {
-				// agent-vault brokered: consolidate this agent's brokered secrets +
-				// their service rules into a single per-agent agent-vault vault, mint
-				// a scoped inject-only token bound to it, and write placeholders. The
-				// real upstream credentials live only inside agent-vault, never in
-				// this agent's .env. One vault per agent works around agent-vault's
-				// single-vault-context proxy (injection only resolves the URL vault).
-				addr := cfg.Vault.AddrOrDefault()
-				// Consolidated vault name must differ from the agent name — agent-vault
-				// conflates a token's vault scope when an agent and a vault share a
-				// name, and the proxy then 403s even serviced hosts.
-				consolidated := config.AgentVaultName(osUser + "-brokered")
-				brokered := map[string]bool{}
-				brokeredKV := make(map[string]string, len(ac.BrokeredSecrets))
-				for _, k := range ac.BrokeredSecrets {
-					v, ok := flatSecrets[k]
-					if !ok {
-						return fmt.Errorf("agent %s: brokered secret %q not found in its vaults", agentKey, k)
-					}
-					brokered[k] = true
-					brokeredKV[k] = v
-				}
-				svcs := brokeredServicesFor(cfg.Vault.Services, brokered, flatSecrets)
-				// seed any extra service credential keys (e.g. a basic-auth username)
-				for _, s := range svcs {
-					for _, ck := range s.CredentialKeys() {
-						if _, have := brokeredKV[ck]; !have {
-							brokeredKV[ck] = flatSecrets[ck]
-						}
-					}
-				}
-				if err := vault.SeedVault(addr, consolidated, brokeredKV); err != nil {
-					return fmt.Errorf("agent %s: seeding consolidated vault: %w", agentKey, err)
-				}
-				if err := vault.ApplyServices(addr, consolidated, svcs); err != nil {
-					return fmt.Errorf("agent %s: applying service rules: %w", agentKey, err)
-				}
-				token, terr := vault.EnsureAgentIdentity(addr, osUser, []string{consolidated})
-				if terr != nil {
-					return fmt.Errorf("agent %s: minting agent-vault token: %w", agentKey, terr)
-				}
-				merged = agent.BrokeredEnv(cfg.Vault, ac, token, consolidated, flatSecrets)
-				for k, v := range providerEnv {
-					merged[k] = v
-				}
-				fmt.Printf("  wrote %s/.env (agent-vault brokered: %d placeholder(s) in vault %s, %d service rule(s))\n",
-					homeDir, len(ac.BrokeredSecrets), consolidated, len(svcs))
-			} else {
-				for k, v := range flatSecrets {
-					merged[k] = v
-				}
-				for k, v := range providerEnv {
-					merged[k] = v
-				}
-				fmt.Printf("  wrote %s/.env (%d secrets + %d provider)\n", homeDir, len(secrets), len(providerEnv))
-			}
-			if err := agent.WriteEnvFile(osUser, homeDir, merged); err != nil {
-				return fmt.Errorf("writing .env for %s: %w", agentKey, err)
-			}
-
-			// If wrangler credentials are present, write the wrangler config file
-			if err := agent.WriteWranglerConfig(osUser, homeDir, secrets); err != nil {
-				fmt.Printf("  warning: writing wrangler config: %v\n", err)
-			} else if flatSecrets["WRANGLER_OAUTH_TOKEN"] != "" {
-				fmt.Printf("  wrote wrangler config for %s\n", osUser)
-			}
-
-			ghToken = flatSecrets["GH_TOKEN"]
-			if ghToken != "" && ac.GitEmail == "" {
-				fmt.Printf("  warning: agent %s has GH_TOKEN but no git_email in clem.yaml — commits may leak operator identity\n", agentKey)
-			}
-		}
-
-		// 3. Write Claude Code settings (skip MCP trust dialog, onboarding)
-		if err := agent.WriteSettings(osUser, homeDir, cfg.Project, ac.Effort); err != nil {
-			return fmt.Errorf("writing settings for %s: %w", agentKey, err)
-		}
-		fmt.Printf("  wrote %s/.claude/settings.json\n", homeDir)
-
-		// 3aa. Install extensions (marketplaces, plugins, skills, MCP servers).
-		// caveman: true is handled as a shorthand inside InstallExtensions.
-		ext := ac.Extensions
-		if ac.Caveman.Enabled() || len(ext.Marketplaces)+len(ext.Plugins)+len(ext.Skills)+len(ext.MCPServers) > 0 {
-			if err := agent.InstallExtensions(osUser, homeDir, ext, ac.Caveman, secrets); err != nil {
-				fmt.Printf("  warning: extensions for %s: %v\n", osUser, err)
-			} else {
-				fmt.Printf("  installed extensions for %s\n", osUser)
-			}
-		}
-
-		// 3a. Generate SSH keypair (idempotent)
-		pubKey, err := agent.EnsureSSHKey(osUser, homeDir)
-		if err != nil {
-			fmt.Printf("  warning: ssh key for %s: %v\n", osUser, err)
-		} else {
-			fmt.Printf("  ssh pubkey: %s\n", pubKey)
-		}
-
-		// 3b. Configure git commit signing and user identity via the agent's SSH key.
-		if pubKey != "" {
-			if err := agent.ConfigureGit(osUser, homeDir, pubKey, ac.GitName, ac.GitEmail); err != nil {
-				fmt.Printf("  warning: git config for %s: %v\n", osUser, err)
-			} else {
-				fmt.Printf("  configured git signing + identity for %s\n", osUser)
-			}
-
-			// 3b1. Register the signing key on GitHub so commits show as verified.
-			// Requires write:ssh_signing_key scope on the agent's GH_TOKEN.
-			// Title includes the OS user so multiple agents sharing a GitHub
-			// account are distinguishable in https://github.com/settings/ssh/signing.
-			signingTitle := fmt.Sprintf("clem-%s", osUser)
-			if err := agent.RegisterSSHSigningKey(pubKey, ghToken, signingTitle); err != nil {
-				fmt.Printf("  warning: register SSH signing key for %s: %v\n", osUser, err)
-			} else if ghToken != "" {
-				fmt.Printf("  registered SSH signing key on GitHub for %s\n", osUser)
-			}
-		}
-
-		// 3c. Install client-side pre-push hook that scans for secret patterns.
-		// Defense-in-depth alongside the existing .gitignore_global + GitHub
-		// Push Protection. Refuses any push whose diff contains credentials.
-		if err := agent.InstallGitHooks(osUser, homeDir); err != nil {
-			return fmt.Errorf("installing git hooks for %s: %w", osUser, err)
-		}
-		fmt.Printf("  installed pre-push secret-scan hook\n")
-
-		// 4. Ensure agent-owned directories (workdir, ~/.local/bin, ~/.claude).
-		// MkdirAll as root would leave intermediate parents (.local, .claude)
-		// root-owned, which breaks the runner's log writes and claude's
-		// credential reads. EnsureOwnedDir chowns the full tree.
-		workDir := filepath.Join(homeDir, cfg.Project)
-		binDir := filepath.Join(homeDir, ".local", "bin")
-		claudeDir := filepath.Join(homeDir, ".claude")
-		for _, d := range []string{workDir, binDir, claudeDir} {
-			if err := agent.EnsureOwnedDir(d, osUser); err != nil {
-				return fmt.Errorf("ensuring %s: %w", d, err)
-			}
-		}
-		content, mode, err := agentdoc.Render(cfg, agentKey, ".")
-		if err != nil {
-			return fmt.Errorf("rendering CLAUDE.local.md for %s: %w", agentKey, err)
-		}
-		if content != nil {
-			dst := filepath.Join(workDir, "CLAUDE.local.md")
-			if err := os.WriteFile(dst, content, 0644); err != nil {
-				return fmt.Errorf("writing %s: %w", dst, err)
-			}
-			fmt.Printf("  wrote %s (%s, %d bytes)\n", dst, mode, len(content))
-		}
-		chownDir(workDir, osUser)
-
-		// 4. Write runner.sh
-		runnerContent := runner.Generate(cfg, agentKey)
-		runnerPath := filepath.Join(binDir, "clem-runner.sh")
-		if err := os.WriteFile(runnerPath, []byte(runnerContent), 0755); err != nil {
-			return fmt.Errorf("writing runner.sh for %s: %w", agentKey, err)
-		}
-		chownDir(runnerPath, osUser)
-		fmt.Printf("  wrote %s\n", runnerPath)
-
-		// 5. Install systemd service
-		svcContent, err := runner.GenerateService(cfg, agentKey)
-		if err != nil {
-			return fmt.Errorf("generating service for %s: %w", agentKey, err)
-		}
-		if err := agent.InstallService(cfg, agentKey, svcContent); err != nil {
-			return fmt.Errorf("installing service for %s: %w", agentKey, err)
-		}
-		fmt.Printf("  installed %s\n", cfg.ServiceName(agentKey))
-
-		// 6. Install ttyd web terminal service (if configured)
-		if ac.WebTerminalPort > 0 {
-			ttydContent := runner.GenerateTtydService(cfg, agentKey)
-			ttydSvcName := cfg.TtydServiceName(agentKey)
-			if err := agent.InstallServiceByName(ttydSvcName, ttydContent); err != nil {
-				return fmt.Errorf("installing ttyd service for %s: %w", agentKey, err)
-			}
-			fmt.Printf("  installed %s (port %d)\n", ttydSvcName, ac.WebTerminalPort)
+		if err := provisionAgent(agentKey, ac); err != nil {
+			return err
 		}
 	}
 
-	// 5b. Egress containment (pipelock proxy + nftables UID firewall), host-level.
+	// Egress containment (pipelock proxy + nftables UID firewall), host-level.
 	// Runs after the agent loop so all agent OS users exist for UID resolution.
 	if err := provisionEgress(); err != nil {
 		return err
 	}
 
-	// 5c. Privileged MCP sidecars: stand up mcp-proxy listeners under a dedicated
+	// Privileged MCP sidecars: stand up mcp-proxy listeners under a dedicated
 	// system user so secrets that can't be HTTP-brokered stay out of agent .envs.
 	// Also after the agent loop — the loopback firewall keys on subscriber UIDs.
 	if err := provisionMCPSidecars(); err != nil {
 		return err
 	}
 
-	// 6. Install watchdog
+	if err := provisionWatchdog(); err != nil {
+		return err
+	}
+
+	if err := provisionManagedSettings(); err != nil {
+		return err
+	}
+
+	fmt.Printf("\nProvisioning complete. Run 'clem login' then 'clem up'.\n")
+	return nil
+}
+
+// provisionAgent provisions one agent end-to-end: OS user, runtime CLI, .env
+// (plain or brokered), Claude settings, extensions, SSH/git identity, secret
+// hooks, workdir + runner script, and systemd services.
+func provisionAgent(agentKey string, ac config.AgentConfig) error {
+	osUser := cfg.OSUsername(agentKey)
+	homeDir := fmt.Sprintf("/home/%s", osUser)
+	fmt.Printf("\n[%s] %s (%s)\n", agentKey, ac.Name, osUser)
+
+	// 1. Create OS user
+	if err := agent.EnsureUser(osUser); err != nil {
+		return fmt.Errorf("agent %s: %w", agentKey, err)
+	}
+
+	// 1a. Install the agent's runtime (claude-code or opencode) into the
+	// user's home so self-update works and the runner always invokes a
+	// binary owned by the agent user.
+	runtimeKind := ac.RuntimeKind()
+	fmt.Printf("  installing runtime %s for %s\n", runtimeKind, osUser)
+	if err := agent.InstallRuntime(osUser, runtimeKind); err != nil {
+		return fmt.Errorf("installing %s for %s: %w", runtimeKind, osUser, err)
+	}
+
+	// 2. Decrypt and write .env (merged with provider env vars)
+	secrets, ghToken, err := writeAgentEnv(agentKey, ac, osUser, homeDir)
+	if err != nil {
+		return err
+	}
+
+	// 3. Write Claude Code settings (skip MCP trust dialog, onboarding)
+	if err := agent.WriteSettings(osUser, homeDir, cfg.Project, ac.Effort); err != nil {
+		return fmt.Errorf("writing settings for %s: %w", agentKey, err)
+	}
+	fmt.Printf("  wrote %s/.claude/settings.json\n", homeDir)
+
+	// 3aa. Install extensions (marketplaces, plugins, skills, MCP servers).
+	// caveman: true is handled as a shorthand inside InstallExtensions.
+	ext := ac.Extensions
+	if ac.Caveman.Enabled() || len(ext.Marketplaces)+len(ext.Plugins)+len(ext.Skills)+len(ext.MCPServers) > 0 {
+		if err := agent.InstallExtensions(osUser, homeDir, ext, ac.Caveman, secrets); err != nil {
+			fmt.Printf("  warning: extensions for %s: %v\n", osUser, err)
+		} else {
+			fmt.Printf("  installed extensions for %s\n", osUser)
+		}
+	}
+
+	// 3a. Generate SSH keypair (idempotent)
+	pubKey, err := agent.EnsureSSHKey(osUser, homeDir)
+	if err != nil {
+		fmt.Printf("  warning: ssh key for %s: %v\n", osUser, err)
+	} else {
+		fmt.Printf("  ssh pubkey: %s\n", pubKey)
+	}
+
+	// 3b. Configure git commit signing and user identity via the agent's SSH key.
+	if pubKey != "" {
+		if err := agent.ConfigureGit(osUser, homeDir, pubKey, ac.GitName, ac.GitEmail); err != nil {
+			fmt.Printf("  warning: git config for %s: %v\n", osUser, err)
+		} else {
+			fmt.Printf("  configured git signing + identity for %s\n", osUser)
+		}
+
+		// 3b1. Register the signing key on GitHub so commits show as verified.
+		// Requires write:ssh_signing_key scope on the agent's GH_TOKEN.
+		// Title includes the OS user so multiple agents sharing a GitHub
+		// account are distinguishable in https://github.com/settings/ssh/signing.
+		signingTitle := fmt.Sprintf("clem-%s", osUser)
+		if err := agent.RegisterSSHSigningKey(pubKey, ghToken, signingTitle); err != nil {
+			fmt.Printf("  warning: register SSH signing key for %s: %v\n", osUser, err)
+		} else if ghToken != "" {
+			fmt.Printf("  registered SSH signing key on GitHub for %s\n", osUser)
+		}
+	}
+
+	// 3c. Install client-side pre-push hook that scans for secret patterns.
+	// Defense-in-depth alongside the existing .gitignore_global + GitHub
+	// Push Protection. Refuses any push whose diff contains credentials.
+	if err := agent.InstallGitHooks(osUser, homeDir); err != nil {
+		return fmt.Errorf("installing git hooks for %s: %w", osUser, err)
+	}
+	fmt.Printf("  installed pre-push secret-scan hook\n")
+
+	// 4. Ensure agent-owned directories (workdir, ~/.local/bin, ~/.claude).
+	// MkdirAll as root would leave intermediate parents (.local, .claude)
+	// root-owned, which breaks the runner's log writes and claude's
+	// credential reads. EnsureOwnedDir chowns the full tree.
+	workDir := filepath.Join(homeDir, cfg.Project)
+	binDir := filepath.Join(homeDir, ".local", "bin")
+	claudeDir := filepath.Join(homeDir, ".claude")
+	for _, d := range []string{workDir, binDir, claudeDir} {
+		if err := agent.EnsureOwnedDir(d, osUser); err != nil {
+			return fmt.Errorf("ensuring %s: %w", d, err)
+		}
+	}
+	content, mode, err := agentdoc.Render(cfg, agentKey, ".")
+	if err != nil {
+		return fmt.Errorf("rendering CLAUDE.local.md for %s: %w", agentKey, err)
+	}
+	if content != nil {
+		dst := filepath.Join(workDir, "CLAUDE.local.md")
+		if err := os.WriteFile(dst, content, 0644); err != nil {
+			return fmt.Errorf("writing %s: %w", dst, err)
+		}
+		fmt.Printf("  wrote %s (%s, %d bytes)\n", dst, mode, len(content))
+	}
+	chownDir(workDir, osUser)
+
+	// 4a. Write runner.sh
+	runnerContent := runner.Generate(cfg, agentKey)
+	runnerPath := filepath.Join(binDir, "clem-runner.sh")
+	if err := os.WriteFile(runnerPath, []byte(runnerContent), 0755); err != nil {
+		return fmt.Errorf("writing runner.sh for %s: %w", agentKey, err)
+	}
+	chownDir(runnerPath, osUser)
+	fmt.Printf("  wrote %s\n", runnerPath)
+
+	// 5. Install systemd service
+	svcContent, err := runner.GenerateService(cfg, agentKey)
+	if err != nil {
+		return fmt.Errorf("generating service for %s: %w", agentKey, err)
+	}
+	if err := agent.InstallService(cfg, agentKey, svcContent); err != nil {
+		return fmt.Errorf("installing service for %s: %w", agentKey, err)
+	}
+	fmt.Printf("  installed %s\n", cfg.ServiceName(agentKey))
+
+	// 6. Install ttyd web terminal service (if configured)
+	if ac.WebTerminalPort > 0 {
+		ttydContent := runner.GenerateTtydService(cfg, agentKey)
+		ttydSvcName := cfg.TtydServiceName(agentKey)
+		if err := agent.InstallServiceByName(ttydSvcName, ttydContent); err != nil {
+			return fmt.Errorf("installing ttyd service for %s: %w", agentKey, err)
+		}
+		fmt.Printf("  installed %s (port %d)\n", ttydSvcName, ac.WebTerminalPort)
+	}
+	return nil
+}
+
+// writeAgentEnv decrypts the agent's vaults and writes /home/<user>/.env —
+// plain values, or placeholders plus a freshly-minted inject-only token when
+// the agent is brokered. Returns the qualified secrets map (for extensions'
+// vault refs) and the agent's GH_TOKEN (for signing-key registration). A
+// decrypt failure is a warning, not an error: provider-only env still lets an
+// agent run without a vault.
+func writeAgentEnv(agentKey string, ac config.AgentConfig, osUser, homeDir string) (map[string]string, string, error) {
+	providerEnv, pErr := ac.ProviderEnv()
+	if pErr != nil {
+		return nil, "", fmt.Errorf("agent %s: %w", agentKey, pErr)
+	}
+	if ac.Provider != "" && ac.Provider != "anthropic" {
+		fmt.Printf("  provider: %s\n", ac.Provider)
+	}
+
+	secrets, err := decryptForAgent(agentKey, ac.Vaults)
+	if err != nil {
+		fmt.Printf("  warning: could not decrypt secrets for %s: %v\n", agentKey, err)
+		if len(providerEnv) > 0 {
+			// still write provider env so agents can run without vault
+			if err := agent.WriteEnvFile(osUser, homeDir, providerEnv); err != nil {
+				return nil, "", fmt.Errorf("writing .env for %s: %w", agentKey, err)
+			}
+			fmt.Printf("  wrote %s/.env (provider only, no vault)\n", homeDir)
+		} else {
+			fmt.Println("  skipping .env — run clem vault init and set secrets first")
+		}
+		return nil, "", nil
+	}
+
+	flatSecrets := vault.FlatSecrets(secrets)
+	merged := make(map[string]string, len(flatSecrets)+len(providerEnv)+12)
+	if ac.VaultBroker {
+		// agent-vault brokered: consolidate this agent's brokered secrets +
+		// their service rules into a single per-agent agent-vault vault, mint
+		// a scoped inject-only token bound to it, and write placeholders. The
+		// real upstream credentials live only inside agent-vault, never in
+		// this agent's .env. One vault per agent works around agent-vault's
+		// single-vault-context proxy (injection only resolves the URL vault).
+		addr := cfg.Vault.AddrOrDefault()
+		consolidated, brokeredKV, svcs, bErr := brokeredSeedInputs(osUser, ac, cfg.Vault.Services, flatSecrets)
+		if bErr != nil {
+			return nil, "", fmt.Errorf("agent %s: %w", agentKey, bErr)
+		}
+		if err := vault.SeedVault(addr, consolidated, brokeredKV); err != nil {
+			return nil, "", fmt.Errorf("agent %s: seeding consolidated vault: %w", agentKey, err)
+		}
+		if err := vault.ApplyServices(addr, consolidated, svcs); err != nil {
+			return nil, "", fmt.Errorf("agent %s: applying service rules: %w", agentKey, err)
+		}
+		token, terr := vault.EnsureAgentIdentity(addr, osUser, []string{consolidated})
+		if terr != nil {
+			return nil, "", fmt.Errorf("agent %s: minting agent-vault token: %w", agentKey, terr)
+		}
+		merged = agent.BrokeredEnv(cfg.Vault, ac, token, consolidated, flatSecrets)
+		for k, v := range providerEnv {
+			merged[k] = v
+		}
+		fmt.Printf("  wrote %s/.env (agent-vault brokered: %d placeholder(s) in vault %s, %d service rule(s))\n",
+			homeDir, len(ac.BrokeredSecrets), consolidated, len(svcs))
+	} else {
+		for k, v := range flatSecrets {
+			merged[k] = v
+		}
+		for k, v := range providerEnv {
+			merged[k] = v
+		}
+		fmt.Printf("  wrote %s/.env (%d secrets + %d provider)\n", homeDir, len(secrets), len(providerEnv))
+	}
+	if err := agent.WriteEnvFile(osUser, homeDir, merged); err != nil {
+		return nil, "", fmt.Errorf("writing .env for %s: %w", agentKey, err)
+	}
+
+	// If wrangler credentials are present, write the wrangler config file
+	if err := agent.WriteWranglerConfig(osUser, homeDir, secrets); err != nil {
+		fmt.Printf("  warning: writing wrangler config: %v\n", err)
+	} else if flatSecrets["WRANGLER_OAUTH_TOKEN"] != "" {
+		fmt.Printf("  wrote wrangler config for %s\n", osUser)
+	}
+
+	ghToken := flatSecrets["GH_TOKEN"]
+	if ghToken != "" && ac.GitEmail == "" {
+		fmt.Printf("  warning: agent %s has GH_TOKEN but no git_email in clem.yaml — commits may leak operator identity\n", agentKey)
+	}
+	return secrets, ghToken, nil
+}
+
+// brokeredSeedInputs resolves everything the brokering flow needs for one
+// agent before any side effect: the consolidated per-agent vault name, the
+// key/values to seed into it (the brokered secrets plus any extra credential
+// keys referenced by applicable service rules, e.g. a basic-auth username),
+// and the applicable service rules themselves. Pure — seeding, rule
+// application, and token mint stay in the caller, so a missing brokered
+// secret aborts before agent-vault is touched.
+//
+// The consolidated vault name must differ from the agent name — agent-vault
+// conflates a token's vault scope when an agent and a vault share a name, and
+// the proxy then 403s even serviced hosts.
+func brokeredSeedInputs(osUser string, ac config.AgentConfig, services []config.Service, flat map[string]string) (string, map[string]string, []config.Service, error) {
+	consolidated := config.AgentVaultName(osUser + "-brokered")
+	brokered := map[string]bool{}
+	kv := make(map[string]string, len(ac.BrokeredSecrets))
+	for _, k := range ac.BrokeredSecrets {
+		v, ok := flat[k]
+		if !ok {
+			return "", nil, nil, fmt.Errorf("brokered secret %q not found in its vaults", k)
+		}
+		brokered[k] = true
+		kv[k] = v
+	}
+	svcs := brokeredServicesFor(services, brokered, flat)
+	// seed any extra service credential keys (e.g. a basic-auth username)
+	for _, s := range svcs {
+		for _, ck := range s.CredentialKeys() {
+			if _, have := kv[ck]; !have {
+				kv[ck] = flat[ck]
+			}
+		}
+	}
+	return consolidated, kv, svcs, nil
+}
+
+// provisionWatchdog writes the watchdog script and installs its service+timer.
+func provisionWatchdog() error {
 	fmt.Printf("\n[watchdog]\n")
 	wdScript := watchdog.GenerateScript(cfg)
 	wdPath := fmt.Sprintf("/usr/local/bin/clem-watchdog-%s.sh", cfg.Project)
@@ -310,15 +368,17 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("installing watchdog timer: %w", err)
 	}
 	fmt.Printf("  installed %s\n", cfg.WatchdogTimerName())
+	return nil
+}
 
-	// 7. Write host-level managed-settings.json (root-owned; agent users cannot override)
+// provisionManagedSettings writes the host-level managed-settings.json
+// (root-owned; agent users cannot override).
+func provisionManagedSettings() error {
 	managedPath := "/etc/claude-code/managed-settings.json"
 	if err := agent.WriteHostManagedSettings(cfg, managedPath); err != nil {
 		return fmt.Errorf("writing managed-settings: %w", err)
 	}
 	fmt.Printf("\nwrote %s\n", managedPath)
-
-	fmt.Printf("\nProvisioning complete. Run 'clem login' then 'clem up'.\n")
 	return nil
 }
 
@@ -545,7 +605,7 @@ func provisionMCPSidecars() error {
 	}
 	pending := make([]resolved, 0, len(listeners))
 	for _, l := range listeners {
-		secretEnv, err := sidecarSecretEnv(l, allVaults)
+		secretEnv, err := sidecarSecretEnv(cfg, l, allVaults)
 		if err != nil {
 			return fmt.Errorf("mcp-sidecars: sidecar %s: %w", l.Server.Name, err)
 		}
@@ -601,11 +661,11 @@ func provisionMCPSidecars() error {
 // sidecarSecretEnv resolves the upstream secret values for a listener. A shared
 // listener reads the named sops vault (secrets_vault); a per-agent listener
 // reads the subscribing agent's own vaults (the value differs per agent).
-func sidecarSecretEnv(l config.SidecarListener, allVaults map[string]map[string]string) (map[string]string, error) {
+func sidecarSecretEnv(c *config.Config, l config.SidecarListener, allVaults map[string]map[string]string) (map[string]string, error) {
 	var source map[string]string
 	if l.AgentKey != "" {
-		ac := cfg.Agents[l.AgentKey]
-		sec, err := vault.DecryptForAgent(l.AgentKey, ac.Vaults)
+		ac := c.Agents[l.AgentKey]
+		sec, err := decryptForAgent(l.AgentKey, ac.Vaults)
 		if err != nil {
 			return nil, fmt.Errorf("decrypting secrets for %s: %w", l.AgentKey, err)
 		}

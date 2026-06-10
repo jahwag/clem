@@ -14,7 +14,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const latestReleaseURL = "https://api.github.com/repos/jahwag/clem/releases/latest"
+// latestReleaseURL is a var so tests can point it at an httptest server.
+var latestReleaseURL = "https://api.github.com/repos/jahwag/clem/releases/latest"
 
 var updateCmd = &cobra.Command{
 	Use:   "update",
@@ -26,13 +27,28 @@ func init() {
 	rootCmd.AddCommand(updateCmd)
 }
 
+type ghAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+	Size               int64  `json:"size"`
+}
+
 type ghRelease struct {
-	TagName string `json:"tag_name"`
-	Assets  []struct {
-		Name               string `json:"name"`
-		BrowserDownloadURL string `json:"browser_download_url"`
-		Size               int64  `json:"size"`
-	} `json:"assets"`
+	TagName string    `json:"tag_name"`
+	Assets  []ghAsset `json:"assets"`
+}
+
+// pickAsset returns the release asset for the given platform (asset names
+// follow the goreleaser template clem_<os>_<arch>), or nil if the release
+// carries no binary for it.
+func pickAsset(rel *ghRelease, goos, goarch string) *ghAsset {
+	prefix := fmt.Sprintf("clem_%s_%s", goos, goarch)
+	for i := range rel.Assets {
+		if strings.HasPrefix(rel.Assets[i].Name, prefix) {
+			return &rel.Assets[i]
+		}
+	}
+	return nil
 }
 
 func runUpdate(cmd *cobra.Command, args []string) error {
@@ -50,18 +66,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Latest:          %s\n", rel.TagName)
 
-	assetName := fmt.Sprintf("clem_%s_%s", runtime.GOOS, runtime.GOARCH)
-	var asset *struct {
-		Name               string `json:"name"`
-		BrowserDownloadURL string `json:"browser_download_url"`
-		Size               int64  `json:"size"`
-	}
-	for i := range rel.Assets {
-		if strings.HasPrefix(rel.Assets[i].Name, assetName) {
-			asset = &rel.Assets[i]
-			break
-		}
-	}
+	asset := pickAsset(rel, runtime.GOOS, runtime.GOARCH)
 	if asset == nil {
 		return fmt.Errorf("no prebuilt binary for %s/%s in release %s — build from source", runtime.GOOS, runtime.GOARCH, rel.TagName)
 	}

@@ -263,3 +263,28 @@ func TestInit_ReuseExistingKey(t *testing.T) {
 		t.Errorf(".sops.yaml not created: %v", err)
 	}
 }
+
+// TestFlatSecrets pins the vault-prefix stripping used for .env exports:
+// "vaultName.keyName" becomes bare "keyName", unqualified keys pass through,
+// and only the first dot delimits (values like keys with dots keep the rest).
+func TestFlatSecrets(t *testing.T) {
+	in := map[string]string{
+		"github.GH_TOKEN":      "tok",
+		"discord-lead.TOKEN.X": "weird", // only the first dot is the vault delimiter
+		"BARE_KEY":             "v",
+	}
+	got := FlatSecrets(in)
+	want := map[string]string{
+		"GH_TOKEN": "tok",
+		"TOKEN.X":  "weird",
+		"BARE_KEY": "v",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("FlatSecrets = %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("FlatSecrets[%q] = %q, want %q", k, got[k], v)
+		}
+	}
+}
