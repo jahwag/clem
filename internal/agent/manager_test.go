@@ -1327,12 +1327,12 @@ func withSkillsStub(t *testing.T) *skillsStub {
 
 func TestSkillsCacheName(t *testing.T) {
 	cases := map[string]string{
-		"https://github.com/foo/bar":             "bar",
-		"https://github.com/foo/bar.git":         "bar",
-		"https://github.com/foo/bar/":            "bar",
-		"git@github.com:foo/bar.git":             "bar",
-		"ssh://git@self-hosted/foo/bar.git":      "bar",
-		"https://gitlab.example.com/g/sub/repo":  "repo",
+		"https://github.com/foo/bar":            "bar",
+		"https://github.com/foo/bar.git":        "bar",
+		"https://github.com/foo/bar/":           "bar",
+		"git@github.com:foo/bar.git":            "bar",
+		"ssh://git@self-hosted/foo/bar.git":     "bar",
+		"https://gitlab.example.com/g/sub/repo": "repo",
 	}
 	for in, want := range cases {
 		if got := skillsCacheName(in); got != want {
@@ -1354,7 +1354,7 @@ func TestSyncSkillsRepo_SymlinksSharedAndAgent(t *testing.T) {
 	for _, p := range []string{
 		filepath.Join(cache, "shared", "skill-a", "SKILL.md"),
 		filepath.Join(cache, "worker", "skill-b", "SKILL.md"),
-		filepath.Join(cache, "lead", "skill-c", "SKILL.md"),     // not for worker
+		filepath.Join(cache, "lead", "skill-c", "SKILL.md"),       // not for worker
 		filepath.Join(cache, "random-dir", "skill-d", "SKILL.md"), // ignored
 	} {
 		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {

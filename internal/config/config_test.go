@@ -1949,10 +1949,10 @@ agents:
 
 func TestLoad_SkillsRepoAccepted(t *testing.T) {
 	cases := map[string]string{
-		"github https":  "https://github.com/example/myteam-skills",
-		"github .git":   "https://github.com/example/myteam-skills.git",
-		"gitlab ssh":    "git@gitlab.example.com:org/skills.git",
-		"self-hosted":   "ssh://git@self.example.com/org/skills.git",
+		"github https": "https://github.com/example/myteam-skills",
+		"github .git":  "https://github.com/example/myteam-skills.git",
+		"gitlab ssh":   "git@gitlab.example.com:org/skills.git",
+		"self-hosted":  "ssh://git@self.example.com/org/skills.git",
 	}
 	for name, url := range cases {
 		t.Run(name, func(t *testing.T) {
