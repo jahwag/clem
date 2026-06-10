@@ -23,5 +23,4 @@ agents:
     model: "claude-sonnet-4-6"
     subagent_model: "claude-sonnet-4-6"
     iteration: 5m
-    reports_to: lead
     prompt: "Act as Athena per CLAUDE.local.md. Check Discord #tasks for tasks assigned to you. Work on ONE task. When done post results and run: kill $PPID. If no tasks: kill $PPID"

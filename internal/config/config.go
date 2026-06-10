@@ -1,7 +1,10 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"sort"
@@ -949,6 +952,11 @@ func expandEnv(raw []byte) []byte {
 // Load reads and parses clem.yaml from the given path.
 // ${ENV_VAR} and ${ENV_VAR:-default} references in the YAML are expanded from
 // the process environment at load time.
+//
+// Unknown keys are a hard error (KnownFields). clem.yaml carries security
+// dispositions — egress, vault_broker, brokered_secrets, permissions — and a
+// silently-ignored typo in any of them would leave a control off while the
+// operator believes it is on. Fail loud at load instead.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -956,8 +964,10 @@ func Load(path string) (*Config, error) {
 	}
 	data = expandEnv(data)
 	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing config: %w", err)
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("parsing config: %w (unknown keys are rejected — check for typos against the clem.yaml reference)", err)
 	}
 	if cfg.Project == "" {
 		return nil, fmt.Errorf("config missing required field: project")

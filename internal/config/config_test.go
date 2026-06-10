@@ -36,6 +36,80 @@ agents:
     model: "claude-sonnet-4-6"` + cavemanLine + "\n"
 }
 
+// TestLoad_RejectsUnknownKeys pins the strict-decoding contract: clem.yaml
+// carries security dispositions (egress, vault_broker, brokered_secrets,
+// permissions), so a misspelled key must be a load error, not a silent no-op
+// that leaves a containment control off.
+func TestLoad_RejectsUnknownKeys(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+	}{
+		{"unknown top-level key", `
+project: myteam
+egresss:
+  enabled: true
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+`},
+		{"unknown agent key", `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+    vault_brokerr: true
+`},
+		{"unknown egress key", `
+project: myteam
+egress:
+  enabled: true
+  postures: strict
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeYAML(t, tc.yaml)
+			_, err := Load(path)
+			if err == nil {
+				t.Fatal("Load should reject a config with an unknown key")
+			}
+			if !strings.Contains(err.Error(), "not found in type") {
+				t.Errorf("error should name the unknown field, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestLoad_EmptyFileStillReportsMissingProject pins that strict decoding's
+// io.EOF on an empty document degrades to the original "missing project"
+// error rather than a confusing decode failure.
+func TestLoad_EmptyFileStillReportsMissingProject(t *testing.T) {
+	path := writeYAML(t, "")
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "project") {
+		t.Errorf("want missing-project error for empty config, got: %v", err)
+	}
+}
+
 func TestCavemanLevel_StringLevels(t *testing.T) {
 	cases := []struct {
 		yaml    string
