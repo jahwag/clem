@@ -22,6 +22,9 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  # Pinned for determinism (matches ci.yml). The provisioned hook itself
+  # forces LC_ALL=C internally, so assertions here don't depend on locale.
+  LANG: "C.UTF-8"
 
 jobs:
   provision:
