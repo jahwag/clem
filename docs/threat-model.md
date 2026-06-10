@@ -18,7 +18,7 @@ clem deliberately splits work across distinct OS principals so the kernel, not t
 | **agent UID** (`<project>-<agent>`) | **untrusted** | continuously, at runtime |
 | **`clem-proxy`** (egress proxy) | trusted, isolated | continuously, separate UID |
 | **`clem-vault`** (credential broker) | trusted, isolated | continuously, separate UID |
-| **`clem-mcp`** (credential sidecar) | trusted, isolated | **planned** — schema landed, runtime not yet shipped |
+| **`clem-mcp`** (credential sidecar) | trusted, isolated | continuously, separate UID |
 | **the `clem` binary** | trusted | **provision time only — not in the loop at runtime** |
 
 The agent UID can read none of the trusted principals' files (`0700`/`0600`, foreign ownership) and cannot become them. The sops age key, when present, is root-owned; the agent cannot decrypt the vault even though the ciphertext is on the host.
@@ -32,8 +32,8 @@ A TLS-MITM credential proxy ([Infisical agent-vault](https://github.com/Infisica
 - The minted per-agent token is **instance-role `no-access` + vault-role `proxy` ONLY** — it can cause injection but cannot read a credential back or mutate vaults/services (verified: a proxy token gets `Member role required` / `not logged in` on every read/write surface).
 - sops remains the git-committable source of truth and re-seeds the broker at every provision (lossless rollback).
 
-### 2. sidecar — non-HTTP, gateway-identity, and scoped-internal secrets  *(planned — config schema landed; runtime not yet shipped)*
-For secrets the broker can't rewrite (a chat-gateway WebSocket token, an internal database), a secret-holding **MCP server runs as `clem-mcp`** (a separate UID) and exposes only specific tools over a **loopback HTTP MCP transport** with a per-agent bearer token. The agent calls a tool and gets a result; it never sees the credential, and it gets a **narrow capability** (e.g. read-only) rather than the full API.
+### 2. sidecar — non-HTTP, gateway-identity, and scoped-internal secrets
+For secrets the broker can't rewrite (a chat-gateway WebSocket token, an internal database), a secret-holding **MCP server runs as `clem-mcp`** (a separate UID) and exposes only specific tools over a **loopback HTTP MCP transport**. The agent calls a tool and gets a result; it never sees the credential, and it gets a **narrow capability** (e.g. read-only) rather than the full API. Each listener's loopback port is locked to its subscribing agent UID(s) by a dedicated nftables rule, and the listener `Requires=` that firewall unit (fail-closed). Declared via `mcp_sidecars:` in `clem.yaml`; provisioned as systemd services with the upstream secret supplied root-side via `EnvironmentFile`.
 > A **stdio** MCP server does NOT provide this — it runs as the agent's own UID and its secret is in the agent's reach. Isolation requires a *different principal*; the sidecar is that principal.
 
 ### 3. remove — unused credentials

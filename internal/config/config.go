@@ -257,10 +257,13 @@ type Config struct {
 // access (e.g. read-only Elasticsearch). A stdio MCP server cannot provide this:
 // it runs as the agent's own UID, so its secret is in the agent's reach.
 //
-// FOUNDATION ONLY (this commit): schema + validation. Provision wiring (the
-// clem-mcp system user, the stdio→HTTP bridge install, the systemd loopback
-// service, per-agent token mint, nftables allow-rule, and runner .mcp.json http
-// entry) is the follow-up build. See docs/threat-model.md and the design notes.
+// Provision wiring lives in cmd/provision.go (provisionMCPSidecars) and
+// internal/proxy: the clem-mcp system user, the pinned mcp-proxy stdio→HTTP
+// bridge, one systemd loopback listener per subscribed sidecar (upstream
+// secret supplied root-side via EnvironmentFile), a per-port nftables rule
+// restricting each listener to its subscriber UID(s) — the listener
+// Requires= that firewall unit, fail-closed — and the http entry in the
+// runner-generated .mcp.json. See docs/threat-model.md.
 type MCPSidecarsConfig struct {
 	// SystemUser is the dedicated non-login user that runs all sidecar servers.
 	// Default "clem-mcp".
@@ -274,9 +277,10 @@ type MCPSidecarsConfig struct {
 }
 
 // SidecarServer is one privileged MCP server definition. The agent sees only a
-// loopback HTTP MCP endpoint + a scoped bearer token; the upstream credential
-// lives only in the sidecar process (sourced from Secrets, written to a
-// root-owned env file, never any agent .env).
+// loopback HTTP MCP endpoint, reachable solely from its own UID (enforced by
+// the sidecar nftables rule); the upstream credential lives only in the
+// sidecar process (sourced from Secrets, written to a root-owned env file,
+// never any agent .env).
 type SidecarServer struct {
 	// Name is the sidecar slug (matches validName) and the MCP server name the
 	// agent sees in .mcp.json unless Tool overrides it.
@@ -612,8 +616,9 @@ type AgentConfig struct {
 	// shorthand that prepends the caveman marketplace and plugin entries.
 	Extensions ExtensionsConfig `yaml:"extensions"`
 	// Sidecars lists names of mcp_sidecars.servers this agent subscribes to. Each
-	// gives the agent a loopback HTTP MCP endpoint + a scoped bearer token, with
-	// the upstream credential held by the clem-mcp user (never this agent's .env).
+	// gives the agent a loopback HTTP MCP endpoint locked to its UID by the
+	// sidecar nftables rule, with the upstream credential held by the clem-mcp
+	// user (never this agent's .env).
 	Sidecars []string `yaml:"sidecars"`
 	// Permissions configures root-owned /etc/claude-code/managed-settings.json
 	// deny rules for this agent. managed-settings.json has higher precedence
