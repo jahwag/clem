@@ -120,3 +120,40 @@ func TestFetchLatestRelease_ParsesAndHandlesStatuses(t *testing.T) {
 		t.Error("non-200 should surface as an error")
 	}
 }
+
+// fetchLatestIncludingPrerelease backs the --snapshot channel: GitHub's
+// /releases list is newest-first by created_at, so the first non-draft entry
+// is the latest cut regardless of the prerelease flag. A draft ahead of it
+// must be skipped, never installed.
+func TestFetchLatestIncludingPrerelease_SkipsDraftPicksNewest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/list":
+			// newest-first: a draft, then a prerelease snapshot, then stable.
+			_, _ = w.Write([]byte(`[
+				{"tag_name":"v0.15.0-draft","draft":true,"prerelease":true,"assets":[]},
+				{"tag_name":"v0.14.0-snapshot.1","draft":false,"prerelease":true,"assets":[{"name":"clem_linux_amd64","browser_download_url":"u","size":3}]},
+				{"tag_name":"v0.13.0","draft":false,"prerelease":false,"assets":[]}
+			]`))
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+	orig := allReleasesURL
+	defer func() { allReleasesURL = orig }()
+
+	allReleasesURL = srv.URL + "/list"
+	rel, err := fetchLatestIncludingPrerelease()
+	if err != nil {
+		t.Fatalf("fetchLatestIncludingPrerelease: %v", err)
+	}
+	if rel.TagName != "v0.14.0-snapshot.1" {
+		t.Errorf("snapshot channel picked %q, want the newest non-draft v0.14.0-snapshot.1 (draft must be skipped)", rel.TagName)
+	}
+
+	allReleasesURL = srv.URL + "/boom"
+	if _, err := fetchLatestIncludingPrerelease(); err == nil {
+		t.Error("non-200 should surface as an error")
+	}
+}
