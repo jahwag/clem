@@ -10,6 +10,10 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  # Pin the locale so test results do not depend on the runner image's
+  # default. The pre-push hook tests must also pass under the C locale
+  # (what systemd gives agent sessions) — enforced by a dedicated step.
+  LANG: "C.UTF-8"
 
 jobs:
   test:
@@ -38,6 +42,12 @@ jobs:
       - name: go test
         run: go test -race -v ./...
 
+      - name: go test (C locale)
+        # Agent sessions are systemd-spawned with no LANG set (the C locale).
+        # The secret-scan hook is exercised by these tests, so they must pass
+        # there too — a UTF-8-only pass means a silently dead control in prod.
+        run: LANG=C LC_ALL=C go test ./internal/agent/
+
       - name: go build
         run: go build ./...
 
@@ -53,5 +63,8 @@ jobs:
 
       - uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          # Pinned: `latest` made lint results drift with upstream releases,
+          # so an unrelated PR could go red when a new linter version shipped.
+          # Bump deliberately alongside any new-lint fallout in one PR.
+          version: v1.64.8
           args: --timeout=5m
