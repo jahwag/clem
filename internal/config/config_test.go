@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -183,6 +184,71 @@ func TestLoad_VaultServices_BadNameSlug(t *testing.T) {
       token_key: OR_KEY`))
 	if _, err := Load(path); err == nil {
 		t.Fatal("expected error for invalid service name slug")
+	}
+}
+
+func TestLoad_BrokeredSecretWithMatchingServiceLoads(t *testing.T) {
+	path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+operator:
+  discord_ids: ["277434478803156993"]
+vault:
+  backend: agent-vault
+  services:
+    - name: github
+      host: api.github.com
+      auth_type: bearer
+      token_key: GH_TOKEN
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+    vaults: [github]
+    vault_broker: true
+    brokered_secrets: [GH_TOKEN]
+`)
+	if _, err := Load(path); err != nil {
+		t.Fatalf("brokered secret with a matching service should load: %v", err)
+	}
+}
+
+func TestLoad_BrokeredSecretWithoutServiceRejected(t *testing.T) {
+	// GH_TOKEN is brokered (so its .env value is a placeholder) but no vault.service
+	// injects it — agent-vault would never swap the placeholder and it would egress
+	// literally. Must fail closed at config load, not provision a broken agent.
+	path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+operator:
+  discord_ids: ["277434478803156993"]
+vault:
+  backend: agent-vault
+  services:
+    - name: github
+      host: api.github.com
+      auth_type: bearer
+      token_key: GH_TOKEN
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+    vaults: [github]
+    vault_broker: true
+    brokered_secrets: [GH_TOKEN, TYPEFULLY_API_KEY]
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error: brokered secret with no matching vault.service")
+	}
+	if !strings.Contains(err.Error(), "TYPEFULLY_API_KEY") {
+		t.Errorf("error should name the offending secret, got: %v", err)
 	}
 }
 

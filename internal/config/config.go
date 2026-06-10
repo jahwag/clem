@@ -1150,7 +1150,8 @@ func (cfg *Config) validateMCPSidecars() error {
 // validateVaultServices checks the agent-vault injection rules. Services are
 // global (not vault-bound): clem applies each into the consolidated vault of any
 // agent that brokers the referenced credential keys. Warns on services no agent
-// can use and on brokered secrets with no service to inject them.
+// can use, and rejects any brokered secret with no service to inject it (its
+// placeholder would otherwise egress to the upstream as a silent auth failure).
 func (cfg *Config) validateVaultServices() error {
 	if len(cfg.Vault.Services) == 0 {
 		return nil
@@ -1208,14 +1209,19 @@ func (cfg *Config) validateVaultServices() error {
 			fmt.Fprintf(os.Stderr, "warning: %s references credential keys no agent brokers — it will not be applied\n", where)
 		}
 	}
-	// Warn on any brokered secret with no service to inject it.
+	// Fail closed on any brokered secret with no service to inject it. A brokered
+	// secret is materialized into the agent's .env as a placeholder ("__key__");
+	// agent-vault only swaps it for the real credential on a host-matched service
+	// rule. With no matching rule nothing injects it, so the literal placeholder
+	// egresses to the upstream — a silent auth failure (the 401/403 class). Reject
+	// at config load rather than provision an agent that cannot authenticate.
 	for key, ac := range cfg.Agents {
 		if !ac.VaultBroker {
 			continue
 		}
 		for _, s := range ac.BrokeredSecrets {
 			if !serviceKeys[s] {
-				fmt.Fprintf(os.Stderr, "warning: agent %s: brokered secret %q has no matching vault.service — it would egress as a placeholder\n", key, s)
+				return fmt.Errorf("agent %s: brokered secret %q has no matching vault.service to inject it — it would egress as a literal placeholder; add a vault.service that references %q or remove it from brokered_secrets", key, s, s)
 			}
 		}
 	}
