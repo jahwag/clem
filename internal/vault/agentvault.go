@@ -187,9 +187,18 @@ func AllVaults() (map[string]map[string]string, error) {
 }
 
 // SeedVault creates the named vault in agent-vault (idempotent) and sets every
-// key/value. Secret values are passed as CLI args — acceptable on the
-// provisioning host (root, transient) but note they are briefly visible in the
-// process table there; agent-vault has no documented stdin form for set.
+// key/value.
+//
+// KNOWN EXPOSURE: secret values pass through the agent-vault process argv,
+// which is world-readable in /proc for the lifetime of each (sub-second) set
+// call. This is an upstream constraint, not a choice: per the agent-vault CLI
+// reference (docs.agent-vault.dev/reference/cli), `vault credential set` takes
+// only KEY=VALUE positional args — there is no stdin, file, or env input form
+// (verified against v0.22.0). Risk is bounded to the provisioning host during
+// `clem provision` (run as root, transiently); on a host that also runs agent
+// users, an agent polling /proc during provision could observe a value, so
+// prefer provisioning before agents are started (clem's normal flow). Replace
+// with a non-argv transport when upstream ships one.
 func SeedVault(addr, vaultName string, kv map[string]string) error {
 	env := avEnv(addr)
 	avName := config.AgentVaultName(vaultName)

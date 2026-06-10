@@ -354,20 +354,20 @@ WantedBy=multi-user.target
 `
 
 type RunnerParams struct {
-	Project           string
-	AgentKey          string
-	AgentName         string
-	Model             string
-	SubagentExport    string
-	Prompt            string
-	OSUser            string
-	HomeDir           string
-	SleepActive       int
-	SleepNight        int
-	TtydPort          int
-	TtydBind          string
-	AlertChannel      string
-	AlertCurl         string
+	Project             string
+	AgentKey            string
+	AgentName           string
+	Model               string
+	SubagentExport      string
+	Prompt              string
+	OSUser              string
+	HomeDir             string
+	SleepActive         int
+	SleepNight          int
+	TtydPort            int
+	TtydBind            string
+	AlertChannel        string
+	AlertCurl           string
 	EgressDirectives    string
 	HardeningDirectives string
 	ResourceDirectives  string
@@ -380,7 +380,7 @@ type RunnerParams struct {
 	// WatchChannelIDs is the comma-separated list of Discord channel IDs the
 	// MCP server's gateway watcher should observe. Empty disables the watcher
 	// even when DISCORD_TOKEN is set, preserving the original tool-only mode.
-	WatchChannelIDs   string
+	WatchChannelIDs string
 	// SidecarServers is a Python/JSON list literal of [toolName, port] pairs for
 	// the privileged MCP sidecars this agent subscribes to. "[]" when none.
 	SidecarServers string
@@ -420,15 +420,15 @@ func Generate(cfg *config.Config, agentKey string) string {
 		subagentExport = fmt.Sprintf("export CLAUDE_CODE_SUBAGENT_MODEL=%q", ac.SubagentModel)
 	}
 	p := RunnerParams{
-		Project:         cfg.Project,
-		AgentKey:        agentKey,
-		AgentName:       ac.Name,
-		Model:           ac.Model,
-		SubagentExport:  subagentExport,
-		Prompt:          strings.ReplaceAll(promptText, "'", `'\''`),
-		OSUser:          cfg.OSUsername(agentKey),
-		HomeDir:         fmt.Sprintf("/home/%s", cfg.OSUsername(agentKey)),
-		SleepActive:     iterSec,
+		Project:        cfg.Project,
+		AgentKey:       agentKey,
+		AgentName:      ac.Name,
+		Model:          ac.Model,
+		SubagentExport: subagentExport,
+		Prompt:         strings.ReplaceAll(promptText, "'", `'\''`),
+		OSUser:         cfg.OSUsername(agentKey),
+		HomeDir:        fmt.Sprintf("/home/%s", cfg.OSUsername(agentKey)),
+		SleepActive:    iterSec,
 		// Night sleep matches active. The previous 2x doubler hurt spend:
 		// Anthropic's prompt cache TTL is 5 min, so any iter > 5m at night
 		// guaranteed a cache miss every session — same session count cut

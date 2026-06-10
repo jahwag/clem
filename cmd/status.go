@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jahwag/clem/internal/agent"
@@ -30,7 +31,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	// Header
 	fmt.Printf("%-10s %-20s %-20s %-8s %-8s %-8s %-20s %s\n",
 		"AGENT", "NAME", "USER", "SYSTEMD", "TMUX", "TTYD", "TOKEN EXPIRES", "LAST LOG")
-	fmt.Println(repeatStr("-", 120))
+	fmt.Println(strings.Repeat("-", 120))
 
 	for _, agentKey := range keys {
 		ac := cfg.Agents[agentKey]
@@ -65,14 +66,6 @@ func runStatus(cmd *cobra.Command, args []string) error {
 			agentKey, ac.Name, osUser, systemdState, tmuxAlive, ttydStr, expiryStr, lastLog)
 	}
 	return nil
-}
-
-func repeatStr(s string, n int) string {
-	result := ""
-	for i := 0; i < n; i++ {
-		result += s
-	}
-	return result
 }
 
 // tokenExpiryDisplay formats the access-token expiry for `clem status`.
