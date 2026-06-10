@@ -99,6 +99,52 @@ agents:
 	}
 }
 
+// TestLoad_ValidatesModelAndName pins the runner-safety validation: model is
+// rendered into a single-quoted --model shell argument and name into both a
+// single-quoted --name argument and a double-quoted JSON alert body, so
+// quote/metachar escapes must be rejected at load (consistent with the
+// existing git_email / web_terminal_bind / resource_limits validation).
+func TestLoad_ValidatesModelAndName(t *testing.T) {
+	mk := func(name, model string) string {
+		return fmt.Sprintf(`
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+agents:
+  lead:
+    name: %q
+    model: %q
+`, name, model)
+	}
+	valid := []struct{ name, model string }{
+		{"Amara", "claude-sonnet-4-6"},
+		{"Athena Two", "qwen2.5:7b-instruct"},
+		{"Café Agent", "library/model:tag"},
+		{"Lead", ""},
+	}
+	for _, tc := range valid {
+		if _, err := Load(writeYAML(t, mk(tc.name, tc.model))); err != nil {
+			t.Errorf("name=%q model=%q should load, got: %v", tc.name, tc.model, err)
+		}
+	}
+	invalid := []struct{ name, model string }{
+		{"Amara", "sonnet' --dangerously-x '"}, // quote breaks out of --model '...'
+		{"Amara", "model with spaces"},
+		{"O'Brien", "claude-sonnet-4-6"},    // quote breaks out of --name '...'
+		{`Say "hi"`, "claude-sonnet-4-6"},   // double quote breaks the alert JSON
+		{"a$(reboot)", "claude-sonnet-4-6"}, // $ expands inside the alert curl
+		{"back`tick`", "claude-sonnet-4-6"}, // command substitution
+		{"new\nline", "claude-sonnet-4-6"},  // control character
+	}
+	for _, tc := range invalid {
+		if _, err := Load(writeYAML(t, mk(tc.name, tc.model))); err == nil {
+			t.Errorf("name=%q model=%q should be rejected", tc.name, tc.model)
+		}
+	}
+}
+
 // TestLoad_EmptyFileStillReportsMissingProject pins that strict decoding's
 // io.EOF on an empty document degrades to the original "missing project"
 // error rather than a confusing decode failure.
@@ -1043,7 +1089,6 @@ agents:
 	}
 }
 
-
 func TestLoad_EgressParsed(t *testing.T) {
 	path := writeYAML(t, `
 project: myteam
@@ -1669,7 +1714,7 @@ func TestValidateMCPSidecars_AgentVaultPortCollision(t *testing.T) {
 
 func TestSidecarListeners_SharedAndUnsubscribed(t *testing.T) {
 	cfg := &Config{
-		Project:     "myteam",
+		Project: "myteam",
 		MCPSidecars: MCPSidecarsConfig{BasePort: 14500, Servers: []SidecarServer{
 			{Name: "es-ro", Identity: "shared", Command: "/bin/x", Secrets: []string{"K"}},
 			{Name: "unused", Identity: "shared", Command: "/bin/x", Secrets: []string{"K"}},
@@ -1693,7 +1738,7 @@ func TestSidecarListeners_SharedAndUnsubscribed(t *testing.T) {
 
 func TestSidecarListeners_PerAgentOnePortEach(t *testing.T) {
 	cfg := &Config{
-		Project:     "myteam",
+		Project: "myteam",
 		MCPSidecars: MCPSidecarsConfig{BasePort: 14500, Servers: []SidecarServer{
 			{Name: "disc", Identity: "per-agent", Command: "/bin/x", Secrets: []string{"DISCORD_TOKEN"}},
 		}},

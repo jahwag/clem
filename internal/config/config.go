@@ -50,6 +50,19 @@ func AgentVaultName(sopsVault string) string {
 // githubLoginRe matches a valid GitHub username per GitHub's own rules.
 var githubLoginRe = regexp.MustCompile(`^[a-zA-Z0-9-]{1,39}$`)
 
+// modelRe constrains model IDs to the characters real providers use
+// (claude-sonnet-4-6, qwen2.5:7b-instruct, library/model:tag). The value is
+// rendered into a single-quoted --model argument in the generated runner.sh,
+// so quotes, whitespace, and shell metacharacters must not appear.
+var modelRe = regexp.MustCompile(`^[A-Za-z0-9._:/-]+$`)
+
+// agentNameInvalid matches characters that would escape the contexts an agent
+// display name is rendered into: a single-quoted --name shell argument in
+// runner.sh and a double-quoted JSON body inside the runner/watchdog alert
+// curl. Spaces and non-ASCII letters are fine; quotes, backslash, backtick,
+// '$', and control characters are not.
+var agentNameInvalid = regexp.MustCompile("[\\x00-\\x1f\\x7f'\"\\\\$`]")
+
 // validBindRe matches a safe web_terminal_bind value: an interface name,
 // IPv4/IPv6 address, hostname, or unix socket path (everything ttyd -i
 // accepts). The value lands verbatim on the ExecStart= line of the ttyd
@@ -567,7 +580,7 @@ type AgentConfig struct {
 	// WebTerminalBind controls which interface ttyd listens on. Default
 	// 127.0.0.1 for safety (expects SSH tunnel or reverse proxy). Use
 	// 0.0.0.0 when running inside a container with host port-forward.
-	WebTerminalBind string `yaml:"web_terminal_bind"`
+	WebTerminalBind string       `yaml:"web_terminal_bind"`
 	Caveman         CavemanLevel `yaml:"caveman"`
 	// Runtime selects which CLI drives the agent's session. Default is
 	// claude-code. opencode talks to 75+ providers (including Ollama) via
@@ -1021,6 +1034,12 @@ func Load(path string) (*Config, error) {
 			// supported
 		default:
 			return nil, fmt.Errorf("agent %s: unknown runtime %q (valid: claude-code, opencode)", key, ac.Runtime)
+		}
+		if ac.Model != "" && !modelRe.MatchString(ac.Model) {
+			return nil, fmt.Errorf("agent %s: model %q must match %s (rendered into a quoted shell argument in runner.sh)", key, ac.Model, modelRe.String())
+		}
+		if agentNameInvalid.MatchString(ac.Name) {
+			return nil, fmt.Errorf("agent %s: name %q must not contain quotes, backslashes, backticks, '$', or control characters (rendered into runner.sh and the alert curl)", key, ac.Name)
 		}
 		if _, err := ac.IterationDuration(); err != nil {
 			return nil, fmt.Errorf("agent %s: %w", key, err)
