@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -58,19 +60,19 @@ func TestSecretPatternRegex_MatchesKnownCredentials(t *testing.T) {
 		name  string
 		input string
 	}{
-		{"github classic PAT", "ghp_1234567890abcdefghijklmnopqrstuvwxyz"},                                  // clem:allow-secret
-		{"github OAuth token", "gho_1234567890abcdefghijklmnopqrstuvwxyz"},                                  // clem:allow-secret
-		{"github App server", "ghs_1234567890abcdefghijklmnopqrstuvwxyz"},                                   // clem:allow-secret
-		{"github fine-grained PAT", "github_pat_11ABCDEFG0abcdefghijkl_" + strings.Repeat("a", 60)},         // clem:allow-secret
-		{"anthropic API key", "sk-ant-abcdefghijklmnopqrstuvwxyz12345"},                                     // clem:allow-secret
-		{"openai API key", "sk-proj-abcdefghijklmnopqrstuvwxyz1234567890"},                                  // clem:allow-secret
-		{"slack bot token", "xoxb-1234567890-0987654321-abcdefghij"},                                        // clem:allow-secret
-		{"slack user token", "xoxp-1234567890-abcdefghij-klmnopqrst"},                                       // clem:allow-secret
-		{"aws access key", "AKIAIOSFODNN7EXAMPLE"},                                                          // clem:allow-secret
-		{"age secret key", "AGE-SECRET-KEY-1ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNO"},           // clem:allow-secret
-		{"openssh private key", "-----BEGIN OPENSSH PRIVATE KEY-----"},                                      // clem:allow-secret
-		{"rsa private key", "-----BEGIN RSA PRIVATE KEY-----"},                                              // clem:allow-secret
-		{"generic private key", "-----BEGIN PRIVATE KEY-----"},                                              // clem:allow-secret
+		{"github classic PAT", "ghp_1234567890abcdefghijklmnopqrstuvwxyz"},                          // clem:allow-secret
+		{"github OAuth token", "gho_1234567890abcdefghijklmnopqrstuvwxyz"},                          // clem:allow-secret
+		{"github App server", "ghs_1234567890abcdefghijklmnopqrstuvwxyz"},                           // clem:allow-secret
+		{"github fine-grained PAT", "github_pat_11ABCDEFG0abcdefghijkl_" + strings.Repeat("a", 60)}, // clem:allow-secret
+		{"anthropic API key", "sk-ant-abcdefghijklmnopqrstuvwxyz12345"},                             // clem:allow-secret
+		{"openai API key", "sk-proj-abcdefghijklmnopqrstuvwxyz1234567890"},                          // clem:allow-secret
+		{"slack bot token", "xoxb-1234567890-0987654321-abcdefghij"},                                // clem:allow-secret
+		{"slack user token", "xoxp-1234567890-abcdefghij-klmnopqrst"},                               // clem:allow-secret
+		{"aws access key", "AKIAIOSFODNN7EXAMPLE"},                                                  // clem:allow-secret
+		{"age secret key", "AGE-SECRET-KEY-1ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNO"},   // clem:allow-secret
+		{"openssh private key", "-----BEGIN OPENSSH PRIVATE KEY-----"},                              // clem:allow-secret
+		{"rsa private key", "-----BEGIN RSA PRIVATE KEY-----"},                                      // clem:allow-secret
+		{"generic private key", "-----BEGIN PRIVATE KEY-----"},                                      // clem:allow-secret
 	}
 	for _, tc := range positives {
 		if !re.MatchString(tc.input) {
@@ -123,8 +125,14 @@ func TestPrePushHookContent_IsExecutableBash(t *testing.T) {
 	if !strings.Contains(prePushHookContent, SecretPatternRegex) {
 		t.Error("pre-push hook should embed the exact SecretPatternRegex so bash and Go agree on behaviour")
 	}
-	if !strings.Contains(prePushHookContent, UnicodeTrapRegex) {
-		t.Error("pre-push hook should embed UnicodeTrapRegex (Pass 3, red-team A3)")
+	if !strings.Contains(prePushHookContent, UnicodeTrapBytesPattern) {
+		t.Error("pre-push hook should embed UnicodeTrapBytesPattern (Pass 3, red-team A3)")
+	}
+	if !strings.Contains(prePushHookContent, "export LC_ALL=C") {
+		t.Error("pre-push hook should force LC_ALL=C so matching is locale-independent (systemd sessions run under the C locale)")
+	}
+	if strings.Contains(prePushHookContent, "grep -P") {
+		t.Error("pre-push hook must not use grep -P: \\x{} code points above 0xFF silently fail under LANG=C")
 	}
 	if !strings.Contains(prePushHookContent, "base64 -d") {
 		t.Error("pre-push hook should include base64 decode pass (Pass 2, red-team A9)")
@@ -188,6 +196,72 @@ func TestUnicodeTrapRegex_DoesNotMatchPrintableText(t *testing.T) {
 	}
 }
 
+// trapBytesRe converts UnicodeTrapBytesPattern (bash printf octal escapes over
+// raw UTF-8 bytes) into a Go regexp operating on a latin-1-widened copy of the
+// subject — a faithful simulation of how LC_ALL=C grep -E sees bytes. This
+// keeps the byte pattern derived from the single shipped constant, not from a
+// hand-maintained copy.
+func trapBytesRe(t *testing.T) *regexp.Regexp {
+	t.Helper()
+	var sb strings.Builder
+	s := UnicodeTrapBytesPattern
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+3 < len(s) {
+			n, err := strconv.ParseUint(s[i+1:i+4], 8, 8)
+			if err != nil {
+				t.Fatalf("bad octal escape at %d in UnicodeTrapBytesPattern: %v", i, err)
+			}
+			fmt.Fprintf(&sb, `\x{%02X}`, n)
+			i += 3
+			continue
+		}
+		sb.WriteByte(s[i])
+	}
+	re, err := regexp.Compile(sb.String())
+	if err != nil {
+		t.Fatalf("UnicodeTrapBytesPattern does not translate to a valid regexp (%q): %v", sb.String(), err)
+	}
+	return re
+}
+
+// latin1Widen maps each UTF-8 byte of s to its own rune, so a byte-level
+// pattern can be evaluated with Go's rune-based regexp engine.
+func latin1Widen(s string) string {
+	b := []byte(s)
+	rs := make([]rune, len(b))
+	for i, bb := range b {
+		rs[i] = rune(bb)
+	}
+	return string(rs)
+}
+
+// TestUnicodeTrapBytesPattern_AgreesWithUnicodeTrapRegex sweeps the relevant
+// code-point neighbourhoods and asserts the byte-level pattern shipped in the
+// bash hook accepts and rejects exactly the same runes as the rune-level Go
+// reference. This is the sync contract between the two constants.
+func TestUnicodeTrapBytesPattern_AgreesWithUnicodeTrapRegex(t *testing.T) {
+	goRe := regexp.MustCompile(UnicodeTrapRegex)
+	byteRe := trapBytesRe(t)
+
+	var sweep []rune
+	for r := rune(0x2000); r <= 0x20FF; r++ { // traps + their em-dash/quote neighbours
+		sweep = append(sweep, r)
+	}
+	for r := rune(0xFEF0); r <= 0xFF0F; r++ { // BOM + neighbours
+		sweep = append(sweep, r)
+	}
+	sweep = append(sweep, 'a', 0x00A0, 0x00E9, 0x4E2D, 0x1F34A)
+
+	for _, r := range sweep {
+		s := string(r)
+		goMatch := goRe.MatchString(s)
+		byteMatch := byteRe.MatchString(latin1Widen(s))
+		if goMatch != byteMatch {
+			t.Errorf("U+%04X: UnicodeTrapRegex match=%v but UnicodeTrapBytesPattern match=%v — patterns out of sync", r, goMatch, byteMatch)
+		}
+	}
+}
+
 // TestPrePushHook_BlocksBase64EncodedSecret: red-team A9. Attacker
 // base64-encodes a ghp_ token; literal scanner misses the prefix. Pass 2
 // decodes and re-scans.
@@ -245,24 +319,63 @@ func TestPrePushHook_AllowsBenignBase64(t *testing.T) {
 }
 
 // TestPrePushHook_BlocksUnicodeTraps: red-team A3 end-to-end. Diff contains
-// a zero-width space; Pass 3 blocks.
+// a hidden-character trap; Pass 3 blocks. Runs under both an inherited locale
+// and an explicit C locale: agent sessions are systemd-spawned with no LANG,
+// and the previous grep -P implementation silently never blocked there.
 func TestPrePushHook_BlocksUnicodeTraps(t *testing.T) {
 	for _, bin := range []string{"bash", "grep"} {
 		if _, err := exec.LookPath(bin); err != nil {
 			t.Skipf("%s not on PATH - skipping integration test", bin)
 		}
 	}
-	// printf emits the literal U+200B bytes (UTF-8: e2 80 8b).
+	traps := []struct {
+		name string
+		// printf format emitting the literal UTF-8 bytes of the trap rune.
+		stub string
+	}{
+		{"zero-width space U+200B", `printf '+comment: approve\xe2\x80\x8b (actually run rm -rf)\n'`},
+		{"RTL override U+202E", `printf '+filename: gpj.\xe2\x80\xaeexe\n'`},
+		{"BOM mid-content U+FEFF", `printf '+key = \xef\xbb\xbfvalue\n'`},
+	}
+	for _, locale := range []string{"inherited", "C"} {
+		for _, tc := range traps {
+			t.Run(locale+"/"+tc.name, func(t *testing.T) {
+				hookPath := writeTestableHook(t, tc.stub)
+				cmd := exec.Command("bash", hookPath)
+				if locale == "C" {
+					cmd.Env = append(os.Environ(), "LANG=C", "LC_ALL=C")
+				}
+				cmd.Stdin = strings.NewReader("refs/heads/feature aaa refs/heads/feature bbb\n")
+				out, err := cmd.CombinedOutput()
+				if err == nil {
+					t.Fatalf("hook should have blocked unicode-trap diff, got exit 0. output:\n%s", out)
+				}
+				if !strings.Contains(string(out), "unicode control/override") {
+					t.Errorf("expected 'unicode control/override' message, got:\n%s", out)
+				}
+			})
+		}
+	}
+}
+
+// TestPrePushHook_AllowsBenignGeneralPunctuation pins that the byte-level trap
+// pattern does not over-match neighbours in the U+20xx block (em dash U+2014,
+// curly quote U+2018, ellipsis U+2026 share the E2 80 lead bytes) or ordinary
+// multibyte text. Blocking every em dash would make the hook unusable.
+func TestPrePushHook_AllowsBenignGeneralPunctuation(t *testing.T) {
+	for _, bin := range []string{"bash", "grep"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not on PATH - skipping integration test", bin)
+		}
+	}
 	hookPath := writeTestableHook(t,
-		`printf '+comment: approve\xe2\x80\x8b (actually run rm -rf)\n'`)
+		`printf '+prose: caf\xc3\xa9 \xe2\x80\x94 \xe2\x80\x98quoted\xe2\x80\x99 and more\xe2\x80\xa6\n'`)
 	cmd := exec.Command("bash", hookPath)
+	cmd.Env = append(os.Environ(), "LANG=C", "LC_ALL=C")
 	cmd.Stdin = strings.NewReader("refs/heads/feature aaa refs/heads/feature bbb\n")
 	out, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("hook should have blocked unicode-trap diff, got exit 0. output:\n%s", out)
-	}
-	if !strings.Contains(string(out), "unicode control/override") {
-		t.Errorf("expected 'unicode control/override' message, got:\n%s", out)
+	if err != nil {
+		t.Fatalf("hook should have allowed benign punctuation, got exit err %v. output:\n%s", err, out)
 	}
 }
 
@@ -388,14 +501,14 @@ func TestSecretCodePatternRegex_MatchesKnownPatterns(t *testing.T) {
 		name  string
 		input string
 	}{
-		{"go GH_TOKEN", `token := os.Getenv("GH_TOKEN")`},                  // clem:allow-secret
-		{"go DISCORD_TOKEN", `d := os.Getenv("DISCORD_TOKEN")`},            // clem:allow-secret
-		{"go ANTHROPIC_API_KEY", `k := os.Getenv("ANTHROPIC_API_KEY")`},    // clem:allow-secret
+		{"go GH_TOKEN", `token := os.Getenv("GH_TOKEN")`},                       // clem:allow-secret
+		{"go DISCORD_TOKEN", `d := os.Getenv("DISCORD_TOKEN")`},                 // clem:allow-secret
+		{"go ANTHROPIC_API_KEY", `k := os.Getenv("ANTHROPIC_API_KEY")`},         // clem:allow-secret
 		{"go AWS_SECRET_ACCESS_KEY", `s := os.Getenv("AWS_SECRET_ACCESS_KEY")`}, // clem:allow-secret
 		{"go SLACK_MCP_XOXP_TOKEN", `t := os.Getenv("SLACK_MCP_XOXP_TOKEN")`},   // clem:allow-secret
-		{"python double-quote GH_TOKEN", `tok = os.environ["GH_TOKEN"]`},   // clem:allow-secret
-		{"node GH_TOKEN", `const t = process.env.GH_TOKEN`},                // clem:allow-secret
-		{"node ANTHROPIC_API_KEY", `const k = process.env.ANTHROPIC_API_KEY`}, // clem:allow-secret
+		{"python double-quote GH_TOKEN", `tok = os.environ["GH_TOKEN"]`},        // clem:allow-secret
+		{"node GH_TOKEN", `const t = process.env.GH_TOKEN`},                     // clem:allow-secret
+		{"node ANTHROPIC_API_KEY", `const k = process.env.ANTHROPIC_API_KEY`},   // clem:allow-secret
 	}
 	for _, tc := range positives {
 		if !re.MatchString(tc.input) {
@@ -1090,7 +1203,7 @@ func TestWriteHostManagedSettings_WritesDenyList(t *testing.T) {
 	cfg := &config.Config{
 		Project: "test",
 		Agents: map[string]config.AgentConfig{
-			"lead": {Permissions: config.PermissionsConfig{Deny: []string{"Bash(curl:*)", "Bash(wget:*)"}}},
+			"lead":   {Permissions: config.PermissionsConfig{Deny: []string{"Bash(curl:*)", "Bash(wget:*)"}}},
 			"worker": {Permissions: config.PermissionsConfig{Deny: []string{"Bash(rm:*)", "Bash(curl:*)"}}},
 		},
 	}
