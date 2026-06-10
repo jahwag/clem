@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"encoding/json"
 	"fmt"
 	"os/user"
 	"sort"
@@ -386,6 +387,23 @@ type RunnerParams struct {
 	SidecarServers string
 }
 
+// bashDoubleQuoteEscaper escapes the four characters that stay live inside a
+// bash double-quoted string.
+var bashDoubleQuoteEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, `$`, `\$`, "`", "\\`")
+
+// escapeForAlert escapes a value for the AlertCurl sink, where it sits inside
+// a JSON string that is itself inside a bash double-quoted argument
+// (AlertTemplate's -d "{\"content\":\"%s\"}"). Bash dequotes the argument
+// first, then the chat API parses the JSON, so the value needs both layers of
+// escaping applied innermost-first: JSON string escaping (via json.Marshal,
+// which also covers control characters), then bash's \ " $ `. The static
+// parts of the alert message rely on that bash layer (${SIZE} expands at
+// runtime), which is why the sink cannot simply switch to single quotes.
+func escapeForAlert(s string) string {
+	j, _ := json.Marshal(s) // marshaling a string never errors
+	return bashDoubleQuoteEscaper.Replace(string(j[1 : len(j)-1]))
+}
+
 // Generate renders the runner.sh content for an agent. Dispatches on the
 // agent's runtime (claude-code default, or opencode).
 func Generate(cfg *config.Config, agentKey string) string {
@@ -412,7 +430,7 @@ func Generate(cfg *config.Config, agentKey string) string {
 
 	alertChannel := cfg.Coordination.Channels["alerts"]
 	backend, _ := coordination.Known(cfg.Coordination.Backend) // validated at load time
-	alertMsg := fmt.Sprintf(`⚠️ %s: CLAUDE.local.md is ${SIZE} bytes (>${MAX_CLAUDE_MD_BYTES}). Trim it to reduce token waste.`, ac.Name)
+	alertMsg := fmt.Sprintf(`⚠️ %s: CLAUDE.local.md is ${SIZE} bytes (>${MAX_CLAUDE_MD_BYTES}). Trim it to reduce token waste.`, escapeForAlert(ac.Name))
 	alertCurl := fmt.Sprintf(`[ -n "$%s" ] && %s`, backend.TokenEnvVar, fmt.Sprintf(backend.AlertTemplate, alertChannel, alertMsg))
 
 	subagentExport := ""

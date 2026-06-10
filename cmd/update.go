@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -38,14 +37,16 @@ type ghRelease struct {
 	Assets  []ghAsset `json:"assets"`
 }
 
-// pickAsset returns the release asset for the given platform (asset names
-// follow the goreleaser template clem_<os>_<arch>), or nil if the release
-// carries no binary for it.
-func pickAsset(rel *ghRelease, goos, goarch string) *ghAsset {
-	prefix := fmt.Sprintf("clem_%s_%s", goos, goarch)
-	for i := range rel.Assets {
-		if strings.HasPrefix(rel.Assets[i].Name, prefix) {
-			return &rel.Assets[i]
+// selectBinaryAsset picks the release asset whose name is exactly
+// clem_<os>_<arch>. Prefix matching is not safe here: the GitHub API does not
+// guarantee asset order, and any sibling asset that starts with the binary
+// name (a .sig/.pem, or the Syft SBOM if its naming ever drops the embedded
+// version) would be downloaded and renamed over the running binary.
+func selectBinaryAsset(assets []ghAsset, goos, goarch string) *ghAsset {
+	want := fmt.Sprintf("clem_%s_%s", goos, goarch)
+	for i := range assets {
+		if assets[i].Name == want {
+			return &assets[i]
 		}
 	}
 	return nil
@@ -66,7 +67,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Latest:          %s\n", rel.TagName)
 
-	asset := pickAsset(rel, runtime.GOOS, runtime.GOARCH)
+	asset := selectBinaryAsset(rel.Assets, runtime.GOOS, runtime.GOARCH)
 	if asset == nil {
 		return fmt.Errorf("no prebuilt binary for %s/%s in release %s — build from source", runtime.GOOS, runtime.GOARCH, rel.TagName)
 	}

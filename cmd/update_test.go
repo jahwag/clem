@@ -6,23 +6,83 @@ import (
 	"testing"
 )
 
-func TestPickAsset_MatchesPlatformPrefix(t *testing.T) {
-	rel := &ghRelease{
-		TagName: "v1.2.3",
-		Assets: []ghAsset{
-			{Name: "checksums.txt"},
-			{Name: "clem_linux_amd64", BrowserDownloadURL: "https://x/amd64"},
-			{Name: "clem_linux_arm64", BrowserDownloadURL: "https://x/arm64"},
+// selectBinaryAsset must match the bare clem_<os>_<arch> asset exactly.
+// The GitHub API does not guarantee asset order, and a prefix match would
+// pick up any sibling that starts with the binary name (.sig/.pem, or an
+// SBOM whose naming drops the embedded version) — replacing the running
+// binary with a non-executable artifact.
+func TestSelectBinaryAsset(t *testing.T) {
+	cases := []struct {
+		name     string
+		assets   []ghAsset
+		wantName string // "" means expect nil
+	}{
+		{
+			name: "sbom-listed-before-binary",
+			assets: []ghAsset{
+				{Name: "clem_linux_amd64.sbom.json"},
+				{Name: "clem_linux_amd64"},
+			},
+			wantName: "clem_linux_amd64",
+		},
+		{
+			name: "binary-first-still-binary",
+			assets: []ghAsset{
+				{Name: "clem_linux_amd64"},
+				{Name: "clem_linux_amd64.sbom.json"},
+			},
+			wantName: "clem_linux_amd64",
+		},
+		{
+			name: "only-prefix-siblings-no-binary",
+			assets: []ghAsset{
+				{Name: "clem_linux_amd64.sbom.json"},
+				{Name: "clem_linux_amd64.sig"},
+				{Name: "clem_linux_amd64.pem"},
+			},
+			wantName: "",
+		},
+		{
+			name: "other-arch-not-matched",
+			assets: []ghAsset{
+				{Name: "clem_linux_arm64"},
+				{Name: "checksums.txt"},
+			},
+			wantName: "",
+		},
+		{
+			name:     "empty-assets",
+			assets:   nil,
+			wantName: "",
+		},
+		{
+			// mirrors the actual v0.12.1 release asset list
+			name: "real-release-layout",
+			assets: []ghAsset{
+				{Name: "checksums.txt"},
+				{Name: "clem_0.12.1_linux_amd64.sbom.json"},
+				{Name: "clem_0.12.1_linux_arm64.sbom.json"},
+				{Name: "clem_linux_amd64"},
+				{Name: "clem_linux_arm64"},
+			},
+			wantName: "clem_linux_amd64",
 		},
 	}
-	if a := pickAsset(rel, "linux", "arm64"); a == nil || a.BrowserDownloadURL != "https://x/arm64" {
-		t.Errorf("pickAsset(linux/arm64) = %+v, want the arm64 asset", a)
-	}
-	if a := pickAsset(rel, "linux", "amd64"); a == nil || a.BrowserDownloadURL != "https://x/amd64" {
-		t.Errorf("pickAsset(linux/amd64) = %+v, want the amd64 asset", a)
-	}
-	if a := pickAsset(rel, "darwin", "arm64"); a != nil {
-		t.Errorf("pickAsset for an unreleased platform should be nil, got %+v", a)
+	for _, tc := range cases {
+		got := selectBinaryAsset(tc.assets, "linux", "amd64")
+		if tc.wantName == "" {
+			if got != nil {
+				t.Errorf("%s: got %q, want nil", tc.name, got.Name)
+			}
+			continue
+		}
+		if got == nil {
+			t.Errorf("%s: got nil, want %q", tc.name, tc.wantName)
+			continue
+		}
+		if got.Name != tc.wantName {
+			t.Errorf("%s: got %q, want %q", tc.name, got.Name, tc.wantName)
+		}
 	}
 }
 
