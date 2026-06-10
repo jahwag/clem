@@ -42,8 +42,9 @@ agents:
 // that leaves a containment control off.
 func TestLoad_RejectsUnknownKeys(t *testing.T) {
 	cases := []struct {
-		name string
-		yaml string
+		name    string
+		yaml    string
+		wantErr string // substring the error must carry to be actionable
 	}{
 		{"unknown top-level key", `
 project: myteam
@@ -57,7 +58,7 @@ agents:
   lead:
     name: "Lead"
     model: "claude-sonnet-4-6"
-`},
+`, "egresss"},
 		{"unknown agent key", `
 project: myteam
 coordination:
@@ -69,7 +70,7 @@ agents:
     name: "Lead"
     model: "claude-sonnet-4-6"
     vault_brokerr: true
-`},
+`, "vault_brokerr"},
 		{"unknown egress key", `
 project: myteam
 egress:
@@ -83,7 +84,7 @@ agents:
   lead:
     name: "Lead"
     model: "claude-sonnet-4-6"
-`},
+`, "postures"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -92,10 +93,45 @@ agents:
 			if err == nil {
 				t.Fatal("Load should reject a config with an unknown key")
 			}
-			if !strings.Contains(err.Error(), "not found in type") {
-				t.Errorf("error should name the unknown field, got: %v", err)
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error should name the unknown field %q, got: %v", tc.wantErr, err)
 			}
 		})
+	}
+}
+
+// TestLoad_AllowsAnchorHolderExtensionKeys pins the escape hatch that keeps
+// strict decoding compatible with shared YAML anchors: top-level "x-" keys
+// are collected (not rejected), and merge keys referencing anchors defined in
+// them resolve into agents as usual.
+func TestLoad_AllowsAnchorHolderExtensionKeys(t *testing.T) {
+	yaml := `
+project: myteam
+x-defaults: &defaults
+  model: "claude-sonnet-4-6"
+  iteration: 7m
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+agents:
+  lead:
+    <<: *defaults
+    name: "Lead"
+  worker:
+    <<: *defaults
+    name: "Worker"
+    iteration: 3m
+`
+	cfg, err := Load(writeYAML(t, yaml))
+	if err != nil {
+		t.Fatalf("x- anchor holder + merge keys should load: %v", err)
+	}
+	if cfg.Agents["lead"].Model != "claude-sonnet-4-6" || cfg.Agents["lead"].Iteration != "7m" {
+		t.Errorf("merge key did not apply to lead: %+v", cfg.Agents["lead"])
+	}
+	if cfg.Agents["worker"].Iteration != "3m" {
+		t.Errorf("explicit field should override merged default: %+v", cfg.Agents["worker"])
 	}
 }
 
@@ -124,6 +160,8 @@ agents:
 		"claude-sonnet-4-6",
 		"qwen2.5:7b-instruct",
 		"library/model:tag",
+		"claude-sonnet-4-6@20250514", // Vertex version suffix
+		"arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-sonnet-4-6",
 		"", // unset stays legal
 	}
 	for _, model := range valid {

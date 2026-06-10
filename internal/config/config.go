@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -45,11 +46,13 @@ var agentNameInvalid = regexp.MustCompile(`[\x00-\x1f\x7f]`)
 // githubLoginRe matches a valid GitHub username per GitHub's own rules.
 var githubLoginRe = regexp.MustCompile(`^[a-zA-Z0-9-]{1,39}$`)
 
-// modelRe constrains model IDs to the characters real providers use
-// (claude-sonnet-4-6, qwen2.5:7b-instruct, library/model:tag). The value is
-// rendered into a single-quoted --model argument in the generated runner.sh,
-// so quotes, whitespace, and shell metacharacters must not appear.
-var modelRe = regexp.MustCompile(`^[A-Za-z0-9._:/-]+$`)
+// modelRe constrains model IDs to the characters real providers use:
+// claude-sonnet-4-6, qwen2.5:7b-instruct, library/model:tag, Vertex's
+// claude-sonnet-4-6@20250514, Bedrock inference-profile ARNs
+// (arn:aws:bedrock:...:inference-profile/...). The value is rendered into a
+// single-quoted --model argument in the generated runner.sh, so quotes,
+// whitespace, and shell metacharacters must not appear.
+var modelRe = regexp.MustCompile(`^[A-Za-z0-9._:/@-]+$`)
 
 // validBindRe matches a safe web_terminal_bind value: an interface name,
 // IPv4/IPv6 address, hostname, or unix socket path (everything ttyd -i
@@ -129,6 +132,13 @@ type Config struct {
 	Vault            VaultBackend           `yaml:"vault"`
 	MCPSidecars      MCPSidecarsConfig      `yaml:"mcp_sidecars"`
 	Agents           map[string]AgentConfig `yaml:"agents"`
+	// Extra collects top-level keys not matched by any field above (the
+	// decoder is otherwise strict — see Load). Only "x-"-prefixed extension
+	// keys are accepted, as holders for shared YAML anchors (the
+	// docker-compose convention); anything else is treated as a typo and
+	// rejected, because a silently-dropped key like `egresss:` would leave a
+	// security control off while the operator believes it is on.
+	Extra map[string]yaml.Node `yaml:",inline"`
 }
 
 type Coordination struct {
@@ -408,7 +418,15 @@ func expandEnv(raw []byte) []byte {
 // Unknown keys are a hard error (KnownFields). clem.yaml carries security
 // dispositions — egress, vault_broker, brokered_secrets, permissions — and a
 // silently-ignored typo in any of them would leave a control off while the
-// operator believes it is on. Fail loud at load instead.
+// operator believes it is on. Fail loud at load instead. Top-level "x-"
+// extension keys are the one exception (collected into Config.Extra), so
+// shared YAML anchors still have a place to live:
+//
+//	x-defaults: &defaults
+//	  model: claude-sonnet-4-6
+//	agents:
+//	  lead:
+//	    <<: *defaults
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -420,6 +438,18 @@ func Load(path string) (*Config, error) {
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parsing config: %w (unknown keys are rejected — check for typos against the clem.yaml reference)", err)
+	}
+	// Top-level keys land in Extra instead of erroring (the inline map takes
+	// precedence over KnownFields there); enforce the x- convention manually.
+	extraKeys := make([]string, 0, len(cfg.Extra))
+	for k := range cfg.Extra {
+		if !strings.HasPrefix(k, "x-") {
+			extraKeys = append(extraKeys, k)
+		}
+	}
+	if len(extraKeys) > 0 {
+		sort.Strings(extraKeys)
+		return nil, fmt.Errorf("unknown top-level key(s) in config: %s (misspelled? prefix with \"x-\" if intended as an extension/anchor key)", strings.Join(extraKeys, ", "))
 	}
 	if cfg.Project == "" {
 		return nil, fmt.Errorf("config missing required field: project")

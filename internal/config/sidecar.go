@@ -1,6 +1,7 @@
 // Privileged MCP sidecar configuration: schema, per-listener port
 // allocation, and validation. Provision wiring lives in cmd/provision.go
 // and internal/proxy.
+
 package config
 
 import (

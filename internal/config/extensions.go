@@ -1,5 +1,6 @@
 // Agent extension configuration: marketplaces, plugins, skills, MCP
 // servers, and managed-settings deny rules, plus their validation.
+
 package config
 
 import (
@@ -41,6 +42,12 @@ type PluginConfig struct {
 }
 
 // UnmarshalYAML accepts "name@marketplace" shorthand and the struct form.
+//
+// KNOWN GAP: yaml.Node.Decode cannot inherit the parent decoder's
+// KnownFields strictness, so an unknown key inside the struct form (e.g. a
+// misspelled `marketplce:`) is silently dropped here even though Load
+// rejects unknown keys everywhere else. Tolerable because no plugin field
+// is security-bearing; revisit if one ever becomes so.
 func (p *PluginConfig) UnmarshalYAML(value *yaml.Node) error {
 	if value.Tag == "!!str" {
 		parts := strings.SplitN(value.Value, "@", 2)

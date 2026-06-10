@@ -1,5 +1,6 @@
 // agent-vault credential-broker configuration (Phase 2): backend
 // selection, injection (service) rules, and validation.
+
 package config
 
 import (

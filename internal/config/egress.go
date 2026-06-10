@@ -1,5 +1,6 @@
 // Egress containment configuration (pipelock + per-agent nftables UID
 // firewall): schema, defaults, and per-agent resolution.
+
 package config
 
 // EgressConfig configures hard egress containment via pipelock + a per-agent

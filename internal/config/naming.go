@@ -1,5 +1,6 @@
 // Derived names: every OS user, systemd unit, and firewall table clem
 // provisions is named here, so generators and CLI commands agree.
+
 package config
 
 import (
