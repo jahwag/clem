@@ -21,6 +21,6 @@ agents:
     name: "Athena"
     role: "Software Engineer"
     model: "claude-sonnet-4-6"
-    subagent_model: "claude-sonnet-4-6"
+    subagent_model: "claude-haiku-4-5-20251001"
     iteration: 5m
     prompt: "Act as Athena per CLAUDE.local.md. Check Discord #tasks for tasks assigned to you. Work on ONE task. When done post results and run: kill $PPID. If no tasks: kill $PPID"
