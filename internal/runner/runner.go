@@ -126,6 +126,7 @@ MAX_LESSONS_MESSAGES=25
 while true; do
     START=$(date +%s)
     PROMPT='{{.Prompt}}'
+    RUNNER_WARNINGS=""
 
     # Guard: CLAUDE.local.md too large (token waste)
     if [ -f "$WORKDIR/CLAUDE.local.md" ]; then
@@ -141,6 +142,58 @@ while true; do
     "$CLAUDE" install 2>&1 | tail -5 | tee -a "$LOGFILE" || log "claude install failed, continuing with current version"
 
     {{.SkillsSyncCmd}}
+
+    # Surface a near-expired OAuth token to the agent itself: a dead token
+    # mid-session shows up as opaque 401/407 API errors otherwise.
+    EXP_MS=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.claude/.credentials.json'))).get('claudeAiOauth',{}).get('expiresAt',0))" 2>/dev/null || echo 0)
+    NOW_MS=$(( $(date +%s) * 1000 ))
+    if [ "$EXP_MS" -gt 0 ] 2>/dev/null && [ "$EXP_MS" -lt $(( NOW_MS + 3600000 )) ]; then
+        log "WARNING: OAuth token expires within 1h (or already expired)"
+        RUNNER_WARNINGS="${RUNNER_WARNINGS}[runner] Your OAuth token expires within 1h or is already expired; if you hit 401/407 API errors, escalate to the alerts channel. "
+    fi
+
+    # Per-agent quota snapshot (TTL 25m). Agents read this file instead of
+    # polling the OAuth usage endpoint every iteration, which rate-limits
+    # (429) when multiple agents on one host poll per-session.
+    QUOTA_FILE="$HOME/.claude/quota.json"
+    QUOTA_AGE=$(( $(date +%s) - $(stat -c %Y "$QUOTA_FILE" 2>/dev/null || echo 0) ))
+    if [ "$QUOTA_AGE" -gt 1500 ]; then
+        OAUTH_TOKEN=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.claude/.credentials.json')))['claudeAiOauth']['accessToken'])" 2>/dev/null)
+        if [ -n "$OAUTH_TOKEN" ]; then
+            HTTP_CODE=$(curl -sS -m 15 -o "$QUOTA_FILE.tmp" -w "%{http_code}" \
+                -H "Authorization: Bearer $OAUTH_TOKEN" \
+                -H "anthropic-beta: oauth-2025-04-20" \
+                https://api.anthropic.com/api/oauth/usage 2>>"$LOGFILE")
+            if [ "$HTTP_CODE" = "200" ]; then
+                mv "$QUOTA_FILE.tmp" "$QUOTA_FILE"
+                log "Quota snapshot refreshed"
+            else
+                rm -f "$QUOTA_FILE.tmp"
+                log "Quota snapshot fetch failed (HTTP ${HTTP_CODE}); keeping previous snapshot"
+            fi
+            unset OAUTH_TOKEN
+        fi
+    fi
+
+    # Per-iteration effort override: the agent writes low|medium|high|xhigh
+    # to ~/.claude/next-effort during an iteration; consumed (and deleted)
+    # here. CLAUDE_CODE_EFFORT_LEVEL is session-scoped and outranks settings
+    # files, so an absent file simply means settings.json effortLevel
+    # applies — no reset bookkeeping, no drift across iterations.
+    unset CLAUDE_CODE_EFFORT_LEVEL
+    if [ -f "$HOME/.claude/next-effort" ]; then
+        NEXT_EFFORT=$(tr -cd 'a-z' < "$HOME/.claude/next-effort" | head -c 16)
+        rm -f "$HOME/.claude/next-effort"
+        case "$NEXT_EFFORT" in
+            low|medium|high|xhigh)
+                export CLAUDE_CODE_EFFORT_LEVEL="$NEXT_EFFORT"
+                log "Effort override for this session: $NEXT_EFFORT" ;;
+            *)
+                log "Ignoring invalid next-effort value: $NEXT_EFFORT" ;;
+        esac
+    fi
+
+    [ -n "$RUNNER_WARNINGS" ] && PROMPT="${RUNNER_WARNINGS}${PROMPT}"
 
     log "Starting {{.AgentName}} (fresh session)"
     (sleep 1 && tmux send-keys -t {{.AgentKey}} "" Enter
@@ -254,6 +307,7 @@ MAX_LESSONS_MESSAGES=25
 while true; do
     START=$(date +%s)
     PROMPT='{{.Prompt}}'
+    RUNNER_WARNINGS=""
 
     # Guard: CLAUDE.local.md too large (token waste)
     if [ -f "$WORKDIR/CLAUDE.local.md" ]; then
@@ -266,6 +320,8 @@ while true; do
     fi
 
     {{.SkillsSyncCmd}}
+
+    [ -n "$RUNNER_WARNINGS" ] && PROMPT="${RUNNER_WARNINGS}${PROMPT}"
 
     log "Starting {{.AgentName}} (opencode, fresh session)"
     MODEL_ARG=""
@@ -418,6 +474,8 @@ func Generate(cfg *config.Config, agentKey string) string {
 	ac := cfg.Agents[agentKey]
 	iterDur, _ := ac.IterationDuration() // validated at load time
 	iterSec := int(iterDur.Seconds())
+	nightDur, _ := ac.IterationNightDuration() // validated at load time
+	nightSec := int(nightDur.Seconds())
 
 	// Render {{agent.name}}, {{channels.*}}, etc. in the operator-authored
 	// prompt the same way CLAUDE.local.md is rendered. Without this, agents
@@ -447,8 +505,17 @@ func Generate(cfg *config.Config, agentKey string) string {
 	}
 	skillsSyncCmd := ""
 	if cfg.SkillsRepo != "" {
+		// PIPESTATUS, not ||: without pipefail, `sync | tee || log` reacts to
+		// tee's exit status, so sync failures were silently swallowed (bit a
+		// production host for 3 weeks: a dirty clone blocked every pull and
+		// the "skills sync failed" branch never fired). The warning is also
+		// prepended to the agent's prompt so the agent itself escalates.
 		skillsSyncCmd = fmt.Sprintf(
-			`clem sync-skills --home "$HOME" --agent-key %q --repo %q 2>&1 | tee -a "$LOGFILE" || log "skills sync failed"`,
+			`clem sync-skills --home "$HOME" --agent-key %q --repo %q 2>&1 | tee -a "$LOGFILE"
+    if [ "${PIPESTATUS[0]}" != "0" ]; then
+        log "skills sync failed"
+        RUNNER_WARNINGS="${RUNNER_WARNINGS}[runner] Skills sync FAILED this iteration; your skills may be stale. Check ~/.cache for a dirty clone or auth failure, fix or escalate to the alerts channel. "
+    fi`,
 			agentKey, cfg.SkillsRepo,
 		)
 	}
@@ -462,12 +529,12 @@ func Generate(cfg *config.Config, agentKey string) string {
 		OSUser:         cfg.OSUsername(agentKey),
 		HomeDir:        fmt.Sprintf("/home/%s", cfg.OSUsername(agentKey)),
 		SleepActive:    iterSec,
-		// Night sleep matches active. The previous 2x doubler hurt spend:
-		// Anthropic's prompt cache TTL is 5 min, so any iter > 5m at night
-		// guaranteed a cache miss every session — same session count cut
-		// you'd get from cold-cache cost increase. Match active to keep cache
-		// hot, or override per-iteration in clem.yaml directly.
-		SleepNight:      iterSec,
+		// Night sleep defaults to the active value; iteration_night overrides.
+		// History: a hardcoded 2x night doubler was removed on the belief the
+		// prompt-cache TTL was 5 min. Subscription Claude Code actually gets
+		// the 1h TTL, refreshed on access (verified against session-log usage
+		// fields, 2026-06-13), so night intervals up to ~45m still start warm.
+		SleepNight:      nightSec,
 		AlertChannel:    alertChannel,
 		AlertCurl:       alertCurl,
 		WatchChannelIDs: discordWatchChannels(cfg),

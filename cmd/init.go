@@ -37,7 +37,8 @@ agents:
     name: "Amara"                      # display name in Claude Code and Discord
     role: "Lead Software Engineer"     # used as {{agent.role}} in CLAUDE.shared.md
     model: "claude-sonnet-4-6"
-    iteration: 10m              # sleep between sessions (same day and night)
+    iteration: 10m              # sleep between sessions during active hours (07-22)
+    iteration_night: 30m        # night sleep (22-07); <=45m keeps prompt-cache starts warm (1h TTL)
     vaults: [github, discord-lead]     # vault names from secrets.sops.yaml merged into .env
     prompt: >-
       Act as {{agent.name}} per CLAUDE.local.md.

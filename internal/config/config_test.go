@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeYAML(t *testing.T, content string) string {
@@ -1996,5 +1997,49 @@ agents:
 		if _, err := Load(path); err == nil {
 			t.Errorf("Load should have rejected skills_repo=%q", bad)
 		}
+	}
+}
+
+func TestIterationNightDuration_FallsBackToIteration(t *testing.T) {
+	ac := AgentConfig{Iteration: "7m"}
+	d, err := ac.IterationNightDuration()
+	if err != nil || d != 7*time.Minute {
+		t.Errorf("expected 7m fallback, got %v err=%v", d, err)
+	}
+	ac = AgentConfig{} // both unset -> 5m default
+	d, err = ac.IterationNightDuration()
+	if err != nil || d != 5*time.Minute {
+		t.Errorf("expected 5m default, got %v err=%v", d, err)
+	}
+}
+
+func TestIterationNightDuration_ParsesAndValidates(t *testing.T) {
+	ac := AgentConfig{Iteration: "4m", IterationNight: "30m"}
+	d, err := ac.IterationNightDuration()
+	if err != nil || d != 30*time.Minute {
+		t.Errorf("expected 30m, got %v err=%v", d, err)
+	}
+	for _, bad := range []string{"banana", "500ms"} {
+		ac.IterationNight = bad
+		if _, err := ac.IterationNightDuration(); err == nil {
+			t.Errorf("iteration_night %q should error", bad)
+		}
+	}
+}
+
+func TestLoad_RejectsInvalidIterationNight(t *testing.T) {
+	yaml := `
+project: t
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g", alerts: "a"}
+agents:
+  lead:
+    name: "Lead"
+    iteration_night: "nope"
+`
+	if _, err := Load(writeYAML(t, yaml)); err == nil || !strings.Contains(err.Error(), "iteration_night") {
+		t.Errorf("expected iteration_night validation error, got %v", err)
 	}
 }

@@ -181,9 +181,15 @@ type AgentConfig struct {
 	Role  string `yaml:"role"`
 	Model string `yaml:"model"`
 	// Iteration is a Go-style duration string (e.g. "30s", "1m30s", "2h").
-	// Parsed via time.ParseDuration. Sleep between agent sessions; same
-	// value applies day and night. Default 5m.
-	Iteration       string   `yaml:"iteration"`
+	// Parsed via time.ParseDuration. Sleep between agent sessions during
+	// active hours (07-22 host time). Default 5m.
+	Iteration string `yaml:"iteration"`
+	// IterationNight is the sleep between sessions during night hours
+	// (22:00-07:00 host time). Same format as Iteration. Empty = match
+	// Iteration. On a Claude subscription the prompt-cache TTL is 1h,
+	// refreshed on access, so values up to ~45m keep session starts warm;
+	// longer values trade one cold start per gap for fewer idle wakeups.
+	IterationNight  string   `yaml:"iteration_night"`
 	Vaults          []string `yaml:"vaults"`
 	Prompt          string   `yaml:"prompt"`
 	WebTerminalPort int      `yaml:"web_terminal_port"`
@@ -390,6 +396,22 @@ func (ac AgentConfig) IterationDuration() (time.Duration, error) {
 	return d, nil
 }
 
+// IterationNightDuration returns the parsed night iteration period, falling
+// back to IterationDuration when iteration_night is unset.
+func (ac AgentConfig) IterationNightDuration() (time.Duration, error) {
+	if ac.IterationNight == "" {
+		return ac.IterationDuration()
+	}
+	d, err := time.ParseDuration(ac.IterationNight)
+	if err != nil {
+		return 0, fmt.Errorf("invalid iteration_night %q: %w (expected Go duration like 30s, 1m30s, 2h)", ac.IterationNight, err)
+	}
+	if d < time.Second {
+		return 0, fmt.Errorf("iteration_night %q is too small (minimum 1s)", ac.IterationNight)
+	}
+	return d, nil
+}
+
 // ProviderEnv returns env vars that should be exported for this agent based on
 // its provider selection. These are merged into /home/<user>/.env alongside
 // vault secrets at provision time.
@@ -540,6 +562,9 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("agent %s: model %q must match %s (rendered into a quoted shell argument in runner.sh)", key, ac.Model, modelRe.String())
 		}
 		if _, err := ac.IterationDuration(); err != nil {
+			return nil, fmt.Errorf("agent %s: %w", key, err)
+		}
+		if _, err := ac.IterationNightDuration(); err != nil {
 			return nil, fmt.Errorf("agent %s: %w", key, err)
 		}
 		if _, err := ac.ProviderEnv(); err != nil {
