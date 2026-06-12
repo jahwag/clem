@@ -143,10 +143,31 @@ check_oom() {
     fi
     echo "$new_ts" > "$marker"
 }
+# Transcript prune (daily): agent session JSONLs grow unbounded (~1.5 GB per
+# agent-month observed in production). Deletes session transcripts and their
+# UUID-named sidecar dirs older than 30 days. The memory/ dir and any other
+# non-UUID dir at the same depth are deliberately not matched.
+prune_transcripts() {
+    local stamp="$COOLDOWN_DIR/transcript-prune.last"
+    if [ -f "$stamp" ] && [ $(( $(date +%s) - $(stat -c %Y "$stamp") )) -lt 86400 ]; then
+        return
+    fi
+    local home
+    for home in {{.AgentHomes}}; do
+        local proj="$home/.claude/projects"
+        [ -d "$proj" ] || continue
+        find "$proj" -mindepth 2 -maxdepth 2 -type f -name "*.jsonl" -mtime +30 -delete 2>/dev/null
+        find "$proj" -mindepth 2 -maxdepth 2 -type d -regextype posix-extended \
+            -regex '.*/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' \
+            -mtime +30 -exec rm -rf {} + 2>/dev/null
+    done
+    touch "$stamp"
+}
 {{.EgressCheckDef}}{{.VaultCheckDef}}
 {{.AgentChecks}}
 
 check_oom
+prune_transcripts
 {{.EgressInvoke}}{{.VaultInvoke}}`
 
 // egressCheckDef is injected when egress containment is enabled. It tails the
@@ -249,6 +270,7 @@ const staleFloorSeconds = 1800
 
 type watchdogParams struct {
 	Project        string
+	AgentHomes     string
 	EnvSource      string
 	AlertChannel   string
 	TokenEnvVar    string
@@ -296,6 +318,14 @@ func GenerateScript(cfg *config.Config) string {
 		svc := cfg.ServiceName(key)
 		ac := cfg.Agents[key]
 		iterDur, _ := ac.IterationDuration() // validated at load time
+		nightDur, _ := ac.IterationNightDuration()
+		if nightDur > iterDur {
+			// The stale threshold must cover the LONGEST configured sleep:
+			// with iteration_night > iteration, sizing on the day value makes
+			// every healthy night sleep look stale and hard-restarts the
+			// agent all night.
+			iterDur = nightDur
+		}
 		// Agents sleep up to iterDur between iterations; allow a 5-minute
 		// margin so the next iteration's log line lands before we flag stale.
 		stale := int(iterDur.Seconds()) + staleMarginSeconds
@@ -339,6 +369,7 @@ func GenerateScript(cfg *config.Config) string {
 		TokenEnvVar:    backend.TokenEnvVar,
 		AlertCurl:      alertCurl,
 		AgentChecks:    strings.TrimRight(checks.String(), "\n"),
+		AgentHomes:     agentHomes(cfg, keys),
 		EgressCheckDef: egressDef,
 		EgressInvoke:   egressInvoke,
 		AuditLogPath:   auditPath,
@@ -353,6 +384,7 @@ func GenerateScript(cfg *config.Config) string {
 		"{{.TokenEnvVar}}", p.TokenEnvVar,
 		"{{.AlertCurl}}", p.AlertCurl,
 		"{{.AgentChecks}}", p.AgentChecks,
+		"{{.AgentHomes}}", p.AgentHomes,
 		"{{.EgressCheckDef}}", p.EgressCheckDef,
 		"{{.EgressInvoke}}", p.EgressInvoke,
 		"{{.AuditLogPath}}", p.AuditLogPath,
@@ -370,4 +402,15 @@ func GenerateService(cfg *config.Config) string {
 // GenerateTimer renders the watchdog systemd timer.
 func GenerateTimer(cfg *config.Config) string {
 	return strings.ReplaceAll(watchdogTimerTemplate, "{{.Project}}", cfg.Project)
+}
+
+// agentHomes renders the space-separated list of agent home directories for
+// the transcript-prune loop. Quoted paths are unnecessary: OS usernames are
+// <project>-<agentkey>, both validated identifiers with no whitespace.
+func agentHomes(cfg *config.Config, keys []string) string {
+	homes := make([]string, 0, len(keys))
+	for _, key := range keys {
+		homes = append(homes, "/home/"+cfg.OSUsername(key))
+	}
+	return strings.Join(homes, " ")
 }
