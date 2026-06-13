@@ -67,7 +67,7 @@ RUN curl -fsSL "https://github.com/korotovsky/slack-mcp-server/releases/download
 COPY --from=builder /out/clem /usr/local/bin/clem
 
 # Which sample config to preseed. Override with:
-#   docker build --build-arg SAMPLE=ollama-gemma4-e4b ...
+#   docker build --build-arg SAMPLE=ollama-gemma4 ...
 ARG SAMPLE=anthropic
 
 # Sample team config (placeholders — replace before `clem provision`)

@@ -1,0 +1,50 @@
+# Sample clem.yaml — local code-specialist agent on JetBrains Mellum 2 via Ollama.
+# Start Ollama on the host first and pull the model:
+#   export OLLAMA_CONTEXT_LENGTH=32768   # claude-code's prompt overflows ollama's 4096 default
+#   ollama serve
+#   ollama pull hf.co/JetBrains/Mellum2-12B-A2.5B-Instruct-GGUF-Q4_K_M   # ~8.1 GB on disk
+#
+# REQUIRES OLLAMA >= 0.30.x for current GGUF tool-calling support.
+#
+# Why this model: Mellum 2 (JetBrains, Apache-2.0) is a Mixture-of-Experts model
+# (64 experts, ~2.5B active of 12B) tuned for real-world coding workflows. The
+# Instruct GGUF emits proper tool_use blocks reliably (verified 5/5 single-shot +
+# round-trip) while staying code-focused. Heavier resident (~15 GB) than the
+# Gemma 4 sizes because the full expert set is loaded — budget 16 GB+ RAM.
+# For a lighter general-purpose local agent, see ../ollama-gemma4/.
+#
+# From inside a podman/docker container, the host is reachable via
+# host.containers.internal (podman) or host.docker.internal (docker).
+# Adjust provider_url if you are running clem directly on the host
+# (use http://127.0.0.1:11434 in that case).
+
+project: sample
+
+coordination:
+  backend: discord
+  server_id: "${DISCORD_SERVER_ID}"
+  channels:
+    general: "${DISCORD_GENERAL_CHANNEL}"
+    tasks:   "${DISCORD_TASKS_CHANNEL}"
+    alerts:  "${DISCORD_ALERTS_CHANNEL}"
+    lessons: "${DISCORD_LESSONS_CHANNEL}"
+
+agents:
+  engineer:
+    name: "Mellow"
+    role: "Software Engineer"
+    runtime: claude-code
+    model: "hf.co/JetBrains/Mellum2-12B-A2.5B-Instruct-GGUF-Q4_K_M"  # JetBrains Mellum 2, code-tuned, native tool_use
+    provider: ollama
+    provider_url: "http://host.containers.internal:11434"
+    iteration: 30s
+    web_terminal_port: 7681
+    web_terminal_bind: 0.0.0.0       # safe inside container; host firewall / podman port map is the guard
+    vaults: [github, discord-lead]
+    prompt: >-
+      You are {{agent.name}}, a code-focused engineering Discord bot. Messages authored by
+      {{agent.name}} in #general are your own previous posts — do not respond to yourself.
+      Every iteration: read the last 5 messages in #general via mcp__discord-bot__read_messages.
+      If a message from a different user asks a coding question or requests a code review,
+      reply via mcp__discord-bot__send_message with a concise, concrete answer (include a short
+      code snippet when useful). Otherwise do nothing. Then run bash: kill $PPID

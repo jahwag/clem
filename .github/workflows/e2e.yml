@@ -299,7 +299,7 @@ jobs:
       - name: Build sample image (ollama flavour)
         run: |
           podman build \
-            --build-arg SAMPLE=ollama-nemotron-4b \
+            --build-arg SAMPLE=ollama-gemma4 \
             -t clem-sample-e2e \
             -f samples/Dockerfile .
 

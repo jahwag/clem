@@ -1,11 +1,22 @@
-# Sample clem.yaml — points agents at an Ollama server on the host.
-# Start Ollama on the host first and pull the NVIDIA Nemotron 3 Nano 4B:
-#   ollama serve
-#   ollama pull nemotron-3-nano:4b   # ~2.8 GB — fits 8 GB MacBook Air
+# Sample clem.yaml — points agents at an Ollama server on the host, running
+# Google Gemma 4 in unsloth's QAT (quantization-aware-training) build.
 #
-# Why this model: NVIDIA-trained for agentic use. At 4B it still emits proper
-# tool_use blocks, which is rare at this size. Works with both claude-code
-# and opencode runtimes.
+# Start Ollama on the host first and pull the model (NOTE the explicit quant tag —
+# a bare pull 400s because the repo holds many GGUFs):
+#   export OLLAMA_CONTEXT_LENGTH=32768   # claude-code's prompt overflows ollama's 4096 default
+#   ollama serve
+#   ollama pull hf.co/unsloth/gemma-4-E4B-it-qat-GGUF:UD-Q4_K_XL   # ~5.2 GB
+#
+# REQUIRES OLLAMA >= 0.30.3 (added the `gemma4` architecture). Older ollama fails
+# with "unknown model architecture: gemma4".
+#
+# Why this model (measured on an RTX 3080, 10 GB):
+#   - QAT Q4_0 is smaller (5.2 GB) so the whole model + KV cache stays 100% on GPU
+#     even at 128k context — no CPU spill. ~104 tok/s generation.
+#   - The 12B QAT spills to ~17% CPU at 32k ctx on a 10 GB card (≈3x slower); E4B is
+#     the sweet spot. Bump to the 12B only if you have >12 GB VRAM.
+#   - Native function-calling: 5/5 tool calls + 5/5 round-trips, and claude-code
+#     wrote+ran a Python script end-to-end in ~18s. See README for the full matrix.
 #
 # From inside a podman/docker container, the host is reachable via
 # host.containers.internal (podman) or host.docker.internal (docker).
@@ -28,7 +39,7 @@ agents:
     name: "Clementine"
     role: "Lead Software Engineer"
     runtime: claude-code
-    model: "nemotron-3-nano:4b"  # NVIDIA, proven tool_use at 4B, 2.8 GB
+    model: "hf.co/unsloth/gemma-4-E4B-it-qat-GGUF:UD-Q4_K_XL"  # Gemma 4 E4B QAT, ~5.2 GB, 100% GPU on a 10 GB card
     provider: ollama
     provider_url: "http://host.containers.internal:11434"
     iteration: 30s

@@ -41,7 +41,7 @@ What sets it apart: **secrets and egress are contained at the OS layer, not by t
 | **Multi-runtime** | `runtime: claude-code \| opencode`. Mix Anthropic cloud, Bedrock, Vertex, Ollama, OpenAI-compat - one surface. |
 | **Encrypted secrets** | Per-agent `.env` materialised from age/sops vaults at provision time. Never leave the host after. |
 | **Self-healing** | systemd + tmux per agent. Watchdog timer restarts dead or stalled sessions. Alerts fire only after repeated failures. |
-| **Bring your own model** | Default Claude; one flag away from Ollama Cloud / Bedrock / Vertex / local models. Tested end-to-end on NVIDIA Nemotron. |
+| **Bring your own model** | Default Claude; one flag away from Ollama Cloud / Bedrock / Vertex / local models. Tested end-to-end on local Gemma 4 (E4B QAT via Ollama). |
 | **Live ops** | `clem status` shows health per agent. Optional ttyd web terminal per agent - attach in your browser. |
 | **Works locally** | Laptop, home server, Raspberry Pi, small VPS. No Kubernetes. No cloud services required. |
 

@@ -4,9 +4,10 @@ Self-contained Dockerised setup for trying clem without touching your host.
 
 Samples today:
 
-- [`anthropic/`](anthropic/) - **Discord** coordination + [Anthropic Claude API](https://www.anthropic.com/). Bring your own API key; no local GPU needed. Published as `ghcr.io/jahwag/clem-sample:latest`.
-- [`ollama-nemotron-4b/`](ollama-nemotron-4b/) - **Discord** coordination + local [NVIDIA Nemotron 3 Nano 4B](https://ollama.com/library/nemotron-3-nano) via Ollama. 2.8 GB, fits an 8 GB MacBook Air, emits proper tool_use blocks. Published as `ghcr.io/jahwag/clem-sample:latest-ollama`.
-- [`slack-nemotron-4b/`](slack-nemotron-4b/) - **Slack** coordination, same local model. Uses [korotovsky/slack-mcp-server](https://github.com/korotovsky/slack-mcp-server). Published as `ghcr.io/jahwag/clem-sample:latest-slack`.
+- ⭐ [`ollama-gemma4/`](ollama-gemma4/) - **Recommended local sample.** **Discord** coordination + local [Google Gemma 4](https://ollama.com/library/gemma4) (unsloth **QAT** build) via Ollama. Default `unsloth/gemma-4-E4B-it-qat-GGUF:UD-Q4_K_XL` (~5.2 GB, runs 100% on a 10 GB GPU). Native function-calling — verified 5/5 tool calls and an end-to-end "write + run a Python script" in ~18 s. **Requires ollama ≥ 0.30.3.** Published as `ghcr.io/jahwag/clem-sample:latest-ollama`.
+- [`anthropic/`](anthropic/) - **Discord** coordination + [Anthropic Claude API](https://www.anthropic.com/). Bring your own API key; no local GPU needed — the zero-setup way to try clem. Published as `ghcr.io/jahwag/clem-sample:latest`.
+- [`ollama-mellum2/`](ollama-mellum2/) - **Discord** coordination + local [JetBrains Mellum 2](https://www.jetbrains.com/mellum/) (code specialist, Apache-2.0) via Ollama. MoE, native tool_use, ~16 GB RAM. Published as `ghcr.io/jahwag/clem-sample:latest-mellum2`.
+- [`secure-fleet/`](secure-fleet/) - security-hardened multi-agent fleet — egress controls, resource limits, vault isolation. A configuration reference, not a model demo.
 
 ## Quick start (prebuilt image)
 
@@ -26,7 +27,7 @@ Images are published to GHCR on every release tag for `linux/amd64` and `linux/a
 From the repo root (to customise the sample):
 
 ```bash
-docker build -f samples/Dockerfile --build-arg SAMPLE=ollama-nemotron-4b -t clem-nemotron .
+docker build -f samples/Dockerfile --build-arg SAMPLE=ollama-gemma4 -t clem-gemma4 .
 ```
 
 Substitute `podman build` if that's what you have.
