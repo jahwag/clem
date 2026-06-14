@@ -57,9 +57,9 @@ export CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL=1
 # built against. Pre-0.9.5 hardcoded /usr/local/bin and broke every time
 # system Python state drifted, requiring jahwag to re-edit .mcp.json every
 # iteration because the runner overwrites it.
-_backend = '{{.CoordinationBackend}}'
 python3 -c "
 import json, os
+_backend = '{{.CoordinationBackend}}'
 def _mcp_bin(name):
     pipx = '/opt/pipx/bin/' + name
     sysbin = '/usr/local/bin/' + name
@@ -254,9 +254,9 @@ tail -500 "$LOGFILE" > "$LOGFILE.tmp" 2>/dev/null && mv "$LOGFILE.tmp" "$LOGFILE
 # Write opencode.json with Ollama provider + discord-bot MCP (if token is set).
 # MCP binary paths come from _mcp_bin (pipx-isolated venv preferred over system
 # pip install — see the claude-code runner template above for the rationale).
-_backend = '{{.CoordinationBackend}}'
 python3 -c "
 import json, os
+_backend = '{{.CoordinationBackend}}'
 def _mcp_bin(name):
     pipx = '/opt/pipx/bin/' + name
     sysbin = '/usr/local/bin/' + name

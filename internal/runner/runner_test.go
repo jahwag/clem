@@ -911,3 +911,46 @@ func TestGenerate_SkillsSyncFailureUsesPipestatusAndWarns(t *testing.T) {
 		}
 	}
 }
+
+// TestGenerate_BackendAssignedInsidePython is a regression test: the
+// `_backend = '<backend>'` assignment must live INSIDE the python3 -c MCP-config
+// script, not on the bash line above it. The earlier layout leaked it to the
+// shell ("clem-runner.sh: line NN: _backend: command not found") and left the
+// Python block raising NameError: name '_backend' is not defined.
+func TestGenerate_BackendAssignedInsidePython(t *testing.T) {
+	cases := []struct {
+		name    string
+		runtime string
+		model   string
+	}{
+		{"claude-code", "", "claude-opus-4-7"},
+		{"opencode", "opencode", "nemotron-3-nano:4b"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := baseCfg("lead", config.AgentConfig{
+				Name:      "Lead",
+				Runtime:   tc.runtime,
+				Model:     tc.model,
+				Iteration: "1m",
+				Prompt:    "do the thing",
+			})
+			cfg.Coordination.Backend = "github"
+
+			out := Generate(cfg, "lead")
+
+			// Buggy layout: assignment on its own bash line right before python.
+			if strings.Contains(out, "_backend = 'github'\npython3 -c \"") {
+				t.Fatal("_backend assigned in bash immediately before python3 -c — leaks to the shell")
+			}
+			py := strings.Index(out, `python3 -c "`)
+			assign := strings.Index(out, "_backend = 'github'")
+			if py == -1 || assign == -1 {
+				t.Fatalf("missing python block or _backend assignment, got:\n%s", out)
+			}
+			if assign < py {
+				t.Errorf("_backend assigned before python3 -c (runs in bash), not inside python")
+			}
+		})
+	}
+}
