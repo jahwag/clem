@@ -2306,3 +2306,38 @@ func TestLoad_AcceptsValidVaultNames(t *testing.T) {
 		t.Fatalf("vaults = %v", cfg.Agents["lead"].Vaults)
 	}
 }
+
+func TestLoad_ExposurePolicyValid(t *testing.T) {
+	for _, policy := range []string{"", "warn", "strict", "off"} {
+		line := ""
+		if policy != "" {
+			line = "\nvault:\n  exposure_policy: " + policy
+		}
+		yaml := minYAML("") + line
+		if _, err := Load(writeYAML(t, yaml)); err != nil {
+			t.Errorf("exposure_policy %q should load, got: %v", policy, err)
+		}
+	}
+}
+
+func TestLoad_ExposurePolicyRejectsInvalid(t *testing.T) {
+	yaml := minYAML("") + "\nvault:\n  exposure_policy: paranoid"
+	_, err := Load(writeYAML(t, yaml))
+	if err == nil {
+		t.Fatal("invalid exposure_policy must be rejected")
+	}
+	if !strings.Contains(err.Error(), "exposure_policy") {
+		t.Errorf("error must name exposure_policy, got: %v", err)
+	}
+}
+
+func TestLoad_RevealSecretsAccepted(t *testing.T) {
+	yaml := minYAML("") + "\n    reveal_secrets: [DISCORD_TOKEN, DEPLOY_KEY]"
+	cfg, err := Load(writeYAML(t, yaml))
+	if err != nil {
+		t.Fatalf("reveal_secrets should load: %v", err)
+	}
+	if len(cfg.Agents["lead"].RevealSecrets) != 2 {
+		t.Errorf("reveal_secrets = %v, want 2 entries", cfg.Agents["lead"].RevealSecrets)
+	}
+}

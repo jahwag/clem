@@ -279,6 +279,11 @@ type AgentConfig struct {
 	// .env materialization — this is how DISCORD_TOKEN (gateway, unbrokerable)
 	// stays real while ANTHROPIC_API_KEY/Slack/Typefully/GH_TOKEN are brokered.
 	BrokeredSecrets []string `yaml:"brokered_secrets"`
+	// RevealSecrets lists granted vault keys that are intentionally seeded as
+	// real values in the agent's .env (explicit opt-out from fail-safe exposure
+	// check). Use for keys that cannot be HTTP-brokered: deploy keys, SSH keys,
+	// gRPC credentials, WebSocket auth, non-secret usernames.
+	RevealSecrets []string `yaml:"reveal_secrets"`
 	// EgressRestrictionExperimental is DEPRECATED — superseded by the top-level
 	// egress block (pipelock + nftables). When set true it still opts the agent
 	// into egress containment (treated like egress: true) but Load logs a
@@ -566,6 +571,12 @@ func Load(path string) (*Config, error) {
 		// valid
 	default:
 		return nil, fmt.Errorf("vault.backend must be env or agent-vault, got %q", cfg.Vault.Backend)
+	}
+	switch cfg.Vault.ExposurePolicy {
+	case "", "warn", "strict", "off":
+		// valid
+	default:
+		return nil, fmt.Errorf("vault.exposure_policy must be warn, strict, or off (got %q)", cfg.Vault.ExposurePolicy)
 	}
 	sourceNames := make(map[string]bool, len(cfg.Vault.Backends))
 	sawSops := false

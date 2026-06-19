@@ -209,3 +209,52 @@ func TestSidecarSecretEnv_PerAgentDecryptFailureErrors(t *testing.T) {
 		t.Fatal("decrypt failure must abort the listener, not install it secretless")
 	}
 }
+
+// --- exposureViolations: pure policy check for the fail-safe exposure gate.
+
+func TestExposureViolations_GrantedOnlyIsViolation(t *testing.T) {
+	flat := map[string]string{"API_KEY": "v", "GH_TOKEN": "t"}
+	got := exposureViolations(flat, nil, nil)
+	if len(got) != 2 {
+		t.Fatalf("want 2 violations, got %v", got)
+	}
+}
+
+func TestExposureViolations_BrokeredSuppresses(t *testing.T) {
+	flat := map[string]string{"API_KEY": "v", "GH_TOKEN": "t"}
+	got := exposureViolations(flat, []string{"API_KEY", "GH_TOKEN"}, nil)
+	if len(got) != 0 {
+		t.Errorf("brokered keys must not be violations, got %v", got)
+	}
+}
+
+func TestExposureViolations_RevealedSuppresses(t *testing.T) {
+	flat := map[string]string{"DISCORD_TOKEN": "d"}
+	got := exposureViolations(flat, nil, []string{"DISCORD_TOKEN"})
+	if len(got) != 0 {
+		t.Errorf("revealed keys must not be violations, got %v", got)
+	}
+}
+
+func TestExposureViolations_PartialCoverage(t *testing.T) {
+	flat := map[string]string{"API_KEY": "v", "DISCORD_TOKEN": "d", "DEPLOY_KEY": "k"}
+	got := exposureViolations(flat, []string{"API_KEY"}, []string{"DISCORD_TOKEN"})
+	if len(got) != 1 || got[0] != "DEPLOY_KEY" {
+		t.Errorf("want only DEPLOY_KEY as violation, got %v", got)
+	}
+}
+
+func TestExposureViolations_EmptyFlatIsClean(t *testing.T) {
+	got := exposureViolations(nil, nil, nil)
+	if len(got) != 0 {
+		t.Errorf("empty flat must yield no violations, got %v", got)
+	}
+}
+
+func TestExposureViolations_OutputIsSorted(t *testing.T) {
+	flat := map[string]string{"ZZZ": "z", "AAA": "a", "MMM": "m"}
+	got := exposureViolations(flat, nil, nil)
+	if len(got) != 3 || got[0] != "AAA" || got[1] != "MMM" || got[2] != "ZZZ" {
+		t.Errorf("violations must be sorted, got %v", got)
+	}
+}
