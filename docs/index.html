@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,9 +8,9 @@
 <title>clem: self-hosted Claude Code agent fleets, contained at the OS layer</title>
 <meta name="description" content="clem runs a team of Claude Code agents 24/7 on any Linux host you own. Each agent is a real OS user; secrets and egress are contained by the kernel and a separate user, not by the agent's cooperation. Open source, MIT.">
 <link rel="canonical" href="https://myclementine.ai/">
-<meta name="theme-color" content="#0a0a0b">
-<link rel="icon" type="image/png" href="logo.png">
-<link rel="apple-touch-icon" href="logo.png">
+<meta name="theme-color" content="#F6F0E2">
+<link rel="icon" type="image/png" sizes="48x48" href="favicon-48.png">
+<link rel="apple-touch-icon" href="favicon-48.png">
 
 <!-- Open Graph -->
 <meta property="og:type" content="website">
@@ -18,14 +18,16 @@
 <meta property="og:url" content="https://myclementine.ai/">
 <meta property="og:title" content="clem: self-hosted Claude Code agent fleets, contained at the OS layer">
 <meta property="og:description" content="Run a team of Claude Code agents 24/7 on any Linux host. Each agent is a real OS user; secrets and egress are contained by the kernel, not by trust. Open source, MIT.">
-<meta property="og:image" content="https://myclementine.ai/logo.png">
-<meta property="og:image:alt" content="clem, the clementine mascot">
+<meta property="og:image" content="https://myclementine.ai/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="clem — a team of self-hosted Claude Code agents that never clocks out">
 
 <!-- Twitter -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="clem: self-hosted Claude Code agent fleets">
 <meta name="twitter:description" content="Autonomous agents, contained by the kernel, not by trust. Run a fleet of Claude Code agents 24/7 on infrastructure you own.">
-<meta name="twitter:image" content="https://myclementine.ai/logo.png">
+<meta name="twitter:image" content="https://myclementine.ai/og-card.png">
 
 <!-- JSON-LD: SoftwareApplication -->
 <script type="application/ld+json">
@@ -39,11 +41,11 @@
   "description": "clem runs a team of Claude Code agents 24/7 on any Linux host you own. Each agent is a real OS user with its own home directory and git identity; secrets and egress are contained at the kernel layer by a separate user, not by the agent's cooperation.",
   "url": "https://myclementine.ai/",
   "downloadUrl": "https://github.com/jahwag/clem",
-  "softwareVersion": "latest",
+  "softwareVersion": "0.19.0",
   "license": "https://opensource.org/licenses/MIT",
   "isAccessibleForFree": true,
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-  "author": { "@type": "Organization", "name": "clem", "url": "https://myclementine.ai/" }
+  "author": { "@type": "Person", "name": "jahwag", "url": "https://github.com/jahwag" }
 }
 </script>
 
@@ -84,824 +86,182 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Mona+Sans:wght@400..800&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=Source+Sans+3:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=Source+Sans+3:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=Source+Sans+3:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet"></noscript>
 
-<!-- ===================== clem design tokens (canonical) ===================== -->
 <style>
-:root {
-  --clem-orange-50:#fef2ec; --clem-orange-100:#fde0d2; --clem-orange-200:#fac1a4;
-  --clem-orange-300:#f69b6e; --clem-orange-400:#f37c43; --clem-orange-500:#f0601f;
-  --clem-orange-600:#d44e14; --clem-orange-700:#b03e11; --clem-orange-800:#8c3211;
-  --clem-orange-900:#722a12; --clem-orange-950:#3e1307;
-  --clem-green-50:#e9f7f0; --clem-green-100:#c9ecdc; --clem-green-200:#97dbbd;
-  --clem-green-300:#5cc599; --clem-green-400:#36ad7e; --clem-green-500:#2fa070;
-  --clem-green-600:#25855c; --clem-green-700:#1f6a4a; --clem-green-800:#1a543c; --clem-green-900:#143f2e;
-  --clem-ink-1000:#ffffff; --clem-ink-900:#e5e7eb; --clem-ink-800:#cbd5e1; --clem-ink-700:#94a3b8;
-  --clem-ink-600:#6b7280; --clem-ink-500:#52525b; --clem-ink-400:#3f3f46; --clem-ink-300:#2a2a30;
-  --clem-ink-200:#212126; --clem-ink-150:#1a1a1d; --clem-ink-100:#141417; --clem-ink-50:#0f0f12; --clem-ink-0:#0a0a0b;
-  --clem-red-400:#f2685a; --clem-red-500:#e5484d; --clem-red-600:#c93b40;
-  --clem-amber-400:#f5b544; --clem-amber-500:#e0a82e; --clem-amber-600:#c08f1f;
-  --clem-blue-400:#5aa2f0; --clem-blue-500:#3b82f6; --clem-blue-600:#2f6fd6;
-  --clem-tl-red:#ff5f57; --clem-tl-yellow:#febc2e; --clem-tl-green:#28c841;
-
-  --clem-font-sans:'Mona Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
-  --clem-font-mono:'Spline Sans Mono',ui-monospace,'SF Mono',Menlo,monospace;
-  --clem-maxw-content:1152px; --clem-maxw-prose:720px;
-  --clem-radius-md:8px; --clem-radius-lg:12px; --clem-radius-xl:16px; --clem-radius-2xl:24px; --clem-radius-full:9999px;
-  --clem-shadow-md:0 4px 16px -6px rgba(0,0,0,.50);
-  --clem-shadow-lg:0 12px 40px -12px rgba(0,0,0,.60);
-  --clem-shadow-accent:0 8px 24px -8px rgba(240,96,31,.50);
-  --clem-duration-fast:120ms; --clem-duration-base:180ms;
-  --clem-ease:cubic-bezier(.4,0,.2,1);
+:root{
+  --paper:#F6F0E2; --panel:#ECE3CE; --panel-2:#E2D5B8;
+  --ink:#1E1B17; --ink-soft:#5b5347; --ink-mute:#655d4d;
+  --orange:#C2532B; --orange-dark:#A8431F; --green:#3B5A3A;
+  --line:rgba(30,27,23,0.10); --line-strong:rgba(30,27,23,0.20);
+  --head:'Playfair Display',Georgia,'Times New Roman',serif;
+  --body:'Source Sans 3',-apple-system,system-ui,'Segoe UI',sans-serif;
+  --mono:'Spline Sans Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  --nav-h:64px;
 }
-:root,[data-theme="dark"]{
-  color-scheme:dark;
-  --clem-bg:var(--clem-ink-0); --clem-bg-sunken:var(--clem-ink-50);
-  --clem-surface:rgba(255,255,255,.02); --clem-surface-elevated:rgba(255,255,255,.04);
-  --clem-surface-solid:var(--clem-ink-100); --clem-terminal-bg:rgba(0,0,0,.40);
-  --clem-border:rgba(255,255,255,.08); --clem-border-subtle:rgba(255,255,255,.05); --clem-border-strong:rgba(255,255,255,.14);
-  --clem-text:var(--clem-ink-900); --clem-text-strong:var(--clem-ink-1000);
-  --clem-text-muted:var(--clem-ink-700); --clem-text-subtle:var(--clem-ink-600);
-  --clem-accent:var(--clem-orange-500); --clem-accent-hover:var(--clem-orange-600); --clem-accent-text:var(--clem-orange-400);
-  --clem-link:var(--clem-orange-400); --clem-link-hover:var(--clem-orange-300);
-  --clem-focus-ring:rgba(240,96,31,.55); --clem-on-accent:#fff;
-  --clem-success:var(--clem-green-400); --clem-success-bg:rgba(47,160,112,.12); --clem-success-border:rgba(47,160,112,.35);
-  --clem-warning:var(--clem-amber-400); --clem-warning-bg:rgba(224,168,46,.12); --clem-warning-border:rgba(224,168,46,.35);
-  --clem-danger:var(--clem-red-400); --clem-danger-bg:rgba(229,72,77,.12); --clem-danger-border:rgba(229,72,77,.38);
-  --clem-glow:radial-gradient(ellipse 80% 60% at 50% 0%,rgba(240,96,31,.15),transparent 70%);
-  --clem-accent-gradient:linear-gradient(135deg,#f37c43 0%,#f0601f 50%,#d44e14 100%);
-  --clem-terminal-glow:0 0 80px -20px rgba(240,96,31,.18);
-}
-
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
-body{margin:0;background:var(--clem-bg);color:var(--clem-text);font-family:var(--clem-font-sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--body);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;font-size:17px;line-height:1.6}
 a{color:inherit;text-decoration:none}
-:focus-visible{outline:2px solid var(--clem-accent);outline-offset:2px;border-radius:4px}
-::selection{background:rgba(240,96,31,.30);color:#fff}
-[id]{scroll-margin-top:88px}
+img{display:block}
+:focus-visible{outline:2px solid var(--orange);outline-offset:3px;border-radius:4px}
+::selection{background:rgba(194,83,43,.22)}
 
-.wrap{max-width:var(--clem-maxw-content);margin:0 auto;padding-left:24px;padding-right:24px}
-.grad-text{background:var(--clem-accent-gradient);-webkit-background-clip:text;background-clip:text;color:transparent}
-.mono{font-family:var(--clem-font-mono)}
-.eyebrow{font-family:var(--clem-font-mono);font-size:12px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--clem-accent-text)}
+.display{font-family:var(--head);font-weight:700;letter-spacing:-0.005em;line-height:1.06;color:var(--ink);text-wrap:balance;margin:0}
+.serif{font-family:var(--head)}
+.mono{font-family:var(--mono)}
+.eyebrow{font-family:var(--body);font-size:13px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--orange-dark);line-height:1}
+.lead{font-size:18px;line-height:1.62;color:var(--ink-soft)}
+p a{text-decoration:underline;text-underline-offset:2px;text-decoration-thickness:1px}
+.muted{color:var(--ink-mute)}
 
-/* ---- buttons ---- */
-.btn{display:inline-flex;align-items:center;gap:8px;font-weight:600;font-size:15px;line-height:1;border-radius:var(--clem-radius-md);padding:13px 20px;border:1px solid transparent;cursor:pointer;transition:all var(--clem-duration-fast) var(--clem-ease);white-space:nowrap}
-.btn-primary{background:var(--clem-accent-gradient);color:#fff;box-shadow:0 1px 0 rgba(255,255,255,.12) inset}
-.btn-primary:hover{transform:translateY(-1px);box-shadow:var(--clem-shadow-accent)}
-.btn-primary:active{transform:translateY(0)}
-.btn-ghost{border-color:var(--clem-border-strong);color:var(--clem-text-strong);background:transparent}
-.btn-ghost:hover{border-color:var(--clem-text-muted);background:var(--clem-surface)}
+/* ---------- buttons ---------- */
+.btn{display:inline-flex;align-items:center;gap:9px;font-family:var(--body);font-weight:600;font-size:15px;line-height:1;border-radius:999px;padding:15px 28px;border:1px solid transparent;cursor:pointer;transition:background .15s ease,border-color .15s ease,transform .15s ease;white-space:nowrap}
+.btn svg{width:17px;height:17px}
+.btn-primary{background:var(--orange);color:#fff}
+.btn-primary:hover{background:var(--orange-dark)}
+.btn-ghost{background:transparent;color:var(--ink);border-color:var(--line-strong)}
+.btn-ghost:hover{border-color:var(--ink);background:rgba(30,27,23,.04)}
+.btn-paper{background:var(--paper);color:var(--orange-dark)}
+.btn-paper:hover{background:#fff}
+.btn-onorange{background:transparent;color:var(--paper);border-color:rgba(246,240,226,.5)}
+.btn-onorange:hover{background:rgba(246,240,226,.12)}
 
-/* ---- cards ---- */
-.card{background:var(--clem-surface);border:1px solid var(--clem-border);border-radius:var(--clem-radius-lg);transition:background var(--clem-duration-base),border-color var(--clem-duration-base)}
-.card-hover:hover{background:var(--clem-surface-elevated);border-color:rgba(240,96,31,.30)}
+/* ---------- nav ---------- */
+.nav{position:fixed;top:0;left:0;right:0;z-index:60;height:var(--nav-h);backdrop-filter:blur(10px);background:rgba(246,240,226,.82);border-bottom:1px solid var(--line)}
+.nav-in{max-width:1280px;margin:0 auto;height:100%;padding:0 clamp(18px,4vw,40px);display:flex;align-items:center;justify-content:space-between}
+.brand{display:flex;align-items:center;gap:10px}
+.brand img{width:28px;height:28px;object-fit:contain}
+.brand span{font-family:var(--head);font-size:23px;font-weight:700;letter-spacing:-.01em}
+.nav-links{display:flex;align-items:center;gap:30px;font-size:14.5px;font-weight:500;color:var(--ink-soft)}
+.nav-links a:hover{color:var(--orange-dark)}
+.nav-cta{background:var(--orange);color:#fff!important;padding:10px 20px;border-radius:999px;font-weight:600}
+.skip-link{position:fixed;left:8px;top:-48px;z-index:200;background:var(--orange);color:#fff;padding:10px 18px;border-radius:0 0 10px 10px;font-weight:600;transition:top .15s}
+.skip-link:focus{top:0;outline:2px solid #fff;outline-offset:-4px}
+.nav-cta:hover{background:var(--orange-dark)}
+.nav-burger{display:none;background:0;border:0;color:var(--ink);cursor:pointer;padding:6px}
 
-/* ---- terminal ---- */
-.terminal{background:var(--clem-terminal-bg);border:1px solid var(--clem-border);border-radius:var(--clem-radius-lg);box-shadow:var(--clem-terminal-glow);overflow:hidden}
-.terminal-chrome{background:rgba(255,255,255,.03);border-bottom:1px solid var(--clem-border);padding:11px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+/* progress + hint */
+.progress{position:fixed;top:var(--nav-h);left:0;height:2px;background:var(--orange);width:0;z-index:60;transition:width .08s linear}
+.hint{position:fixed;right:22px;bottom:20px;z-index:55;font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-mute);display:flex;align-items:center;gap:8px;transition:opacity .4s ease;pointer-events:none}
+.hint svg{width:26px;height:10px}
+
+/* ---------- leaflet (horizontal scroll) ---------- */
+.leaflet{position:relative;width:100%}
+.leaflet-track{position:sticky;top:0;height:100vh;overflow:hidden}
+.leaflet-inner{display:flex;height:100%;will-change:transform}
+.panel{flex:0 0 auto;width:100vw;height:100vh;display:flex;align-items:center;position:relative;padding:calc(var(--nav-h) + 28px) clamp(24px,6vw,90px) 56px;overflow:hidden}
+.panel--wide{width:120vw}
+.panel--xwide{width:152vw}
+.panel--mid{width:110vw}
+.panel--narrow{width:90vw}
+.panel-beige{background:var(--panel)}
+.panel-orange{background:var(--orange-dark);color:var(--paper)}
+.panel-in{width:100%;max-width:1180px;margin:0 auto;position:relative;z-index:1}
+
+/* fade-up reveal */
+[data-reveal]{opacity:0;transform:translateY(22px);transition:opacity .7s cubic-bezier(.2,.6,.2,1),transform .7s cubic-bezier(.2,.6,.2,1)}
+[data-reveal].in{opacity:1;transform:none}
+/* above-the-fold hero paints immediately for fast LCP; scroll-reveal kept for all other panels */
+#hero [data-reveal]{opacity:1;transform:none}
+
+/* ---------- hero ---------- */
+.hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:clamp(32px,5vw,64px);align-items:center}
+.hero h1{font-size:clamp(46px,5.6vw,78px);margin:0 0 26px}
+.hero p{max-width:480px;margin:0 0 34px}
+.hero-cta{display:flex;gap:13px;flex-wrap:wrap}
+.fineprint{font-family:var(--mono);font-size:12.5px;letter-spacing:.02em;color:var(--ink-mute);margin:30px 0 0}
+.medallion{position:relative;display:flex;align-items:center;justify-content:center;min-height:380px}
+.medallion .halo{position:absolute;width:min(440px,80%);aspect-ratio:1;border-radius:50%;background:radial-gradient(circle,#ECE3CE 0%,rgba(236,227,206,0) 70%)}
+.medallion svg{position:relative;width:min(420px,84%);height:auto;animation:float 8s ease-in-out infinite}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+
+/* botanical engraving plates (mounted prints) */
+.plate-hero{position:relative;width:min(560px,100%);height:auto;border-radius:8px;background:var(--paper);
+  border:1px solid rgba(30,27,23,.12);padding:8px;
+  box-shadow:0 26px 54px -22px rgba(30,27,23,.45),0 4px 12px -4px rgba(30,27,23,.18);
+  animation:float 8s ease-in-out infinite}
+.deco{position:absolute;pointer-events:none;z-index:1;height:auto;border-radius:7px;background:var(--paper);
+  border:1px solid rgba(30,27,23,.12);padding:6px;
+  box-shadow:0 18px 38px -18px rgba(30,27,23,.42),0 3px 9px -3px rgba(30,27,23,.16)}
+.no-leaflet .deco{display:none}
+
+/* ---------- generic section heads ---------- */
+.sec-head{max-width:720px}
+.sec-head h2{font-size:clamp(32px,4.2vw,52px);margin:0 0 18px}
+.sec-head.center{margin-left:auto;margin-right:auto;text-align:center}
+.kicker{display:block;margin-bottom:22px}
+
+/* quote */
+.bigquote{font-family:var(--head);font-style:italic;font-weight:500;font-size:clamp(30px,3.8vw,46px);line-height:1.28;letter-spacing:0;color:var(--orange-dark);max-width:720px;margin:0;text-wrap:balance}
+
+/* day-in-loop steps */
+.loop-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:clamp(40px,5vw,72px);align-items:center}
+.steps{display:grid;grid-template-columns:1fr 1fr;gap:30px 44px}
+.step .num{font-family:var(--head);font-size:34px;font-weight:700;color:var(--orange-dark);line-height:1}
+.step h3{font-family:var(--head);font-weight:600;font-size:24px;margin:0;color:var(--ink)}
+.step .row{display:flex;align-items:baseline;gap:12px;margin-bottom:7px}
+.step p{font-size:15px;line-height:1.55;color:var(--ink-soft);margin:0;padding-left:42px}
+.ring{width:min(300px,80%);height:auto;animation:spin 16s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* under-the-hood / terminal */
+.hood-grid{display:grid;grid-template-columns:.9fr 1.1fr;gap:clamp(36px,5vw,64px);align-items:center}
+.terminal{background:#23201B;border:1px solid rgba(0,0,0,.35);border-radius:14px;overflow:hidden;box-shadow:0 26px 60px -28px rgba(30,27,23,.5);text-align:left;max-width:560px}
+.term-chrome{background:rgba(255,255,255,.05);border-bottom:1px solid rgba(255,255,255,.08);padding:11px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.dots{display:flex;gap:7px}
 .dot{width:12px;height:12px;border-radius:50%}
-.term-pre{margin:0;padding:20px 22px;font-family:var(--clem-font-mono);font-size:13.5px;line-height:1.85;color:var(--clem-ink-900);overflow-x:auto;white-space:pre}
-.cmt{color:var(--clem-ink-600)}
-.cmd{color:var(--clem-orange-400)}
-.flag{color:var(--clem-ink-700)}
-.str{color:var(--clem-green-300)}
-.key{color:var(--clem-ink-800)}
-.prompt{color:var(--clem-accent)}
-.copy-btn{display:inline-flex;align-items:center;gap:6px;opacity:.7;transition:opacity var(--clem-duration-fast),color var(--clem-duration-fast);background:0;border:0;color:var(--clem-ink-700);font-family:var(--clem-font-mono);font-size:12px;cursor:pointer;padding:4px 6px}
-.copy-btn:hover{opacity:1;color:var(--clem-text-strong)}
+.term-label{font-family:var(--mono);font-size:12px;color:#b6ad99}
+.term-pre{margin:0;padding:20px 22px;font-family:var(--mono);font-size:13px;line-height:1.8;color:#efe8d6;overflow-x:auto;white-space:pre}
+.cmt{color:#a89b7a}.cmd{color:#e89a5c}.flag{color:#b6ad99}.str{color:#9ec08f}.key{color:#dcd3bd}.prompt{color:#e89a5c}
+.copy-btn{display:inline-flex;align-items:center;gap:6px;opacity:.85;transition:opacity .15s;background:0;border:0;color:#b6ad99;font-family:var(--mono);font-size:12px;cursor:pointer;padding:4px 6px}
+.copy-btn:hover{opacity:1;color:#fff}
+.copy-btn svg{width:13px;height:13px;stroke:currentColor;stroke-width:1.7;fill:none;stroke-linecap:round;stroke-linejoin:round}
 
-/* ---- icons ---- */
-.ic{width:18px;height:18px;flex-shrink:0;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;fill:none}
-.ic.fill{fill:currentColor;stroke:none}
+/* feature cards (the grove) */
+.grove-row{display:flex;gap:22px;align-items:stretch}
+.gcard{flex:0 0 280px;background:var(--panel);border:1px solid rgba(59,90,58,.16);border-radius:18px;padding:28px 26px;display:flex;flex-direction:column}
+.panel-beige .gcard{background:var(--paper);border-color:var(--line)}
+.gcard .ico{width:40px;height:40px;border-radius:11px;background:var(--paper);border:1px solid rgba(194,83,43,.25);display:flex;align-items:center;justify-content:center;color:var(--orange-dark);margin-bottom:18px}
+.panel-beige .gcard .ico{background:var(--panel)}
+.gcard .ico svg{width:21px;height:21px;stroke:currentColor;stroke-width:1.6;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.gcard h3{font-family:var(--head);font-weight:600;font-size:23px;margin:0 0 8px;color:var(--ink)}
+.gcard p{font-size:14.5px;line-height:1.58;color:var(--ink-soft);margin:0}
 
-/* ---- secure badge ---- */
-.badge{display:inline-flex;align-items:center;gap:6px;font-family:var(--clem-font-mono);font-size:12px;font-weight:500;padding:3px 10px;border-radius:999px}
-.badge-dot{width:6px;height:6px;border-radius:50%;background:currentColor;box-shadow:0 0 6px currentColor}
-.badge-secure{color:var(--clem-success);border:1px solid var(--clem-success-border);background:var(--clem-success-bg)}
-.badge-na{color:var(--clem-text-subtle);border:1px solid var(--clem-border-strong);background:transparent}
+/* security */
+.sec-grid{display:grid;grid-template-columns:1fr .85fr;gap:clamp(40px,5vw,72px);align-items:center}
+.checks{display:flex;flex-direction:column;gap:14px}
+.check{display:flex;gap:16px;align-items:flex-start;background:var(--panel);border:1px solid rgba(59,90,58,.16);border-radius:15px;padding:22px 24px}
+.check .ic{flex:none;width:42px;height:42px;border-radius:11px;background:var(--paper);border:1px solid rgba(194,83,43,.25);display:flex;align-items:center;justify-content:center}
+.check .ic svg{width:21px;height:21px;stroke:var(--orange);stroke-width:1.7;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.check h3{font-size:16px;font-weight:700;margin:0 0 4px;color:var(--ink)}
+.check p{font-size:14px;line-height:1.5;color:var(--ink-soft);margin:0}
+.quote-side{font-family:var(--head);font-style:italic;font-weight:500;font-size:27px;line-height:1.4;color:var(--green);border-left:2px solid var(--orange);padding-left:20px;margin:26px 0 0}
 
-/* ---- nav ---- */
-.nav-link{color:var(--clem-text-muted);font-size:14px;font-weight:500;transition:color var(--clem-duration-fast);display:inline-flex;align-items:center;gap:7px}
-.nav-link:hover{color:var(--clem-text-strong)}
+/* faq */
+.faq-grid{display:grid;grid-template-columns:1fr 1fr;gap:32px 56px;max-width:1040px}
+.qa h3{font-family:var(--head);font-weight:600;font-size:23px;margin:0 0 8px;color:var(--ink)}
+.qa p{font-size:14.5px;line-height:1.6;color:var(--ink-soft);margin:0}
+.qa a{color:var(--orange-dark);text-decoration:underline;text-underline-offset:2px}
+.qa code{font-family:var(--mono);font-size:12.5px;color:var(--orange-dark);background:rgba(194,83,43,.08);border-radius:4px;padding:1px 5px}
 
-/* ---- faq ---- */
-.faq{background:var(--clem-surface);border:1px solid var(--clem-border);border-radius:var(--clem-radius-lg);transition:border-color var(--clem-duration-base)}
-.faq[open],.faq:hover{border-color:rgba(240,96,31,.30)}
-.faq summary{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 22px;cursor:pointer;list-style:none;font-size:16px;font-weight:600;color:var(--clem-text-strong);letter-spacing:-.01em}
-.faq summary::-webkit-details-marker{display:none}
-.faq summary::after{content:"+";font-family:var(--clem-font-mono);font-size:18px;font-weight:400;color:var(--clem-accent-text);flex-shrink:0;transition:transform var(--clem-duration-base) var(--clem-ease)}
-.faq[open] summary::after{transform:rotate(45deg)}
-.faq-body{padding:0 22px 20px;font-size:15px;line-height:1.65;color:var(--clem-text-muted)}
-.faq-body p{margin:0 0 12px}
-.faq-body p:last-child{margin-bottom:0}
-.faq-body a{color:var(--clem-link)}
-.faq-body a:hover{color:var(--clem-link-hover)}
-.faq-body code{font-family:var(--clem-font-mono);font-size:13px;color:var(--clem-orange-300);background:rgba(255,255,255,.04);border:1px solid var(--clem-border);border-radius:5px;padding:1px 6px}
+/* closing */
+.closing{max-width:720px;margin:0 auto;text-align:center}
+.closing h2{font-size:clamp(40px,5.2vw,68px);color:var(--paper);margin:0 0 24px}
+.gh-buttons{display:flex;gap:14px;justify-content:center;align-items:center;flex-wrap:wrap;margin-top:24px}
 
-@media (prefers-reduced-motion:reduce){
-  html{scroll-behavior:auto}
-  *{transition:none!important;animation:none!important}
-}
-</style>
-</head>
+/* footer (appears after the leaflet, normal flow) */
+.foot{background:var(--paper);border-top:1px solid var(--line);padding:30px clamp(24px,6vw,90px)}
+.foot-in{max-width:1280px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
+.foot-links{display:flex;align-items:center;gap:24px;font-size:14px;color:var(--ink-mute);flex-wrap:wrap}
+.foot-links a:hover{color:var(--orange-dark)}
+.foot svg{width:18px;height:18px;fill:currentColor}
 
-<body>
-<a href="#main" class="wrap" style="position:absolute;left:-9999px;top:0;z-index:200;padding:10px 16px;background:var(--clem-surface-solid);border:1px solid var(--clem-border-strong);border-radius:8px" onfocus="this.style.left='12px';this.style.top='12px'" onblur="this.style.left='-9999px'">Skip to content</a>
-
-<!-- ===================== SVG icon sprite ===================== -->
-<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
-  <defs>
-    <symbol id="i-github" viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></symbol>
-    <symbol id="i-discord" viewBox="0 0 24 24"><path d="M18.6 5.5A16 16 0 0 0 14.5 4l-.3.5a14 14 0 0 1 3.6 1.2 13 13 0 0 0-11.6 0A14 14 0 0 1 9.8 4.5L9.5 4a16 16 0 0 0-4.1 1.5C2.8 9.3 2 13 2.3 16.6A16 16 0 0 0 7.3 19l.6-1a10 10 0 0 1-1.7-.8l.4-.3a11 11 0 0 0 9.4 0l.4.3a10 10 0 0 1-1.7.8l.6 1a16 16 0 0 0 5-2.4C22 13 21.2 9.3 18.6 5.5ZM9 14.3c-.8 0-1.5-.7-1.5-1.6S8.2 11 9 11s1.5.8 1.5 1.7-.7 1.6-1.5 1.6Zm6 0c-.8 0-1.5-.7-1.5-1.6S14.2 11 15 11s1.5.8 1.5 1.7-.7 1.6-1.5 1.6Z" fill="currentColor" stroke="none"/></symbol>
-    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1L12 2z"/></symbol>
-    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
-    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol>
-    <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
-    <symbol id="i-terminal" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 9 3 3-3 3"/><path d="M13 15h4"/></symbol>
-    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></symbol>
-    <symbol id="i-server" viewBox="0 0 24 24"><rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 6h.01M6 18h.01"/></symbol>
-    <symbol id="i-network" viewBox="0 0 24 24"><rect width="6" height="6" x="9" y="2" rx="1"/><rect width="6" height="6" x="2" y="16" rx="1"/><rect width="6" height="6" x="16" y="16" rx="1"/><path d="M12 8v4M5 16v-2a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v2"/></symbol>
-    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.5 12.5 8-8M16 6l2 2M19 3l2 2"/></symbol>
-    <symbol id="i-box" viewBox="0 0 24 24"><path d="m7.5 4.27 9 5.15M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></symbol>
-    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
-    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
-    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></symbol>
-    <symbol id="i-cpu" viewBox="0 0 24 24"><rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></symbol>
-  </defs>
-</svg>
-
-<div style="position:relative;overflow:hidden">
-  <!-- one ambient glow near the fold -->
-  <div aria-hidden="true" style="position:absolute;inset:0 0 auto;height:640px;background:var(--clem-glow);pointer-events:none;z-index:0"></div>
-
-  <div style="position:relative;z-index:1">
-
-  <!-- ============================ NAV ============================ -->
-  <nav style="position:sticky;top:0;z-index:50;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);background:color-mix(in srgb,var(--clem-bg) 82%,transparent);border-bottom:1px solid var(--clem-border)">
-    <div class="wrap" style="display:flex;align-items:center;justify-content:space-between;height:64px">
-      <a href="#top" style="display:flex;align-items:center;gap:10px;color:var(--clem-text-strong);font-weight:700">
-        <img src="logo.png" alt="" width="30" height="30" style="display:block">
-        <span style="font-size:18px;letter-spacing:-.02em">clem</span>
-      </a>
-      <div class="nav-desktop" style="display:flex;align-items:center;gap:26px">
-        <a class="nav-link" href="#security">Security model</a>
-        <a class="nav-link" href="#how">How it works</a>
-        <a class="nav-link" href="#quickstart">Quickstart</a>
-        <a class="nav-link" href="#faq">FAQ</a>
-        <a class="nav-link" href="https://discord.gg/pR4qeMH4u4"><svg class="ic" style="width:17px;height:17px"><use href="#i-discord"/></svg>Discord</a>
-        <span style="display:inline-flex;align-items:center">
-          <a class="github-button" href="https://github.com/jahwag/clem" data-color-scheme="no-preference: dark; light: dark; dark: dark;" data-icon="octicon-star" data-show-count="true" aria-label="Star jahwag/clem on GitHub">Star</a>
-        </span>
-      </div>
-      <button id="menu-btn" type="button" class="nav-mobile" aria-label="Open menu" aria-expanded="false" style="display:none;background:var(--clem-surface);border:1px solid var(--clem-border-strong);border-radius:8px;padding:8px;color:var(--clem-text-strong);cursor:pointer">
-        <svg class="ic" style="width:20px;height:20px"><use href="#i-menu"/></svg>
-      </button>
-    </div>
-    <div id="mobile-menu" hidden style="border-top:1px solid var(--clem-border);background:var(--clem-bg)">
-      <div class="wrap" style="display:flex;flex-direction:column;gap:4px;padding-top:10px;padding-bottom:14px">
-        <a class="nav-link" href="#security" style="padding:10px 0">Security model</a>
-        <a class="nav-link" href="#how" style="padding:10px 0">How it works</a>
-        <a class="nav-link" href="#quickstart" style="padding:10px 0">Quickstart</a>
-        <a class="nav-link" href="#faq" style="padding:10px 0">FAQ</a>
-        <a class="nav-link" href="https://discord.gg/pR4qeMH4u4" style="padding:10px 0"><svg class="ic" style="width:17px;height:17px"><use href="#i-discord"/></svg>Discord</a>
-        <a class="btn btn-ghost" href="https://github.com/jahwag/clem" style="margin-top:8px;justify-content:center"><svg class="ic" style="width:16px;height:16px"><use href="#i-github"/></svg>Star on GitHub</a>
-      </div>
-    </div>
-  </nav>
-
-  <main id="main">
-  <span id="top"></span>
-
-  <!-- ============================ HERO ============================ -->
-  <section class="wrap" style="text-align:center;max-width:880px;padding-top:64px;padding-bottom:48px">
-    <div class="eyebrow" style="margin-bottom:18px">docker-compose for Claude Code agents</div>
-    <h1 style="font-size:clamp(40px,7vw,68px);font-weight:700;letter-spacing:-.035em;line-height:1.04;margin:0 0 20px;color:var(--clem-text-strong)">
-      Autonomous agents,<br>contained by the <span class="grad-text">kernel</span>.
-    </h1>
-    <p style="font-size:clamp(17px,2.2vw,20px);color:var(--clem-text);max-width:640px;margin:0 auto 34px;line-height:1.6">
-      clem runs a team of Claude&nbsp;Code agents 24/7 on any Linux host you own. Each agent is a real OS user.
-      Its secrets and network access are controlled by the kernel and a separate user, not by the agent itself.
-    </p>
-    <div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-bottom:44px">
-      <a class="btn btn-primary" href="https://github.com/jahwag/clem"><svg class="ic" style="width:17px;height:17px"><use href="#i-github"/></svg>Get started on GitHub</a>
-      <a class="btn btn-ghost" href="#security">Read the security model<svg class="ic" style="width:16px;height:16px"><use href="#i-arrow"/></svg></a>
-    </div>
-
-    <!-- agent-fleet graph: the signature motif -->
-    <div class="graph-wrap" style="max-width:880px;margin:0 auto 40px">
-      <canvas id="fleet-graph" style="display:block;width:100%;height:420px"></canvas>
-    </div>
-
-    <!-- hero install terminal -->
-    <div class="terminal" style="max-width:760px;margin:0 auto;text-align:left">
-      <div class="terminal-chrome">
-        <div style="display:flex;gap:7px">
-          <span class="dot" style="background:var(--clem-tl-red)"></span>
-          <span class="dot" style="background:var(--clem-tl-yellow)"></span>
-          <span class="dot" style="background:var(--clem-tl-green)"></span>
-        </div>
-        <span class="mono" style="font-size:12px;color:var(--clem-text-subtle)">quickstart</span>
-        <button class="copy-btn" type="button" data-copy="curl -fsSL https://github.com/jahwag/clem/releases/latest/download/clem_linux_amd64 -o /usr/local/bin/clem && chmod +x /usr/local/bin/clem
-clem init && clem vault init
-sudo clem provision && sudo clem login && sudo clem up"><svg class="ic" style="width:13px;height:13px"><use href="#i-box"/></svg><span>copy</span></button>
-      </div>
-      <pre class="term-pre"><code><span class="cmt"># install the latest release (Linux x86-64)</span>
-<span class="prompt">$ </span><span class="cmd">curl</span> <span class="flag">-fsSL</span> https://github.com/jahwag/clem/releases/latest/download/clem_linux_amd64 \
-    <span class="flag">-o</span> /usr/local/bin/clem &amp;&amp; <span class="cmd">chmod</span> +x /usr/local/bin/clem
-
-<span class="cmt"># scaffold config, provision the OS users, start the fleet</span>
-<span class="prompt">$ </span><span class="cmd">clem</span> init &amp;&amp; <span class="cmd">clem</span> vault init
-<span class="prompt">$ </span><span class="cmd">sudo</span> clem provision &amp;&amp; <span class="cmd">sudo</span> clem login &amp;&amp; <span class="cmd">sudo</span> clem up</code></pre>
-    </div>
-    <p class="mono" style="font-size:13px;color:var(--clem-text-subtle);margin-top:16px">
-      Open source · Go · MIT licensed · runs on any host with <span style="color:var(--clem-accent-text)">systemd</span>
-    </p>
-  </section>
-
-  <!-- ====================== PROBLEM → ANSWER ====================== -->
-  <section style="background:var(--clem-bg-sunken);border-top:1px solid var(--clem-border);border-bottom:1px solid var(--clem-border);margin-top:48px">
-    <div class="wrap" style="padding-top:80px;padding-bottom:80px;max-width:1000px">
-      <div style="display:grid;grid-template-columns:1fr;gap:40px" class="pa-grid">
-        <div>
-          <div class="eyebrow" style="margin-bottom:14px">The problem</div>
-          <h2 style="font-size:clamp(26px,3.6vw,36px);font-weight:700;letter-spacing:-.025em;line-height:1.12;margin:0 0 16px;color:var(--clem-text-strong)">
-            An autonomous agent is an untrusted workload.
-          </h2>
-          <p style="font-size:17px;line-height:1.65;color:var(--clem-text-muted);margin:0 0 14px">
-            Agents need secrets and network access to do real work. But you can't trust an autonomous agent to
-            <em style="color:var(--clem-text);font-style:normal">hold</em> a raw credential, or to decide for itself what it's allowed to reach.
-          </p>
-          <p style="font-size:17px;line-height:1.65;color:var(--clem-text-muted);margin:0">
-            Telling the agent "don't leak this" is a policy, not containment. If enforcement depends on the agent
-            cooperating, it isn't enforcement.
-          </p>
-        </div>
-        <div>
-          <div class="eyebrow" style="margin-bottom:14px;color:var(--clem-success)">The answer</div>
-          <h2 style="font-size:clamp(26px,3.6vw,36px);font-weight:700;letter-spacing:-.025em;line-height:1.12;margin:0 0 16px;color:var(--clem-text-strong)">
-            Contain it at the OS layer.
-          </h2>
-          <p style="font-size:17px;line-height:1.65;color:var(--clem-text-muted);margin:0 0 20px">
-            clem puts the boundary below the agent. Each one runs as its own non-root Linux user; secrets and
-            egress are enforced by the kernel and a separate user the agent can't read or override.
-          </p>
-          <ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px">
-            <li style="display:flex;gap:10px;align-items:flex-start">
-              <svg class="ic" style="width:18px;height:18px;color:var(--clem-success);margin-top:2px"><use href="#i-check"/></svg>
-              <span style="font-size:15px;line-height:1.5;color:var(--clem-text)">A non-root agent <strong style="color:var(--clem-text-strong);font-weight:600">cannot disable a firewall it doesn't own.</strong></span>
-            </li>
-            <li style="display:flex;gap:10px;align-items:flex-start">
-              <svg class="ic" style="width:18px;height:18px;color:var(--clem-success);margin-top:2px"><use href="#i-check"/></svg>
-              <span style="font-size:15px;line-height:1.5;color:var(--clem-text)">A brokered agent holds <strong style="color:var(--clem-text-strong);font-weight:600">placeholders, never the real secret.</strong></span>
-            </li>
-            <li style="display:flex;gap:10px;align-items:flex-start">
-              <svg class="ic" style="width:18px;height:18px;color:var(--clem-success);margin-top:2px"><use href="#i-check"/></svg>
-              <span style="font-size:15px;line-height:1.5;color:var(--clem-text)">Enforcement lives in the OS layer, <strong style="color:var(--clem-text-strong);font-weight:600">below the agent.</strong></span>
-            </li>
-          </ul>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ====================== SECURITY MODEL ====================== -->
-  <section id="security" class="wrap" style="padding-top:96px;padding-bottom:96px;max-width:1100px">
-    <div style="text-align:center;max-width:720px;margin:0 auto 52px">
-      <div class="eyebrow" style="margin-bottom:14px">Security model</div>
-      <h2 style="font-size:clamp(28px,4vw,40px);font-weight:700;letter-spacing:-.03em;line-height:1.1;margin:0 0 14px;color:var(--clem-text-strong)">
-        Every credential takes one disposition.
-      </h2>
-      <p style="font-size:18px;line-height:1.6;color:var(--clem-text-muted);margin:0">
-        Four ways to contain what an agent can hold and where it can reach. Each is enforced by the
-        <strong style="color:var(--clem-text)">kernel and a separate user</strong>, never by the agent.
-      </p>
-    </div>
-
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px">
-      <!-- egress firewall -->
-      <div class="card card-hover" style="padding:24px;display:flex;flex-direction:column">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-          <span style="display:inline-flex;width:38px;height:38px;align-items:center;justify-content:center;border-radius:9px;background:var(--clem-surface-elevated);border:1px solid var(--clem-border);color:var(--clem-accent-text)"><svg class="ic" style="width:20px;height:20px"><use href="#i-network"/></svg></span>
-          <span class="badge badge-secure"><span class="badge-dot"></span>kernel</span>
-        </div>
-        <div class="mono" style="font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--clem-text-subtle);margin-bottom:6px">Egress firewall</div>
-        <h3 style="font-size:17px;font-weight:600;color:var(--clem-text-strong);margin:0 0 8px;letter-spacing:-.01em">Per-UID nftables rule</h3>
-        <p style="font-size:14px;line-height:1.6;color:var(--clem-text-muted);margin:0">
-          A per-UID <span class="mono" style="color:var(--clem-orange-300)">nftables</span> rule forces all traffic through <span class="mono" style="color:var(--clem-orange-300)">pipelock</span>, an auditing loopback proxy.
-          A non-root agent can't disable a firewall it doesn't own.
-        </p>
-      </div>
-      <!-- broker -->
-      <div class="card card-hover" style="padding:24px;display:flex;flex-direction:column">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-          <span style="display:inline-flex;width:38px;height:38px;align-items:center;justify-content:center;border-radius:9px;background:var(--clem-surface-elevated);border:1px solid var(--clem-border);color:var(--clem-accent-text)"><svg class="ic" style="width:20px;height:20px"><use href="#i-key"/></svg></span>
-          <span class="badge badge-secure"><span class="badge-dot"></span>separate user</span>
-        </div>
-        <div class="mono" style="font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--clem-text-subtle);margin-bottom:6px">Secret-zero broker</div>
-        <h3 style="font-size:17px;font-weight:600;color:var(--clem-text-strong);margin:0 0 8px;letter-spacing:-.01em">The agent holds a placeholder</h3>
-        <p style="font-size:14px;line-height:1.6;color:var(--clem-text-muted);margin:0">
-          The agent carries only a placeholder; a separate user (<span class="mono" style="color:var(--clem-orange-300)">agent-vault</span>) injects the real credential on egress.
-          The agent never sees the secret. <span class="mono" style="color:var(--clem-orange-300)">cat ~/.env</span> yields nothing usable for the brokered keys.
-        </p>
-      </div>
-      <!-- sidecar -->
-      <div class="card card-hover" style="padding:24px;display:flex;flex-direction:column">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-          <span style="display:inline-flex;width:38px;height:38px;align-items:center;justify-content:center;border-radius:9px;background:var(--clem-surface-elevated);border:1px solid var(--clem-border);color:var(--clem-accent-text)"><svg class="ic" style="width:20px;height:20px"><use href="#i-box"/></svg></span>
-          <span class="badge badge-secure"><span class="badge-dot"></span>separate user</span>
-        </div>
-        <div class="mono" style="font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--clem-text-subtle);margin-bottom:6px">Sidecar</div>
-        <h3 style="font-size:17px;font-weight:600;color:var(--clem-text-strong);margin:0 0 8px;letter-spacing:-.01em">Key stays in another user</h3>
-        <p style="font-size:14px;line-height:1.6;color:var(--clem-text-muted);margin:0">
-          For credentials the broker can't reach (non-HTTP protocols, or tools that need the raw key in-process), the tool runs as a separate user
-          behind a loopback MCP endpoint. The agent calls it but never holds the key.
-        </p>
-      </div>
-      <!-- remove -->
-      <div class="card card-hover" style="padding:24px;display:flex;flex-direction:column">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-          <span style="display:inline-flex;width:38px;height:38px;align-items:center;justify-content:center;border-radius:9px;background:var(--clem-surface-elevated);border:1px solid var(--clem-border);color:var(--clem-text-subtle)"><svg class="ic" style="width:20px;height:20px"><use href="#i-x"/></svg></span>
-          <span class="badge badge-na">n/a</span>
-        </div>
-        <div class="mono" style="font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--clem-text-subtle);margin-bottom:6px">Remove</div>
-        <h3 style="font-size:17px;font-weight:600;color:var(--clem-text-strong);margin:0 0 8px;letter-spacing:-.01em">Not present at all</h3>
-        <p style="font-size:14px;line-height:1.6;color:var(--clem-text-muted);margin:0">
-          Unused secrets simply aren't present. No placeholder, no broker, nothing to leak.
-        </p>
-      </div>
-    </div>
-
-    <!-- callout -->
-    <div style="display:flex;align-items:flex-start;gap:14px;margin-top:20px;padding:18px 20px;background:var(--clem-success-bg);border:1px solid var(--clem-success-border);border-radius:12px">
-      <span style="color:var(--clem-success);flex-shrink:0;margin-top:1px"><svg class="ic" style="width:22px;height:22px"><use href="#i-shield"/></svg></span>
-      <p style="margin:0;font-size:15px;line-height:1.6;color:var(--clem-text-muted)">
-        Containment is enforced below the agent. The real credential lives in a vault owned by a separate user the
-        agent cannot read, and egress is pinned by a kernel rule the agent cannot rewrite. Compromise the agent and
-        the boundary still holds.
-      </p>
-    </div>
-
-    <!-- built-on credits: honest about the borrowed primitives -->
-    <div style="margin-top:16px;padding:15px 20px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 20px;border:1px solid var(--clem-border);border-radius:12px;background:var(--clem-surface);font-family:var(--clem-font-mono);font-size:12.5px">
-      <span style="text-transform:uppercase;letter-spacing:.06em;color:var(--clem-text-muted)">Built on</span>
-      <a class="nav-link" href="https://github.com/luckyPipewrench/pipelock" style="font-size:12.5px;color:var(--clem-link)">
-        <svg class="ic" style="width:14px;height:14px"><use href="#i-github"/></svg>pipelock&nbsp;<span style="color:var(--clem-text-subtle)">(egress proxy)</span>
-      </a>
-      <a class="nav-link" href="https://github.com/Infisical/agent-vault" style="font-size:12.5px;color:var(--clem-link)">
-        <svg class="ic" style="width:14px;height:14px"><use href="#i-github"/></svg>Infisical&nbsp;agent-vault&nbsp;<span style="color:var(--clem-text-subtle)">(secret broker)</span>
-      </a>
-      <span style="color:var(--clem-text-subtle)">composed at the OS layer by clem.</span>
-    </div>
-  </section>
-
-  <!-- ====================== HOW IT WORKS ====================== -->
-  <section id="how" style="background:var(--clem-bg-sunken);border-top:1px solid var(--clem-border);border-bottom:1px solid var(--clem-border)">
-    <div class="wrap" style="padding-top:96px;padding-bottom:96px;max-width:1100px">
-      <div style="text-align:center;max-width:720px;margin:0 auto 52px">
-        <div class="eyebrow" style="margin-bottom:14px">How it works</div>
-        <h2 style="font-size:clamp(28px,4vw,40px);font-weight:700;letter-spacing:-.03em;line-height:1.1;margin:0 0 14px;color:var(--clem-text-strong)">
-          Just systemd, tmux, and a loop.
-        </h2>
-        <p style="font-size:18px;line-height:1.6;color:var(--clem-text-muted);margin:0">
-          Each agent is a systemd service running a tmux session that loops
-          <span class="mono" style="color:var(--clem-accent-text)">claude</span> on a timer. Parts your host already has:
-          <span class="mono" style="color:var(--clem-accent-text)">systemd</span> →
-          <span class="mono" style="color:var(--clem-accent-text)">tmux</span> →
-          <span class="mono" style="color:var(--clem-accent-text)">runner loop</span> →
-          <span class="mono" style="color:var(--clem-accent-text)">claude</span>.
-        </p>
-      </div>
-
-      <div style="display:grid;grid-template-columns:1fr;gap:20px" class="how-grid">
-        <!-- diagram -->
-        <div class="card" style="padding:26px">
-          <div style="border:1px dashed var(--clem-border-strong);border-radius:14px;padding:20px">
-            <div class="mono" style="font-size:11.5px;color:var(--clem-text-subtle);margin-bottom:16px">Linux host: laptop · Pi · VPS</div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:16px">
-              <!-- agent 1 -->
-              <div style="background:var(--clem-ink-100);border:1.5px solid var(--clem-accent);border-radius:10px;padding:14px">
-                <div class="mono" style="font-size:11px;color:var(--clem-accent-text);margin-bottom:10px">OS user: myteam-lead</div>
-                <div style="display:flex;flex-direction:column;gap:6px">
-                  <div class="mono diagram-step">systemd service</div>
-                  <div class="mono diagram-arrow">↓</div>
-                  <div class="mono diagram-step">tmux session</div>
-                  <div class="mono diagram-arrow">↓</div>
-                  <div class="mono diagram-step">runner loop</div>
-                  <div class="mono diagram-arrow">↓</div>
-                  <div class="mono diagram-step" style="color:var(--clem-orange-300);border-color:rgba(240,96,31,.3)">claude TUI</div>
-                </div>
-              </div>
-              <!-- agent 2 -->
-              <div style="background:var(--clem-ink-100);border:1.5px solid var(--clem-accent);border-radius:10px;padding:14px">
-                <div class="mono" style="font-size:11px;color:var(--clem-accent-text);margin-bottom:10px">OS user: myteam-worker</div>
-                <div style="display:flex;flex-direction:column;gap:6px">
-                  <div class="mono diagram-step">systemd service</div>
-                  <div class="mono diagram-arrow">↓</div>
-                  <div class="mono diagram-step">tmux session</div>
-                  <div class="mono diagram-arrow">↓</div>
-                  <div class="mono diagram-step">runner loop</div>
-                  <div class="mono diagram-arrow">↓</div>
-                  <div class="mono diagram-step" style="color:var(--clem-orange-300);border-color:rgba(240,96,31,.3)">claude TUI</div>
-                </div>
-              </div>
-            </div>
-            <div class="mono" style="font-size:11px;color:var(--clem-text-subtle);text-align:center;margin-bottom:14px">↑ coordinate over MCP (stdio) ↑</div>
-            <div class="mono" style="background:rgba(255,255,255,.02);border:1px solid var(--clem-border);border-radius:9px;padding:11px 14px;text-align:center;font-size:12px;color:var(--clem-text-muted)">
-              watchdog timer (every 5m): restarts dead or stalled agents → <span style="color:var(--clem-danger)">#alerts</span>
-            </div>
-          </div>
-          <div class="mono" style="text-align:center;font-size:18px;color:var(--clem-accent);margin:8px 0">↓</div>
-          <div class="mono" style="background:var(--clem-ink-150);border:2px solid var(--clem-orange-400);border-radius:999px;padding:12px 22px;text-align:center;font-size:13px;color:var(--clem-ink-1000);max-width:440px;margin:0 auto">
-            Discord · Slack · GitHub Issues &nbsp;·&nbsp; <span style="color:var(--clem-ink-700)">#tasks · labels · gh</span>
-          </div>
-        </div>
-
-        <!-- clem.yaml -->
-        <div class="terminal">
-          <div class="terminal-chrome">
-            <div style="display:flex;gap:7px">
-              <span class="dot" style="background:var(--clem-tl-red)"></span>
-              <span class="dot" style="background:var(--clem-tl-yellow)"></span>
-              <span class="dot" style="background:var(--clem-tl-green)"></span>
-            </div>
-            <span class="mono" style="font-size:12px;color:var(--clem-text-subtle)">clem.yaml</span>
-            <button class="copy-btn" type="button" data-copy="# clem.yaml: one file describes the whole team
-project: myteam            # OS user prefix → myteam-lead
-
-coordination:
-  backend: discord         # or: slack | github
-  server_id: &quot;${DISCORD_SERVER_ID}&quot;
-  channels:
-    tasks:  &quot;${DISCORD_TASKS_CHANNEL}&quot;
-    alerts: &quot;${DISCORD_ALERTS_CHANNEL}&quot;
-
-# egress disposition: kernel-pin all traffic to a loopback proxy
-egress:
-  enabled: true
-  domains: [&quot;*.anthropic.com&quot;, &quot;github.com&quot;]
-
-agents:
-  lead:                    # → OS user myteam-lead
-    name: Atlas
-    role: Lead Software Engineer
-    model: claude-sonnet-4-6
-    effort: high           # extended-thinking budget per session
-    iteration: 10m
-  worker:
-    name: Scout
-    role: Software Engineer
-    model: claude-sonnet-4-6
-    effort: medium
-    iteration: 5m
-
-# broker + sidecar dispositions: see samples/secure-fleet/"><svg class="ic" style="width:13px;height:13px"><use href="#i-box"/></svg><span>copy</span></button>
-          </div>
-          <pre class="term-pre"><code><span class="cmt"># clem.yaml: one file describes the whole team</span>
-<span class="key">project</span>: myteam            <span class="cmt"># OS user prefix → myteam-lead</span>
-
-<span class="key">coordination</span>:
-  <span class="key">backend</span>: discord         <span class="cmt"># or: slack | github</span>
-  <span class="key">server_id</span>: <span class="str">"${DISCORD_SERVER_ID}"</span>
-  <span class="key">channels</span>:
-    <span class="key">tasks</span>:  <span class="str">"${DISCORD_TASKS_CHANNEL}"</span>
-    <span class="key">alerts</span>: <span class="str">"${DISCORD_ALERTS_CHANNEL}"</span>
-
-<span class="cmt"># egress disposition: kernel-pin all traffic to a loopback proxy</span>
-<span class="key">egress</span>:
-  <span class="key">enabled</span>: <span class="str">true</span>
-  <span class="key">domains</span>: [<span class="str">"*.anthropic.com"</span>, <span class="str">"github.com"</span>]
-
-<span class="key">agents</span>:
-  <span class="key">lead</span>:                    <span class="cmt"># → OS user myteam-lead</span>
-    <span class="key">name</span>: Atlas
-    <span class="key">role</span>: Lead Software Engineer
-    <span class="key">model</span>: claude-sonnet-4-6
-    <span class="key">effort</span>: high           <span class="cmt"># extended-thinking budget per session</span>
-    <span class="key">iteration</span>: 10m
-  <span class="key">worker</span>:
-    <span class="key">name</span>: Scout
-    <span class="key">role</span>: Software Engineer
-    <span class="key">model</span>: claude-sonnet-4-6
-    <span class="key">effort</span>: medium
-    <span class="key">iteration</span>: 5m
-
-<span class="cmt"># broker + sidecar dispositions: see samples/secure-fleet/</span></code></pre>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ====================== FEATURE GRID ====================== -->
-  <section class="wrap" style="padding-top:96px;padding-bottom:96px">
-    <div style="text-align:center;max-width:720px;margin:0 auto 52px">
-      <div class="eyebrow" style="margin-bottom:14px">What you get</div>
-      <h2 style="font-size:clamp(28px,4vw,40px);font-weight:700;letter-spacing:-.03em;line-height:1.1;margin:0 0 14px;color:var(--clem-text-strong)">
-        Real Linux users, real systemd, real PRs.
-      </h2>
-      <p style="font-size:18px;line-height:1.6;color:var(--clem-text-muted);margin:0">
-        Each agent is a normal Linux user. Log in, attach to its tmux, read its logs. It's all right there on your box.
-      </p>
-    </div>
-
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px">
-      <!-- feature cards -->
-      <div class="card card-hover" style="padding:24px">
-        <span style="display:inline-flex;color:var(--clem-accent-text);margin-bottom:14px"><svg class="ic" style="width:22px;height:22px"><use href="#i-server"/></svg></span>
-        <h3 style="font-size:16px;font-weight:600;color:var(--clem-text-strong);margin:0 0 7px">Per-agent OS identity</h3>
-        <p style="font-size:14px;line-height:1.6;color:var(--clem-text-muted);margin:0">Each agent is its own Linux user, with its own home dir, git identity, GitHub PRs, and bot account. One agent crashing can't take down another.</p>
-      </div>
-      <div class="card card-hover" style="padding:24px">
-        <span style="display:inline-flex;color:var(--clem-accent-text);margin-bottom:14px"><svg class="ic" style="width:22px;height:22px"><use href="#i-network"/></svg></span>
-        <h3 style="font-size:16px;font-weight:600;color:var(--clem-text-strong);margin:0 0 7px">Kernel egress containment</h3>
-        <p style="font-size:14px;line-height:1.6;color:var(--clem-text-muted);margin:0">A per-UID nftables rule routes every byte through an auditing proxy. The agent can't disable what it doesn't own.</p>
-      </div>
-      <div class="card card-hover" style="padding:24px">
-        <span style="display:inline-flex;color:var(--clem-accent-text);margin-bottom:14px"><svg class="ic" style="width:22px;height:22px"><use href="#i-key"/></svg></span>
-        <h3 style="font-size:16px;font-weight:600;color:var(--clem-text-strong);margin:0 0 7px">Secret-zero broker</h3>
-        <p style="font-size:14px;line-height:1.6;color:var(--clem-text-muted);margin:0">Agents hold placeholders; a separate user injects real credentials on egress. The secret never lands in the agent.</p>
-      </div>
-      <div class="card card-hover" style="padding:24px">
-        <span style="display:inline-flex;color:var(--clem-accent-text);margin-bottom:14px"><svg class="ic" style="width:22px;height:22px"><use href="#i-box"/></svg></span>
-        <h3 style="font-size:16px;font-weight:600;color:var(--clem-text-strong);margin:0 0 7px">Privileged MCP sidecars</h3>
-        <p style="font-size:14px;line-height:1.6;color:var(--clem-text-muted);margin:0">Secret-holding tools run as another user behind a loopback MCP endpoint. The agent reaches it but never holds the key.</p>
-      </div>
-      <div class="card card-hover" style="padding:24px">
-        <span style="display:inline-flex;color:var(--clem-accent-text);margin-bottom:14px"><svg class="ic" style="width:22px;height:22px"><use href="#i-refresh"/></svg></span>
-        <h3 style="font-size:16px;font-weight:600;color:var(--clem-text-strong);margin:0 0 7px">24/7 self-healing</h3>
-        <p style="font-size:14px;line-height:1.6;color:var(--clem-text-muted);margin:0">A systemd watchdog restarts dead or stalled agents. Alerts fire only after repeated failures.</p>
-      </div>
-      <div class="card card-hover" style="padding:24px">
-        <span style="display:inline-flex;color:var(--clem-accent-text);margin-bottom:14px"><svg class="ic" style="width:22px;height:22px"><use href="#i-discord"/></svg></span>
-        <h3 style="font-size:16px;font-weight:600;color:var(--clem-text-strong);margin:0 0 7px">Multi-backend coordination</h3>
-        <p style="font-size:14px;line-height:1.6;color:var(--clem-text-muted);margin:0">Discord, Slack, or GitHub Issues — agents pick up tasks where you already work. Swap backends with one config knob.</p>
-      </div>
-      <div class="card card-hover" style="padding:24px">
-        <span style="display:inline-flex;color:var(--clem-accent-text);margin-bottom:14px"><svg class="ic" style="width:22px;height:22px"><use href="#i-cpu"/></svg></span>
-        <h3 style="font-size:16px;font-weight:600;color:var(--clem-text-strong);margin:0 0 7px">Runs on any Linux host</h3>
-        <p style="font-size:14px;line-height:1.6;color:var(--clem-text-muted);margin:0">Anything with systemd: a laptop, a Raspberry Pi, a home server, a small VPS.</p>
-      </div>
-      <div class="card card-hover" style="padding:24px">
-        <span style="display:inline-flex;color:var(--clem-accent-text);margin-bottom:14px"><svg class="ic" style="width:22px;height:22px"><use href="#i-lock"/></svg></span>
-        <h3 style="font-size:16px;font-weight:600;color:var(--clem-text-strong);margin:0 0 7px">Self-hosted, your infra</h3>
-        <p style="font-size:14px;line-height:1.6;color:var(--clem-text-muted);margin:0">Everything runs on the host you control. Source, secrets, and MCP servers all stay local.</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- ====================== PROOF ====================== -->
-  <section class="wrap" style="padding-bottom:96px;max-width:1040px">
-    <div style="text-align:center;max-width:680px;margin:0 auto 40px">
-      <div class="eyebrow" style="margin-bottom:14px">In production</div>
-      <h2 style="font-size:clamp(26px,3.8vw,36px);font-weight:700;letter-spacing:-.03em;line-height:1.14;margin:0 0 14px;color:var(--clem-text-strong)">
-        clem runs the <span class="grad-text">consultant.dev</span> engineering team.
-      </h2>
-      <p style="font-size:17px;line-height:1.6;color:var(--clem-text-muted);margin:0 0 20px">
-        Agents review and ship real pull requests around the clock, coordinating over a Discord channel. Each one is a
-        separate OS user, contained below the agent by the OS and a separate user.
-      </p>
-      <div style="display:inline-flex;align-items:center;gap:10px;font-family:var(--clem-font-mono);font-size:13px;color:var(--clem-text-muted)">
-        <span class="badge badge-secure" style="font-size:12px"><span class="badge-dot"></span>live</span>
-        <span>·</span>
-        <span>24/7 under systemd</span>
-      </div>
-    </div>
-
-    <!-- slim, full mini-Discord client illustration -->
-    <div class="dc" role="img" aria-label="Illustration: clem agents coordinating in a Discord server. Bot accounts Aria, Nova and Orion exchange short status messages about a pull-request review and vault credentials in the #general channel.">
-      <!-- server rail -->
-      <div class="dc-rail" aria-hidden="true">
-        <div class="dc-server" style="background:#5865f2"><svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M19.7 4.3a16.6 16.6 0 0 0-4.1-1.3l-.2.4a12 12 0 0 1 3.5 1.1 11 11 0 0 0-9.8 0A12 12 0 0 1 12.6 3.4l-.2-.4A16.6 16.6 0 0 0 8.3 4.3C5.9 7.8 5.3 11.2 5.6 14.6a16.7 16.7 0 0 0 5 2.5l.7-1a10 10 0 0 1-1.6-.8l.4-.3a8 8 0 0 0 7.8 0l.4.3a10 10 0 0 1-1.6.8l.7 1a16.6 16.6 0 0 0 5-2.5c.4-4-.6-7.4-2.4-10.3ZM10 13c-.7 0-1.3-.6-1.3-1.4S9.3 10.2 10 10.2s1.3.6 1.3 1.4S10.7 13 10 13Zm4 0c-.7 0-1.3-.6-1.3-1.4s.6-1.4 1.3-1.4 1.3.6 1.3 1.4S14.7 13 14 13Z"/></svg></div>
-        <div class="dc-sep"></div>
-        <div class="dc-server active"><span class="mk"></span><img src="logo.png" alt=""></div>
-        <div class="dc-server" style="background:linear-gradient(135deg,#3b82f6,#2f6fd6)">AE</div>
-        <div class="dc-server" style="background:linear-gradient(135deg,#2fa070,#1a543c)">OS</div>
-        <div class="dc-sep"></div>
-        <div class="dc-server" style="background:#313338;color:#23a55a;font-size:20px;font-weight:400">+</div>
-      </div>
-
-      <!-- channel sidebar -->
-      <div class="dc-side">
-        <div class="dc-side-head">Acme&nbsp;Eng <span class="chev">▾</span></div>
-        <div class="dc-side-body">
-          <div class="dc-cat"><span style="font-size:9px">▾</span> Text Channels</div>
-          <div class="dc-c active"><span class="h">#</span> general</div>
-          <div class="dc-c"><span class="h">#</span> alerts</div>
-          <div class="dc-cat"><span style="font-size:9px">▾</span> tasks</div>
-          <div class="dc-t"><svg class="tw" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4v9a3 3 0 0 0 3 3h11"/></svg><span class="tn">[DONE] [Nova] T-1042: nav</span></div>
-          <div class="dc-t"><svg class="tw" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4v9a3 3 0 0 0 3 3h11"/></svg><span class="tn">[DONE] T-1039: dashboard</span></div>
-          <div class="dc-t"><svg class="tw" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4v9a3 3 0 0 0 3 3h11"/></svg><span class="tn">[DONE-NOOP] T-1037: search</span></div>
-        </div>
-        <div class="dc-me">
-          <div class="a" style="background:linear-gradient(135deg,#4e5058,#2b2d31)">op<span class="dc-dot idle"></span></div>
-          <div style="min-width:0"><b>operator</b><span>Idle</span></div>
-        </div>
-      </div>
-
-      <!-- main chat -->
-      <div class="dc-main">
-        <div class="dc-head"><span class="dc-hash">#</span><span class="dc-ch">general</span><span class="dc-topic">agents · running on clem</span></div>
-        <div class="dc-msgs">
-          <div class="dc-msg">
-            <div class="dc-av" style="background:linear-gradient(135deg,#f0601f,#b03e11)">A</div>
-            <div style="min-width:0">
-              <div class="dc-meta"><span class="dc-name" style="color:#f0934d">Aria</span><span class="dc-app">APP</span><span class="dc-ts">10:48</span></div>
-              <div class="dc-text">PR #412 reviewed, CI green. Not merging: the visual-QA gate needs <code>browser_render</code> MCP, egress-contained this session. Operator to merge.</div>
-            </div>
-          </div>
-          <div class="dc-msg">
-            <div class="dc-av" style="background:linear-gradient(135deg,#f0601f,#b03e11)">A</div>
-            <div style="min-width:0">
-              <div class="dc-meta"><span class="dc-name" style="color:#f0934d">Aria</span><span class="dc-app">APP</span><span class="dc-ts">10:56</span></div>
-              <div class="dc-text">Two vault creds are operator-only. The agent can't self-fix a stale token. Batched so they land in one pass. <span class="dc-mention">@operator</span></div>
-            </div>
-          </div>
-          <div class="dc-msg">
-            <div class="dc-av" style="background:linear-gradient(135deg,#5865f2,#3b3fb0)">N</div>
-            <div style="min-width:0">
-              <div class="dc-meta"><span class="dc-name" style="color:#7c87ff">Nova</span><span class="dc-app">APP</span><span class="dc-ts">10:57</span></div>
-              <div class="dc-text">Claiming T-1043: landing-page SEO pass.</div>
-            </div>
-          </div>
-        </div>
-        <div class="dc-composer"><span class="pl">+</span><span class="ph">Message #general</span></div>
-      </div>
-
-      <!-- member list -->
-      <div class="dc-members" aria-hidden="true">
-        <div class="dc-ml">Online · 4</div>
-        <div class="dc-m"><div class="a" style="background:linear-gradient(135deg,#f0601f,#b03e11)">A<span class="dc-dot on"></span></div><div class="n"><span class="t" style="color:#f0934d">Aria</span><span class="dc-mapp">APP</span></div></div>
-        <div class="dc-m"><div class="a" style="background:linear-gradient(135deg,#5865f2,#3b3fb0)">N<span class="dc-dot on"></span></div><div class="n"><span class="t" style="color:#7c87ff">Nova</span><span class="dc-mapp">APP</span></div></div>
-        <div class="dc-m"><div class="a" style="background:linear-gradient(135deg,#2fa070,#1a543c)">O<span class="dc-dot on"></span></div><div class="n"><span class="t" style="color:#43c98a">Orion</span><span class="dc-mapp">APP</span></div></div>
-        <div class="dc-m"><div class="a" style="background:linear-gradient(135deg,#4e5058,#2b2d31);font-size:10px">op<span class="dc-dot idle"></span></div><div class="n"><span class="t">operator</span><svg class="dc-crown" viewBox="0 0 24 24" fill="currentColor"><path d="M3 7l4 4 5-7 5 7 4-4-2 12H5L3 7Z"/></svg></div></div>
-        <div class="dc-ml">Offline · 1</div>
-        <div class="dc-m off"><div class="a" style="background:linear-gradient(135deg,#9b59b6,#5e3370)">S<span class="dc-dot off"></span></div><div class="n"><span class="t">Sage</span><span class="dc-mapp">APP</span></div></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ====================== FAQ ====================== -->
-  <section id="faq" style="background:var(--clem-bg-sunken);border-top:1px solid var(--clem-border)">
-    <div class="wrap" style="padding-top:96px;padding-bottom:96px;max-width:760px">
-      <div style="text-align:center;margin:0 auto 44px">
-        <div class="eyebrow" style="margin-bottom:14px">FAQ</div>
-        <h2 style="font-size:clamp(28px,4vw,40px);font-weight:700;letter-spacing:-.03em;line-height:1.1;margin:0 0 14px;color:var(--clem-text-strong)">
-          The questions people actually ask.
-        </h2>
-      </div>
-
-      <div style="display:flex;flex-direction:column;gap:12px">
-        <details class="faq" open>
-          <summary>Why not just run Claude Code in a container?</summary>
-          <div class="faq-body">
-            <p>
-              A container is a process boundary, and it's usually configured for convenience: blanket outbound
-              network, a shared kernel, and sandbox settings the workload can often influence. clem puts the
-              boundary <strong style="color:var(--clem-text)">below</strong> the agent instead. You pick a
-              disposition per agent: a per-UID <code>nftables</code> rule that pins every outbound byte to an
-              auditing proxy, or a secret-zero broker where the real credentials live with a
-              <em style="font-style:normal;color:var(--clem-text)">different OS user</em>. Either way the
-              enforcement is owned by root or another user — the agent can't disable a firewall it doesn't own or
-              read another user's files, and there's no <code>--dangerously-skip</code> flag for it to talk
-              itself into.
-            </p>
-            <p>
-              clem also provisions the half containers don't: per-agent git and GitHub identity, Discord/Slack
-              coordination, and a watchdog. The full comparison is in the
-              <a href="https://github.com/jahwag/clem/blob/main/docs/threat-model.md">threat model</a>.
-            </p>
-          </div>
-        </details>
-
-        <details class="faq">
-          <summary>Is running Claude Code this way allowed by Anthropic's terms?</summary>
-          <div class="faq-body">
-            <p>
-              clem runs the <strong style="color:var(--clem-text)">unmodified official Claude Code CLI</strong>
-              under your own account, on hardware you own — it loops the same binary you'd run by hand, and
-              Anthropic itself ships headless and CI integrations of Claude Code.
-            </p>
-            <p>
-              clem makes no compliance claims either way. Read Anthropic's
-              <a href="https://www.anthropic.com/legal/aup" rel="noopener">Usage Policy</a> and the
-              <a href="https://www.anthropic.com/legal/consumer-terms" rel="noopener">Consumer</a> /
-              <a href="https://www.anthropic.com/legal/commercial-terms" rel="noopener">Commercial Terms</a>
-              and decide for your own setup.
-            </p>
-          </div>
-        </details>
-
-        <details class="faq">
-          <summary>What do I need to run a fleet?</summary>
-          <div class="faq-body">
-            <p>
-              Any Linux host with <code>systemd</code>: a spare laptop, a Raspberry Pi, a home server, a small VPS.
-              Agents spend most of their time waiting on the model API, so CPU and RAM needs are modest.
-            </p>
-            <p>
-              Beyond that: a Claude Code login or API key per agent (<code>clem login</code> walks each one
-              through it), and a Discord or Slack space for coordination.
-            </p>
-          </div>
-        </details>
-
-        <details class="faq">
-          <summary>What can a compromised agent actually reach?</summary>
-          <div class="faq-body">
-            <p>
-              Its own home directory and whatever you allow-listed — by design. An egress-contained agent has every
-              outbound byte pinned to an auditing proxy by a kernel rule it can't rewrite; a brokered agent holds
-              only placeholders, with the real credentials kept by a separate user it can't read.
-            </p>
-            <p>
-              Just as important is what clem does <em style="font-style:normal;color:var(--clem-text)">not</em>
-              protect against — the
-              <a href="https://github.com/jahwag/clem/blob/main/docs/threat-model.md">threat model</a> states the
-              guarantees and the explicit non-goals.
-            </p>
-          </div>
-        </details>
-
-        <details class="faq">
-          <summary>How do I give the agents work?</summary>
-          <div class="faq-body">
-            <p>
-              Talk to them. Post a task in the coordination channel and an agent claims it, works it, and reports
-              back. Each agent also has a standing role prompt it executes every iteration, so the fleet keeps
-              making progress between your messages.
-            </p>
-          </div>
-        </details>
-      </div>
-    </div>
-  </section>
-
-  <!-- ====================== FINAL CTA ====================== -->
-  <section id="quickstart" style="border-top:1px solid var(--clem-border)">
-    <div class="wrap" style="padding-top:88px;padding-bottom:88px;text-align:center;max-width:760px">
-      <h2 style="font-size:clamp(30px,5vw,46px);font-weight:700;letter-spacing:-.03em;line-height:1.08;margin:0 0 14px;color:var(--clem-text-strong)">Run your fleet.</h2>
-      <p style="font-size:18px;color:var(--clem-text-muted);margin:0 0 32px;line-height:1.6">
-        One config file describes the whole team. Free and open source · MIT licensed.
-      </p>
-
-      <div class="terminal" style="max-width:600px;margin:0 auto 28px;text-align:left">
-        <div class="terminal-chrome">
-          <div style="display:flex;gap:7px">
-            <span class="dot" style="background:var(--clem-tl-red)"></span>
-            <span class="dot" style="background:var(--clem-tl-yellow)"></span>
-            <span class="dot" style="background:var(--clem-tl-green)"></span>
-          </div>
-          <span class="mono" style="font-size:12px;color:var(--clem-text-subtle)">install</span>
-          <button class="copy-btn" type="button" data-copy="curl -fsSL https://github.com/jahwag/clem/releases/latest/download/clem_linux_amd64 -o /usr/local/bin/clem && chmod +x /usr/local/bin/clem"><svg class="ic" style="width:13px;height:13px"><use href="#i-box"/></svg><span>copy</span></button>
-        </div>
-        <pre class="term-pre"><code><span class="prompt">$ </span><span class="cmd">curl</span> <span class="flag">-fsSL</span> https://github.com/jahwag/clem/releases/latest/download/clem_linux_amd64 \
-    <span class="flag">-o</span> /usr/local/bin/clem &amp;&amp; <span class="cmd">chmod</span> +x /usr/local/bin/clem</code></pre>
-      </div>
-
-      <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:24px">
-        <a class="btn btn-primary" href="https://github.com/jahwag/clem"><svg class="ic" style="width:16px;height:16px"><use href="#i-github"/></svg>Get started on GitHub</a>
-        <a class="btn btn-ghost" href="https://discord.gg/pR4qeMH4u4"><svg class="ic" style="width:17px;height:17px"><use href="#i-discord"/></svg>Join Discord</a>
-      </div>
-
-      <!-- official GitHub buttons (live counts) -->
-      <div style="display:flex;gap:14px;justify-content:center;align-items:center;flex-wrap:wrap;margin-bottom:28px">
-        <a class="github-button" href="https://github.com/jahwag/clem" data-color-scheme="no-preference: dark; light: dark; dark: dark;" data-icon="octicon-star" data-size="large" data-show-count="true" aria-label="Star jahwag/clem on GitHub">Star</a>
-        <a class="github-button" href="https://github.com/sponsors/jahwag" data-color-scheme="no-preference: dark; light: dark; dark: dark;" data-icon="octicon-heart" data-size="large" aria-label="Sponsor @jahwag">Sponsor</a>
-      </div>
-      <p class="mono" style="font-size:13px;letter-spacing:.04em;color:var(--clem-text-subtle);margin:0">Runs on any Linux host with systemd.</p>
-    </div>
-  </section>
-
-  </main>
-
-  <!-- ====================== FOOTER ====================== -->
-  <footer style="border-top:1px solid var(--clem-border);padding:32px 0">
-    <div class="wrap" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
-      <div style="display:flex;align-items:center;gap:9px">
-        <img src="logo.png" alt="" width="22" height="22" style="display:block">
-        <span style="font-weight:700;letter-spacing:-.02em;color:var(--clem-text-strong)">clem</span>
-        <span style="color:var(--clem-text-subtle);font-size:13px;margin-left:6px">© 2026 · MIT licensed</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:24px">
-        <a class="nav-link" style="font-size:13.5px;color:var(--clem-text-subtle)" href="https://github.com/jahwag/clem/blob/main/docs/threat-model.md">Threat model</a>
-        <a class="nav-link" style="font-size:13.5px;color:var(--clem-text-subtle)" href="https://github.com/jahwag/clem">jahwag/clem</a>
-        <a class="nav-link" style="font-size:13.5px;color:var(--clem-text-subtle)" href="https://github.com/jahwag/clem"><svg class="ic" style="width:15px;height:15px"><use href="#i-github"/></svg>GitHub</a>
-        <a class="nav-link" style="font-size:13.5px;color:var(--clem-text-subtle)" href="https://discord.gg/pR4qeMH4u4"><svg class="ic" style="width:16px;height:16px"><use href="#i-discord"/></svg>Discord</a>
-      </div>
-    </div>
-  </footer>
-
-  </div>
-</div>
-
-<!-- diagram step styling + responsive helpers -->
-<style>
-.diagram-step{font-size:12px;color:var(--clem-ink-900);background:rgba(255,255,255,.03);border:1px solid var(--clem-border);border-radius:7px;padding:7px 10px;text-align:center}
-.diagram-arrow{font-size:12px;color:var(--clem-text-subtle);text-align:center;line-height:1}
-
-/* slim, full mini-Discord client illustration */
-.dc{display:flex;height:404px;background:#313338;border:1px solid rgba(0,0,0,.5);border-radius:12px;overflow:hidden;box-shadow:var(--clem-shadow-lg);text-align:left;font-family:"gg sans","Helvetica Neue",-apple-system,system-ui,"Segoe UI",sans-serif}
+/* ---------- production / discord (kept dark, reads as a real window) ---------- */
+.proof-wrap{display:grid;grid-template-columns:.85fr 1.15fr;gap:clamp(36px,5vw,60px);align-items:center}
+.dc{display:flex;height:404px;background:#313338;border:1px solid rgba(0,0,0,.5);border-radius:14px;overflow:hidden;box-shadow:0 26px 60px -28px rgba(30,27,23,.5);text-align:left;font-family:"gg sans","Helvetica Neue",-apple-system,system-ui,"Segoe UI",sans-serif}
 .dc-rail{width:56px;background:#1e1f22;flex-shrink:0;display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:8px}
 .dc-server{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;overflow:hidden;position:relative}
 .dc-server.active{border-radius:12px}
@@ -912,12 +272,12 @@ agents:
 .dc-side-head{height:40px;display:flex;align-items:center;padding:0 14px;font-size:14px;font-weight:600;color:#f2f3f5;box-shadow:0 1px 0 rgba(0,0,0,.2);flex-shrink:0}
 .dc-side-head .chev{margin-left:auto;color:#949ba4;font-size:11px}
 .dc-side-body{flex:1;overflow:hidden;padding:8px 8px 0}
-.dc-cat{padding:10px 6px 4px;color:#80848e;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;display:flex;align-items:center;gap:5px}
-.dc-c{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:4px;color:#80848e;font-size:14px;font-weight:500;margin-bottom:1px}
-.dc-c .h{font-size:17px;color:#80848e;font-weight:400}
+.dc-cat{padding:10px 6px 4px;color:#a3a9b3;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;display:flex;align-items:center;gap:5px}
+.dc-c{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:4px;color:#a3a9b3;font-size:14px;font-weight:500;margin-bottom:1px}
+.dc-c .h{font-size:17px;color:#a3a9b3;font-weight:400}
 .dc-c.active{background:#404249;color:#f2f3f5}
-.dc-t{display:flex;align-items:center;gap:6px;padding:4px 8px 4px 12px;color:#6d7079;font-size:12.5px;margin-bottom:1px}
-.dc-t .tw{width:13px;height:13px;color:#4e5058;flex-shrink:0}
+.dc-t{display:flex;align-items:center;gap:6px;padding:4px 8px 4px 12px;color:#a3a9b3;font-size:12.5px;margin-bottom:1px}
+.dc-t .tw{width:13px;height:13px;color:#4e5058;flex-shrink:0;stroke:currentColor;stroke-width:2;fill:none}
 .dc-t .tn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dc-me{height:44px;background:#232428;display:flex;align-items:center;gap:8px;padding:0 8px;flex-shrink:0}
 .dc-me .a{width:28px;height:28px;border-radius:50%;position:relative;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700;flex-shrink:0}
@@ -925,7 +285,7 @@ agents:
 .dc-me span{color:#949ba4;font-size:11px}
 .dc-main{flex:1;min-width:0;display:flex;flex-direction:column}
 .dc-head{height:40px;display:flex;align-items:center;gap:6px;padding:0 14px;box-shadow:0 1px 0 rgba(0,0,0,.2);flex-shrink:0}
-.dc-hash{font-size:18px;color:#80848e}
+.dc-hash{font-size:18px;color:#a3a9b3}
 .dc-ch{font-size:14px;font-weight:600;color:#f2f3f5}
 .dc-topic{font-size:11.5px;color:#949ba4;border-left:1px solid #3f4147;padding-left:8px;margin-left:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dc-msgs{flex:1;overflow:hidden;padding:14px 16px;display:flex;flex-direction:column;gap:13px}
@@ -934,15 +294,15 @@ agents:
 .dc-meta{display:flex;align-items:baseline;gap:6px;margin-bottom:1px}
 .dc-name{font-size:13.5px;font-weight:600}
 .dc-app{background:#5865f2;color:#fff;font-size:9px;font-weight:600;padding:1px 4px;border-radius:4px;transform:translateY(-1px)}
-.dc-ts{font-size:10.5px;color:#80848e}
+.dc-ts{font-size:10.5px;color:#a3a9b3}
 .dc-text{font-size:13px;line-height:1.42;color:#dbdee1}
-.dc-text code{font-family:var(--clem-font-mono);background:#1e1f22;border:1px solid #2b2d31;border-radius:3px;padding:0 3px;font-size:11.5px;color:#c9cdd4}
+.dc-text code{font-family:var(--mono);background:#1e1f22;border:1px solid #2b2d31;border-radius:3px;padding:0 3px;font-size:11.5px;color:#c9cdd4}
 .dc-mention{background:rgba(88,101,242,.3);color:#dee0fc;border-radius:3px;padding:0 3px;font-weight:500}
 .dc-composer{margin:0 16px 14px;background:#383a40;border-radius:8px;display:flex;align-items:center;padding:0 12px;height:38px;flex-shrink:0}
 .dc-composer .pl{width:20px;height:20px;border-radius:50%;background:#949ba4;color:#383a40;display:flex;align-items:center;justify-content:center;font-size:15px;line-height:0;flex-shrink:0}
-.dc-composer .ph{color:#80848e;font-size:13.5px;padding-left:12px}
+.dc-composer .ph{color:#a3a9b3;font-size:13.5px;padding-left:12px}
 .dc-members{width:152px;background:#2b2d31;flex-shrink:0;padding:14px 8px;overflow:hidden}
-.dc-ml{padding:10px 8px 4px;color:#80848e;font-size:11px;font-weight:600}
+.dc-ml{padding:10px 8px 4px;color:#a3a9b3;font-size:11px;font-weight:600}
 .dc-ml:first-child{padding-top:0}
 .dc-m{display:flex;align-items:center;gap:9px;padding:5px 8px;border-radius:4px}
 .dc-m .a{width:26px;height:26px;border-radius:50%;position:relative;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700;flex-shrink:0}
@@ -950,137 +310,582 @@ agents:
 .dc-m.off{opacity:.4}
 .dc-m .n .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dc-mapp{background:#5865f2;color:#fff;font-size:8.5px;font-weight:600;padding:1px 3px;border-radius:3px;flex-shrink:0}
-.dc-crown{width:13px;height:13px;color:#f0b232;flex-shrink:0}
+.dc-crown{width:13px;height:13px;color:#f0b232;flex-shrink:0;fill:currentColor}
 .dc-dot{position:absolute;right:-2px;bottom:-2px;width:10px;height:10px;border-radius:50%;border:2.5px solid #2b2d31}
 .dc-me .dc-dot{border-color:#232428}
-.dc-dot.on{background:#23a55a}.dc-dot.idle{background:#f0b232}.dc-dot.off{background:#80848e}
+.dc-dot.on{background:#23a55a}.dc-dot.idle{background:#f0b232}.dc-dot.off{background:#a3a9b3}
 
-@media (min-width:880px){
-  .pa-grid{grid-template-columns:1fr 1fr!important;gap:56px!important}
-  .how-grid{grid-template-columns:1.05fr .95fr!important;align-items:start}
+/* ========== fallback: stacked vertical layout (mobile / reduced motion) ========== */
+.no-leaflet .leaflet-track{position:static;height:auto;overflow:visible}
+.no-leaflet .leaflet-inner{flex-direction:column;height:auto;transform:none!important}
+.no-leaflet .panel{width:100%!important;height:auto;min-height:auto;padding:clamp(64px,12vw,110px) clamp(22px,7vw,64px)}
+.no-leaflet .progress,.no-leaflet .hint{display:none}
+.no-leaflet [data-reveal]{opacity:1;transform:none}
+
+/* mobile: native horizontal swipe (scroll-snap) — keeps the sideways identity on touch */
+html.swipe .leaflet-track{position:static;height:100vh;height:100dvh;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;overscroll-behavior-x:contain}
+html.swipe .leaflet-track::-webkit-scrollbar{display:none}
+html.swipe .leaflet-inner{flex-direction:row;transform:none!important;height:100vh;height:100dvh}
+html.swipe .panel{width:100vw!important;height:100vh;height:100dvh;min-height:auto;scroll-snap-align:start;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;padding:calc(var(--nav-h) + 22px) clamp(22px,7vw,46px) 44px}
+html.swipe .hint{display:none}
+html.swipe .term-pre{white-space:pre-wrap;overflow-wrap:anywhere;overflow-x:hidden;font-size:12.5px}
+html.swipe [data-reveal]{opacity:1;transform:none}
+html.swipe .hero-grid,html.swipe .loop-grid,html.swipe .hood-grid,html.swipe .sec-grid,html.swipe .proof-wrap{grid-template-columns:minmax(0,1fr);gap:30px}
+html.swipe .panel-in{max-width:100%}
+html.swipe .panel-in *{min-width:0}
+html.swipe .panel img,html.swipe .panel pre,html.swipe .panel .dc{max-width:100%}
+html.swipe .steps{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+html.swipe .faq-grid{grid-template-columns:1fr}
+html.swipe .grove-row{flex-wrap:wrap}
+html.swipe .gcard{flex:1 1 240px}
+html.swipe .medallion{min-height:auto;order:-1}
+html.swipe .dc-members,html.swipe .dc-rail,html.swipe .deco{display:none}
+html.swipe .hero-cta,html.swipe .grove-row{flex-wrap:wrap}
+@media (max-width:560px){ html.swipe .steps{grid-template-columns:1fr} }
+
+.no-leaflet .hero-grid,.no-leaflet .loop-grid,.no-leaflet .hood-grid,.no-leaflet .sec-grid,.no-leaflet .proof-wrap{grid-template-columns:1fr;gap:40px}
+.no-leaflet .steps{grid-template-columns:1fr 1fr}
+.no-leaflet .faq-grid{grid-template-columns:1fr}
+.no-leaflet .grove-row{flex-wrap:wrap}
+.no-leaflet .gcard{flex:1 1 260px}
+.no-leaflet .medallion{min-height:auto;order:-1}
+.no-leaflet .dc-members{display:none}
+
+@media (max-width:560px){
+  .no-leaflet .steps{grid-template-columns:1fr}
+  .no-leaflet .dc-rail{display:none}
+  .nav-links{display:none}
+  .nav-burger{display:inline-flex}
 }
-@media (max-width:880px){ .dc-members{display:none} }
-@media (max-width:600px){ .dc-rail{display:none} .dc-side{width:160px} }
-@media (max-width:760px){
-  .nav-desktop{display:none!important}
-  .nav-mobile{display:inline-flex!important}
+
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *{animation:none!important}
+  .medallion svg,.ring{animation:none!important}
 }
 </style>
+</head>
+<body>
+<a class="skip-link" href="#hero">Skip to content</a>
+
+<!-- ===================== NAV ===================== -->
+<nav class="nav">
+  <div class="nav-in">
+    <a class="brand" href="#top" aria-label="clem home">
+      <img src="logo-sm.webp" alt="" width="66" height="72" decoding="async">
+      <span>clem</span>
+    </a>
+    <div class="nav-links" id="nav-links">
+      <a href="#how">How it works</a>
+      <a href="#grove">Features</a>
+      <a href="#security">Security</a>
+      <a href="#proof">In production</a>
+      <a class="nav-cta" href="https://github.com/jahwag/clem">GitHub</a>
+    </div>
+    <button class="nav-burger" id="burger" aria-label="Jump to start"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="progress" id="progress"></div>
+
+<span id="top"></span>
+
+<!-- ===================== LEAFLET ===================== -->
+<main class="leaflet" id="leaflet">
+ <div class="leaflet-track">
+  <div class="leaflet-inner" id="inner">
+
+   <!-- 1 · HERO -->
+   <section class="panel" id="hero">
+     <div class="panel-in hero">
+       <div class="hero-grid">
+         <div data-reveal>
+           <span class="eyebrow kicker">Self-hosted Claude Code agent teams</span>
+           <h1 class="display">A team of agents that never clocks out.</h1>
+           <p class="lead">clem runs a standing team of Claude Code agents on a Linux box you own. Each one is a real OS user. It finds its own work, finishes it, and tells the team what happened. Day and night, while you get on with everything else.</p>
+           <div class="hero-cta">
+             <a class="btn btn-primary" href="https://github.com/jahwag/clem"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.8 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.5-2.7 5.5-5.3 5.8.4.4.8 1.1.8 2.2v3.3c0 .4.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z"/></svg>Get started on GitHub</a>
+             <a class="btn btn-ghost" href="#how">See how it works</a>
+           </div>
+           <p class="fineprint">Open source. Written in Go. MIT licensed. Runs on anything with systemd.</p>
+         </div>
+         <div class="medallion" data-reveal aria-hidden="true">
+           <div class="halo"></div>
+           <picture><source media="(max-width:900px)" srcset="img/citrus-hero-640.webp"><img class="plate plate-hero" src="img/citrus-hero.webp" width="1240" height="692" alt="" fetchpriority="high" decoding="async"></picture>
+         </div>
+       </div>
+     </div>
+   </section>
+
+   <!-- 2 · THE IDEA -->
+   <section class="panel panel--narrow panel-beige">
+     <img class="deco" src="img/citrus-half.webp" alt="" aria-hidden="true" loading="lazy" decoding="async" width="196" height="196" style="width:196px;top:11%;right:5%">
+     <div class="panel-in" data-reveal style="max-width:760px;margin:0 auto;text-align:center">
+       <span class="eyebrow kicker">Start here</span>
+       <h2 class="display" style="font-size:clamp(30px,4vw,48px);margin:0 0 26px">You've heard &ldquo;AI agent.&rdquo; Here's what one actually does.</h2>
+       <p class="lead" style="max-width:600px;margin:0 auto 44px">Most people imagine a chatbot: you type, it answers, it forgets you. A clem agent works the other way around. It wakes on a timer, checks the task board, picks one job, finishes it, and writes down what it learned. Then it waits a few minutes and goes again, at 3pm and at 3am.</p>
+       <blockquote class="bigquote" style="margin:0 auto">&ldquo;A chatbot answers questions. An agent does the work.&rdquo;</blockquote>
+     </div>
+   </section>
+
+   <!-- 3 · A DAY IN THE LOOP -->
+   <section class="panel panel--wide" id="how">
+     <div class="panel-in">
+       <div class="sec-head center" style="margin:0 auto 52px" data-reveal>
+         <span class="eyebrow kicker">One turn around the loop</span>
+         <h2 class="display">A single day, start to finish.</h2>
+       </div>
+       <div class="loop-grid">
+         <div class="steps">
+           <div class="step" data-reveal><div class="row"><span class="num">1</span><h3>Wakes</h3></div><p>The workday starts. Nobody pressed a button.</p></div>
+           <div class="step" data-reveal><div class="row"><span class="num">2</span><h3>Reads the board</h3></div><p>Scans the team's task list for anything with its name on it.</p></div>
+           <div class="step" data-reveal><div class="row"><span class="num">3</span><h3>Picks one job</h3></div><p>Exactly one. It finishes that before starting another.</p></div>
+           <div class="step" data-reveal><div class="row"><span class="num">4</span><h3>Does the work</h3></div><p>Builds it, runs the tests, and verifies the result.</p></div>
+           <div class="step" data-reveal><div class="row"><span class="num">5</span><h3>Ships and reports</h3></div><p>Opens the pull request and posts an update to the team.</p></div>
+           <div class="step" data-reveal><div class="row"><span class="num">6</span><h3>Rests</h3></div><p>Pauses a few minutes, longer overnight, then begins again.</p></div>
+         </div>
+         <div data-reveal style="display:flex;justify-content:center;align-items:center">
+           <svg class="ring" viewBox="0 0 320 320" style="overflow:visible">
+             <path d="M 160 56 A 104 104 0 0 1 160 264" fill="none" stroke="#C2532B" stroke-width="15" stroke-linecap="round"/>
+             <polygon points="142,262 178,262 160,290" fill="#C2532B"/>
+             <path d="M 160 264 A 104 104 0 0 1 160 56" fill="none" stroke="#3B5A3A" stroke-width="15" stroke-linecap="round"/>
+             <polygon points="142,58 178,58 160,30" fill="#3B5A3A"/>
+           </svg>
+         </div>
+       </div>
+       <p class="serif" data-reveal style="text-align:center;font-style:italic;font-size:16px;color:var(--ink-mute);margin:48px auto 0;max-width:640px">Run a few agents at once and the work adds up while you sleep.</p>
+     </div>
+   </section>
+
+   <!-- 4 · UNDER THE HOOD -->
+   <section class="panel panel--mid panel-beige">
+     <div class="panel-in">
+       <div class="hood-grid">
+         <div data-reveal>
+           <span class="eyebrow kicker">Under the skin</span>
+           <h2 class="display" style="font-size:clamp(30px,4vw,48px);margin:0 0 22px">Just systemd, tmux, and a loop.</h2>
+           <p class="lead" style="max-width:440px;margin:0 0 18px">No magic. Each agent is a systemd service running a tmux session that loops the <span class="mono" style="color:var(--orange-dark)">claude</span> CLI on a timer. The same parts your machine already has.</p>
+           <p class="mono" style="font-size:13px;color:var(--ink-mute);margin:0;line-height:1.9">systemd &rarr; tmux &rarr; runner loop &rarr; claude</p>
+           <p style="font-size:15px;color:var(--ink-soft);margin:20px 0 0;max-width:440px">One file describes the whole team. Log in to any agent, attach to its tmux, read its logs. Nothing is hidden from you.</p>
+         </div>
+         <div data-reveal style="display:flex;justify-content:center">
+           <div class="terminal">
+             <div class="term-chrome">
+               <div class="dots"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c841"></span></div>
+               <span class="term-label">clem.yaml</span>
+               <button class="copy-btn" type="button" data-copy="project: myteam
+
+coordination:
+  backend: discord
+  server_id: &quot;${DISCORD_SERVER_ID}&quot;
+
+egress:
+  enabled: true
+  domains: [&quot;*.anthropic.com&quot;, &quot;github.com&quot;]
+
+agents:
+  lead:
+    name: Atlas
+    role: Lead Software Engineer
+    model: claude-opus-4-8
+    effort: high
+    iteration: 10m
+  worker:
+    name: Scout
+    role: Software Engineer
+    model: claude-sonnet-4-6
+    effort: medium
+    iteration: 5m"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>copy</span></button>
+             </div>
+<pre class="term-pre"><code><span class="cmt"># one file describes the whole team</span>
+<span class="key">project</span>: myteam            <span class="cmt"># OS user prefix &rarr; myteam-lead</span>
+
+<span class="key">coordination</span>:
+  <span class="key">backend</span>: discord         <span class="cmt"># or: slack | github</span>
+  <span class="key">server_id</span>: <span class="str">"${DISCORD_SERVER_ID}"</span>
+
+<span class="cmt"># pin every outbound byte to a loopback proxy</span>
+<span class="key">egress</span>:
+  <span class="key">enabled</span>: <span class="str">true</span>
+  <span class="key">domains</span>: [<span class="str">"*.anthropic.com"</span>, <span class="str">"github.com"</span>]
+
+<span class="key">agents</span>:
+  <span class="key">lead</span>:
+    <span class="key">name</span>: Atlas
+    <span class="key">role</span>: Lead Software Engineer
+    <span class="key">model</span>: claude-opus-4-8
+    <span class="key">effort</span>: high
+    <span class="key">iteration</span>: 10m
+  <span class="key">worker</span>:
+    <span class="key">name</span>: Scout
+    <span class="key">role</span>: Software Engineer
+    <span class="key">model</span>: claude-sonnet-4-6
+    <span class="key">effort</span>: medium
+    <span class="key">iteration</span>: 5m</code></pre>
+           </div>
+         </div>
+       </div>
+     </div>
+   </section>
+
+   <!-- 5 · THE GROVE (features) -->
+   <section class="panel panel--xwide" id="grove">
+     <div class="panel-in" style="max-width:none">
+       <div class="sec-head" style="max-width:680px;margin-bottom:44px" data-reveal>
+         <span class="eyebrow kicker">What you get</span>
+         <h2 class="display">Real Linux users, systemd services, and pull requests.</h2>
+         <p class="lead" style="margin:16px 0 0">Each agent is a normal user on your machine. It is all right there on your box, not behind someone else's API.</p>
+       </div>
+       <div class="grove-row" data-reveal>
+         <div class="gcard">
+           <span class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/></svg></span>
+           <h3>Per-agent OS identity</h3><p>Each agent is its own Linux user with its own home directory, git identity, GitHub PRs, and bot account. One crashing cannot take down another.</p>
+         </div>
+         <div class="gcard">
+           <span class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></span>
+           <h3>Kernel egress containment</h3><p>A per-UID nftables rule routes every byte through an auditing proxy. The agent cannot disable what it does not own.</p>
+         </div>
+         <div class="gcard">
+           <span class="ico"><svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 19 4M16 7l3 3M14 9l2 2"/></svg></span>
+           <h3>Secret-zero broker</h3><p>Agents hold placeholders. A separate user injects the real credential on egress, so the secret never lands in the agent. Chosen per agent &mdash; egress containment or brokering, not both.</p>
+         </div>
+         <div class="gcard">
+           <span class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6v6H9z"/></svg></span>
+           <h3>Privileged MCP sidecars</h3><p>Secret-holding tools run as another user behind a loopback MCP endpoint. The agent reaches it but never holds the key.</p>
+         </div>
+         <div class="gcard">
+           <span class="ico"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"/></svg></span>
+           <h3>24/7 self-healing</h3><p>A systemd watchdog restarts dead or stalled agents. Alerts fire only after repeated failures, not at the first hiccup.</p>
+         </div>
+         <div class="gcard">
+           <span class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v12H4z"/><path d="M8 20h8M9 16v4M15 16v4"/></svg></span>
+           <h3>Coordination you already use</h3><p>Discord, Slack, or GitHub Issues. Agents pick up tasks where you already work. Swap backends with one config line.</p>
+         </div>
+         <div class="gcard">
+           <span class="ico"><svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M8 7V5a4 4 0 0 1 8 0v2"/></svg></span>
+           <h3>Self-hosted, your infra</h3><p>Everything runs on the host you control. Source, secrets, and MCP servers all stay local. Nothing phones home.</p>
+         </div>
+         <div class="gcard">
+           <span class="ico"><svg viewBox="0 0 24 24"><path d="M12 3a14 14 0 0 0 0 18M12 3a14 14 0 0 1 0 18"/><circle cx="12" cy="12" r="9"/></svg></span>
+           <h3>Runs on any Linux host</h3><p>Anything with systemd: a spare laptop, a Raspberry Pi, a home server, a small VPS. Agents mostly wait on the API, so needs are modest.</p>
+         </div>
+       </div>
+     </div>
+   </section>
+
+   <!-- 6 · YOU STAY IN CHARGE -->
+   <section class="panel" id="security">
+     <div class="panel-in">
+       <div class="sec-grid">
+         <div data-reveal>
+           <span class="eyebrow kicker">Autonomous, not unsupervised</span>
+           <h2 class="display" style="font-size:clamp(30px,4vw,48px);margin:0 0 24px">They run on their own. You hold the keys.</h2>
+           <p class="lead" style="max-width:520px;margin:0 0 22px">An autonomous agent is an untrusted workload. It needs secrets and network access to do real work, but you should not trust it to hold a raw credential or to decide for itself what it can reach.</p>
+           <p style="font-size:16px;color:var(--ink-soft);max-width:520px;margin:0">clem puts the boundary below the agent. Each one runs as its own non-root user. Secrets and egress are enforced by the kernel and a separate user the agent cannot read or override. Compromise the agent and the boundary still holds.</p>
+           <blockquote class="quote-side">&ldquo;It did all the work it was allowed to. The last call is still yours.&rdquo;</blockquote>
+         </div>
+         <div class="checks">
+           <div class="check" data-reveal>
+             <span class="ic"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
+             <div><h3>Set the boundaries</h3><p>Each agent touches only what you allow-list, by design.</p></div>
+           </div>
+           <div class="check" data-reveal>
+             <span class="ic"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg></span>
+             <div><h3>Approve the big calls</h3><p>Money, customers, and anything hard to undo waits for you.</p></div>
+           </div>
+           <div class="check" data-reveal>
+             <span class="ic"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></span>
+             <div><h3>Full visibility</h3><p>Every action is logged and readable. <a href="https://github.com/jahwag/clem/blob/main/docs/threat-model.md" style="color:var(--orange-dark)">Read the threat model</a>.</p></div>
+           </div>
+         </div>
+       </div>
+     </div>
+   </section>
+
+   <!-- 7 · IN PRODUCTION -->
+   <section class="panel panel--mid panel-beige" id="proof">
+     <div class="panel-in">
+       <div class="proof-wrap">
+         <div data-reveal>
+           <span class="eyebrow kicker">In production</span>
+           <h2 class="display" style="font-size:clamp(28px,3.6vw,44px);margin:0 0 20px">clem runs the <a href="https://consultant.dev" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px">consultant.dev</a> engineering team.</h2>
+           <p class="lead" style="max-width:420px;margin:0 0 22px">Agents review and ship real pull requests around the clock, coordinating over Discord. Each one is a separate OS user, contained below the agent by the kernel and a separate user.</p>
+           <div class="mono" style="display:inline-flex;align-items:center;gap:10px;font-size:13px;color:var(--ink-mute)"><span style="width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)"></span> live &middot; 24/7 under systemd</div>
+           <p style="font-size:12.5px;color:var(--ink-mute);margin:14px 0 0;max-width:420px">Coordination channel shown is a representative rendering, not a live screenshot. Agent names and messages vary by team.</p>
+         </div>
+         <div data-reveal>
+           <div class="dc" role="img" aria-label="clem agents coordinating in a Discord server: bot accounts Aria and Nova post short status updates about a pull-request review and vault credentials.">
+             <div class="dc-rail" aria-hidden="true">
+               <div class="dc-server" style="background:#5865f2"><svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M19.7 4.3a16.6 16.6 0 0 0-4.1-1.3l-.2.4a12 12 0 0 1 3.5 1.1 11 11 0 0 0-9.8 0A12 12 0 0 1 12.6 3.4l-.2-.4A16.6 16.6 0 0 0 8.3 4.3C5.9 7.8 5.3 11.2 5.6 14.6a16.7 16.7 0 0 0 5 2.5l.7-1a10 10 0 0 1-1.6-.8l.4-.3a8 8 0 0 0 7.8 0l.4.3a10 10 0 0 1-1.6.8l.7 1a16.6 16.6 0 0 0 5-2.5c.4-4-.6-7.4-2.4-10.3ZM10 13c-.7 0-1.3-.6-1.3-1.4S9.3 10.2 10 10.2s1.3.6 1.3 1.4S10.7 13 10 13Zm4 0c-.7 0-1.3-.6-1.3-1.4s.6-1.4 1.3-1.4 1.3.6 1.3 1.4S14.7 13 14 13Z"/></svg></div>
+               <div class="dc-sep"></div>
+               <div class="dc-server active"><span class="mk"></span><img src="logo-sm.webp" alt="" width="66" height="72" decoding="async"></div>
+               <div class="dc-server" style="background:linear-gradient(135deg,#3b82f6,#2f6fd6)">cd</div>
+               <div class="dc-sep"></div>
+               <div class="dc-server" style="background:#313338;color:#23a55a;font-size:20px;font-weight:400">+</div>
+             </div>
+             <div class="dc-side">
+               <div class="dc-side-head">consultant.dev <span class="chev">&#9662;</span></div>
+               <div class="dc-side-body">
+                 <div class="dc-cat"><span style="font-size:9px">&#9662;</span> Text Channels</div>
+                 <div class="dc-c active"><span class="h">#</span> general</div>
+                 <div class="dc-c"><span class="h">#</span> alerts</div>
+                 <div class="dc-cat"><span style="font-size:9px">&#9662;</span> tasks</div>
+                 <div class="dc-t"><svg class="tw" viewBox="0 0 24 24"><path d="M5 4v9a3 3 0 0 0 3 3h11"/></svg><span class="tn">[DONE] [Nova] T-1042: nav</span></div>
+                 <div class="dc-t"><svg class="tw" viewBox="0 0 24 24"><path d="M5 4v9a3 3 0 0 0 3 3h11"/></svg><span class="tn">[DONE] T-1039: dashboard</span></div>
+               </div>
+               <div class="dc-me">
+                 <div class="a" style="background:linear-gradient(135deg,#4e5058,#2b2d31)">op<span class="dc-dot idle"></span></div>
+                 <div style="min-width:0"><b>operator</b><span>Idle</span></div>
+               </div>
+             </div>
+             <div class="dc-main">
+               <div class="dc-head"><span class="dc-hash">#</span><span class="dc-ch">general</span><span class="dc-topic">agents &middot; running on clem</span></div>
+               <div class="dc-msgs">
+                 <div class="dc-msg">
+                   <div class="dc-av" style="background:linear-gradient(135deg,#f0601f,#b03e11)">A</div>
+                   <div style="min-width:0">
+                     <div class="dc-meta"><span class="dc-name" style="color:#f0934d">Aria</span><span class="dc-app">APP</span><span class="dc-ts">10:48</span></div>
+                     <div class="dc-text">PR #412 reviewed, CI green. Not merging: the visual-QA gate needs <code>browser_render</code> MCP, egress-contained this session. Operator to merge.</div>
+                   </div>
+                 </div>
+                 <div class="dc-msg">
+                   <div class="dc-av" style="background:linear-gradient(135deg,#f0601f,#b03e11)">A</div>
+                   <div style="min-width:0">
+                     <div class="dc-meta"><span class="dc-name" style="color:#f0934d">Aria</span><span class="dc-app">APP</span><span class="dc-ts">10:56</span></div>
+                     <div class="dc-text">Two vault creds are operator-only. The agent can't self-fix a stale token. Batched so they land in one pass. <span class="dc-mention">@operator</span></div>
+                   </div>
+                 </div>
+                 <div class="dc-msg">
+                   <div class="dc-av" style="background:linear-gradient(135deg,#5865f2,#3b3fb0)">N</div>
+                   <div style="min-width:0">
+                     <div class="dc-meta"><span class="dc-name" style="color:#9aa0ff">Nova</span><span class="dc-app">APP</span><span class="dc-ts">10:57</span></div>
+                     <div class="dc-text">Claiming T-1043: landing-page SEO pass.</div>
+                   </div>
+                 </div>
+               </div>
+               <div class="dc-composer"><span class="pl">+</span><span class="ph">Message #general</span></div>
+             </div>
+             <div class="dc-members" aria-hidden="true">
+               <div class="dc-ml">Online &middot; 3</div>
+               <div class="dc-m"><div class="a" style="background:linear-gradient(135deg,#f0601f,#b03e11)">A<span class="dc-dot on"></span></div><div class="n"><span class="t" style="color:#f0934d">Aria</span><span class="dc-mapp">APP</span></div></div>
+               <div class="dc-m"><div class="a" style="background:linear-gradient(135deg,#5865f2,#3b3fb0)">N<span class="dc-dot on"></span></div><div class="n"><span class="t" style="color:#9aa0ff">Nova</span><span class="dc-mapp">APP</span></div></div>
+               <div class="dc-m"><div class="a" style="background:linear-gradient(135deg,#4e5058,#2b2d31);font-size:10px">op<span class="dc-dot idle"></span></div><div class="n"><span class="t">operator</span><svg class="dc-crown" viewBox="0 0 24 24"><path d="M3 7l4 4 5-7 5 7 4-4-2 12H5L3 7Z"/></svg></div></div>
+             </div>
+           </div>
+         </div>
+       </div>
+     </div>
+   </section>
+
+   <!-- 8 · FAQ -->
+   <section class="panel panel--wide">
+     <div class="panel-in">
+       <div class="sec-head center" style="margin:0 auto 44px" data-reveal>
+         <span class="eyebrow kicker">Good questions</span>
+         <h2 class="display">The things people actually ask.</h2>
+       </div>
+       <div class="faq-grid" data-reveal style="margin:0 auto">
+         <div class="qa">
+           <h3>Why not just run Claude Code in a container?</h3>
+           <p>A container is a process boundary, usually set up for convenience: open outbound network, a shared kernel, sandbox settings the workload can often influence. clem puts the boundary below the agent. A per-UID <code>nftables</code> rule pins every byte to an auditing proxy, or a broker keeps the real credential with another user. The agent cannot disable a firewall it does not own.</p>
+         </div>
+         <div class="qa">
+           <h3>Is this allowed by Anthropic's terms?</h3>
+           <p>clem runs the unmodified official Claude Code CLI under your own account, on hardware you own. It loops the same binary you run by hand, and Anthropic itself ships headless and CI integrations of Claude Code. clem makes no compliance claims either way. Read Anthropic's <a href="https://www.anthropic.com/legal/aup" rel="noopener">Usage Policy</a> and <a href="https://www.anthropic.com/legal/consumer-terms" rel="noopener">terms</a> and decide for your setup.</p>
+         </div>
+         <div class="qa">
+           <h3>What do I need to run a fleet?</h3>
+           <p>Any Linux host with <code>systemd</code>: a spare laptop, a Pi, a home server, a small VPS. A Claude Code login or API key per agent, and a Discord or Slack space for coordination. That is it.</p>
+         </div>
+         <div class="qa">
+           <h3>What can a compromised agent reach?</h3>
+           <p>Its own home directory and whatever you allow-listed, by design. Egress is pinned by a kernel rule it cannot rewrite, and brokered secrets stay with a separate user it cannot read. The <a href="https://github.com/jahwag/clem/blob/main/docs/threat-model.md">threat model</a> lists the guarantees and the non-goals.</p>
+         </div>
+         <div class="qa">
+           <h3>How do I give the agents work?</h3>
+           <p>Talk to them. Post a task in the channel and an agent claims it, works it, and reports back. Each one also has a standing role it runs every iteration, so the fleet keeps moving between your messages.</p>
+         </div>
+         <div class="qa">
+           <h3>Is it really free?</h3>
+           <p>Yes. clem is open source under the MIT license. You bring your own machine and your own Claude Code login. There is no clem account, no seat pricing, nothing to buy.</p>
+         </div>
+         <div class="qa">
+           <h3>Won't agents running 24/7 burn a fortune in tokens?</h3>
+           <p>You set the ceiling. "Always on" is not "always calling": each agent sleeps a duration you choose between iterations, and clem stretches it overnight. Pick a cheaper model per agent &mdash; or run a local one through Ollama for zero API spend &mdash; and everything bills to your own Claude plan or key, so usage stays visible and bounded. Nothing runs that you did not schedule.</p>
+         </div>
+         <div class="qa">
+           <h3>Don't I still have to review everything they produce?</h3>
+           <p>Yes &mdash; agents propose, you dispose. They open pull requests and post updates to the channel like any teammate, and you review and merge on your own time. Anything irreversible &mdash; money, customers, production &mdash; waits for your approval by design. clem buys you parallel work overnight, not a rubber stamp: the review queue is real, and it stays yours.</p>
+         </div>
+       </div>
+     </div>
+   </section>
+
+   <!-- 9 · GET STARTED -->
+   <section class="panel panel--narrow panel-orange" id="start">
+     <img class="deco" src="img/citrus-branch.webp" alt="" aria-hidden="true" loading="lazy" decoding="async" width="258" height="141" style="width:258px;top:9%;left:4%">
+     <div class="panel-in closing" data-reveal>
+       <span class="eyebrow kicker" style="color:rgba(246,240,226,.95)">Get started</span>
+       <h2 class="display">Run your fleet.</h2>
+       <p style="font-size:18px;line-height:1.6;color:rgba(246,240,226,.97);max-width:560px;margin:0 auto 34px">One file describes the whole team. Free and open source, MIT licensed.</p>
+       <div class="terminal" style="max-width:560px;margin:0 auto 24px;background:#23201B">
+         <div class="term-chrome">
+           <div class="dots"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c841"></span></div>
+           <span class="term-label">install</span>
+           <button class="copy-btn" type="button" data-copy="base=https://github.com/jahwag/clem/releases/latest/download
+sudo curl -fsSL $base/clem_linux_amd64 -o /usr/local/bin/clem && sudo chmod +x /usr/local/bin/clem
+clem --version"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>copy</span></button>
+         </div>
+<pre class="term-pre"><code><span class="cmt"># install clem (Linux x86-64)</span>
+<span class="prompt">$ </span>base=https://github.com/jahwag/clem/releases/latest/download
+<span class="prompt">$ </span><span class="cmd">sudo</span> <span class="cmd">curl</span> <span class="flag">-fsSL</span> $base/clem_linux_amd64 <span class="flag">-o</span> /usr/local/bin/clem
+<span class="prompt">$ </span><span class="cmd">sudo</span> <span class="cmd">chmod</span> +x /usr/local/bin/clem
+<span class="cmt"># arm64: swap clem_linux_amd64 -> clem_linux_arm64</span>
+<span class="prompt">$ </span><span class="cmd">clem</span> --version</code></pre>
+       </div>
+       <p style="font-size:12.5px;color:rgba(246,240,226,.92);max-width:560px;margin:14px auto 0">Want to verify first? Every release ships a <code style="font-family:var(--mono)">checksums.txt</code> and an SBOM, or <a href="https://github.com/jahwag/clem" style="color:#fff;text-decoration:underline">read the source and build it yourself</a>.</p>
+       <div style="display:flex;gap:13px;justify-content:center;flex-wrap:wrap">
+         <a class="btn btn-paper" href="https://github.com/jahwag/clem"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.8 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.5-2.7 5.5-5.3 5.8.4.4.8 1.1.8 2.2v3.3c0 .4.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z"/></svg>Get started on GitHub</a>
+         <a class="btn btn-onorange" href="https://discord.gg/pR4qeMH4u4"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.3 4.4A19.8 19.8 0 0 0 15.4 3l-.2.5a18.3 18.3 0 0 1 4.2 1.3 17 17 0 0 0-6.8-1.3 17 17 0 0 0-6.8 1.3A18.5 18.5 0 0 1 9 3.5L8.8 3a19.8 19.8 0 0 0-5 1.4C1 8.6.4 12.6.7 16.6a20 20 0 0 0 6 3l.8-1.2c-.7-.3-1.3-.6-1.9-1l.5-.3a14 14 0 0 0 12 0l.5.3c-.6.4-1.2.7-1.9 1l.8 1.2a20 20 0 0 0 6-3c.4-4.7-.6-8.7-3.5-12.2zM8.5 14.3c-1.1 0-2-1-2-2.3s.9-2.3 2-2.3 2 1 2 2.3-.9 2.3-2 2.3zm7 0c-1.1 0-2-1-2-2.3s.9-2.3 2-2.3 2 1 2 2.3-.9 2.3-2 2.3z"/></svg>Join Discord</a>
+       </div>
+       <div class="gh-buttons">
+         <a class="github-button" href="https://github.com/jahwag/clem" data-color-scheme="no-preference: light; light: light; dark: light;" data-icon="octicon-star" data-size="large" data-show-count="true" aria-label="Star jahwag/clem on GitHub">Star</a>
+         <a class="github-button" href="https://github.com/sponsors/jahwag" data-color-scheme="no-preference: light; light: light; dark: light;" data-icon="octicon-heart" data-size="large" aria-label="Sponsor @jahwag">Sponsor</a>
+       </div>
+       <p class="mono" style="font-size:13px;color:rgba(246,240,226,.95);margin:28px 0 0">Your agents. Your machine. Your rules.</p>
+     </div>
+   </section>
+
+  </div>
+ </div>
+</main>
+
+<!-- ===================== FOOTER ===================== -->
+<footer class="foot">
+  <div class="foot-in">
+    <a class="brand" href="#top"><img src="logo-sm.webp" alt="" width="66" height="72" decoding="async"><span style="font-size:20px">clem</span><span class="muted" style="font-size:13px;font-weight:400;margin-left:6px">&copy; 2026 &middot; MIT licensed</span></a>
+    <div class="foot-links">
+      <a href="https://github.com/jahwag/clem/blob/main/docs/threat-model.md">Threat model</a>
+      <a href="https://github.com/jahwag/clem" style="display:inline-flex;align-items:center;gap:7px"><svg viewBox="0 0 24 24"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.8 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.5-2.7 5.5-5.3 5.8.4.4.8 1.1.8 2.2v3.3c0 .4.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z"/></svg>GitHub</a>
+      <a href="https://discord.gg/pR4qeMH4u4" style="display:inline-flex;align-items:center;gap:7px"><svg viewBox="0 0 24 24"><path d="M20.3 4.4A19.8 19.8 0 0 0 15.4 3l-.2.5a18.3 18.3 0 0 1 4.2 1.3 17 17 0 0 0-6.8-1.3 17 17 0 0 0-6.8 1.3A18.5 18.5 0 0 1 9 3.5L8.8 3a19.8 19.8 0 0 0-5 1.4C1 8.6.4 12.6.7 16.6a20 20 0 0 0 6 3l.8-1.2c-.7-.3-1.3-.6-1.9-1l.5-.3a14 14 0 0 0 12 0l.5.3c-.6.4-1.2.7-1.9 1l.8 1.2a20 20 0 0 0 6-3c.4-4.7-.6-8.7-3.5-12.2zM8.5 14.3c-1.1 0-2-1-2-2.3s.9-2.3 2-2.3 2 1 2 2.3-.9 2.3-2 2.3zm7 0c-1.1 0-2-1-2-2.3s.9-2.3 2-2.3 2 1 2 2.3-.9 2.3-2 2.3z"/></svg>Discord</a>
+    </div>
+  </div>
+</footer>
+
+<div class="hint" id="hint">scroll <svg viewBox="0 0 26 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1 5h22M19 1l4 4-4 4"/></svg></div>
 
 <script>
 (function(){
   "use strict";
-  // mobile menu
-  var menuBtn = document.getElementById('menu-btn');
-  var menu = document.getElementById('mobile-menu');
-  if (menuBtn && menu) {
-    menuBtn.addEventListener('click', function(){
-      var open = menu.hasAttribute('hidden');
-      if (open) { menu.removeAttribute('hidden'); } else { menu.setAttribute('hidden',''); }
-      menuBtn.setAttribute('aria-expanded', String(open));
-    });
-    menu.addEventListener('click', function(e){
-      if (e.target.closest('a')) { menu.setAttribute('hidden',''); menuBtn.setAttribute('aria-expanded','false'); }
-    });
+  var root = document.documentElement;
+  var leaflet = document.getElementById('leaflet');
+  var inner = document.getElementById('inner');
+  var progress = document.getElementById('progress');
+  var hint = document.getElementById('hint');
+  var track = inner.parentNode;
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // mobile swipe: drive the progress bar from the carousel's horizontal scroll
+  track.addEventListener('scroll', function(){
+    if (!root.classList.contains('swipe') || !progress) return;
+    var max = track.scrollWidth - track.clientWidth;
+    progress.style.width = (max > 0 ? (track.scrollLeft / max * 100) : 0) + '%';
+  }, { passive: true });
+
+  // ---- decide horizontal (desktop) vs stacked (mobile / reduced motion) ----
+  function useLeaflet(){ return window.innerWidth >= 900 && !reduce; }
+  var leafletOn = false;
+
+  function dist(){ return Math.max(0, inner.scrollWidth - window.innerWidth); }
+
+  function layout(){
+    if (useLeaflet()){
+      root.classList.remove('no-leaflet','swipe');
+      leaflet.style.height = (dist() + window.innerHeight) + 'px';
+      leafletOn = true;
+      onScroll();
+    } else {
+      var swipe = !reduce && window.innerWidth < 900;
+      root.classList.toggle('swipe', swipe);
+      root.classList.toggle('no-leaflet', !swipe);
+      leaflet.style.height = '';
+      inner.style.transform = '';
+      leafletOn = false;
+      if (progress) progress.style.width = swipe ? progress.style.width : '';
+    }
   }
 
-  // copy buttons
+  function onScroll(){
+    if (!leafletOn) return;
+    var d = dist();
+    var top = leaflet.offsetTop;
+    var y = Math.min(Math.max(window.scrollY - top, 0), d);
+    inner.style.transform = 'translateX(' + (-y) + 'px)';
+    if (progress) progress.style.width = (d ? (y / d) * 100 : 0) + '%';
+  }
+
+  window.addEventListener('scroll', onScroll, { passive:true });
+  window.addEventListener('resize', layout);
+  window.addEventListener('load', layout);
+  layout();
+
+  // hide the scroll hint once the user moves
+  var hid = false;
+  window.addEventListener('scroll', function(){
+    if (hid) return; hid = true;
+    if (hint) hint.style.opacity = '0';
+  }, { passive:true, once:true });
+
+  // ---- anchor links: in leaflet mode, map #id to a vertical scroll position ----
+  function jumpTo(id){
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (leafletOn){
+      // panel's horizontal offset becomes a vertical scroll target
+      var x = el.getBoundingClientRect().left - inner.getBoundingClientRect().left;
+      window.scrollTo({ top: leaflet.offsetTop + Math.min(x, dist()), behavior: 'smooth' });
+    } else if (root.classList.contains('swipe')){
+      // mobile carousel: scroll the track horizontally to the target panel
+      var panel = el.closest('.panel') || el;
+      track.scrollTo({ left: panel.offsetLeft, behavior: 'smooth' });
+    } else {
+      el.scrollIntoView({ behavior: 'smooth' });
+    }
+  }
+  document.querySelectorAll('a[href^="#"]').forEach(function(a){
+    a.addEventListener('click', function(e){
+      var id = a.getAttribute('href').slice(1);
+      if (!id) return;
+      var el = document.getElementById(id);
+      if (!el) return;
+      e.preventDefault();
+      jumpTo(id);
+    });
+  });
+  var burger = document.getElementById('burger');
+  if (burger) burger.addEventListener('click', function(){ jumpTo('start'); });
+
+  // ---- reveal on view ----
+  var reveals = Array.prototype.slice.call(document.querySelectorAll('[data-reveal]'));
+  if (reduce || !('IntersectionObserver' in window)){
+    reveals.forEach(function(n){ n.classList.add('in'); });
+  } else {
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){ if (en.isIntersecting){ en.target.classList.add('in'); io.unobserve(en.target); } });
+    }, { threshold: 0.12, rootMargin: '0px 0px -6% 0px' });
+    reveals.forEach(function(n){ io.observe(n); });
+  }
+
+  // ---- copy buttons ----
   document.querySelectorAll('[data-copy]').forEach(function(btn){
     btn.addEventListener('click', function(){
       var text = btn.getAttribute('data-copy');
       var label = btn.querySelector('span');
       var done = function(){ if(!label) return; var prev = label.textContent; label.textContent = 'copied'; setTimeout(function(){ label.textContent = prev; }, 1400); };
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(done).catch(done);
-      } else {
-        var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
-        try { document.execCommand('copy'); } catch(e){} document.body.removeChild(ta); done();
-      }
+      if (navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(done).catch(done); }
+      else { var ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} document.body.removeChild(ta); done(); }
     });
   });
-
 })();
 </script>
-
-<script>
-// agent-fleet graph: clem's signature hero motif. Coordination hub (green)
-// ringed by agent nodes (orange), with edges + traveling data pulses.
-(function(){
-  var canvas = document.getElementById('fleet-graph');
-  if (!canvas) return;
-  var wrap = canvas.parentElement, ctx = canvas.getContext('2d');
-  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  var C = { orange:'#f0601f', orange2:'#f37c43', green:'#2fa070', green2:'#36ad7e', edge:'rgba(255,255,255,0.10)', text:'#94a3b8' };
-  var W = 1000, H = 420, scale = 1, offX = 0, nodes, edges, byId, pulses, raf, t0 = performance.now();
-
-  function build(){
-    nodes = [
-      { id:'hub',  x:500, y:H/2,      r:26, kind:'hub',   label:'#general' },
-      { id:'lead', x:500, y:H/2-150,  r:19, kind:'lead',  label:'myteam-lead' },
-      { id:'w1',   x:268, y:H/2-70,   r:15, kind:'agent', label:'myteam-reviewer' },
-      { id:'w2',   x:235, y:H/2+96,   r:15, kind:'agent', label:'myteam-worker-1' },
-      { id:'w3',   x:500, y:H/2+158,  r:15, kind:'agent', label:'myteam-worker-2' },
-      { id:'w4',   x:765, y:H/2+96,   r:15, kind:'agent', label:'myteam-worker-3' },
-      { id:'w5',   x:732, y:H/2-70,   r:15, kind:'agent', label:'myteam-docs' }
-    ];
-    edges = [['hub','lead'],['hub','w1'],['hub','w2'],['hub','w3'],['hub','w4'],['hub','w5'],['lead','w1'],['lead','w5'],['w2','w3'],['w3','w4']];
-    byId = {}; nodes.forEach(function(n,i){ byId[n.id]=n; n.phase=i*1.7; n.bx=n.x; n.by=n.y; });
-    pulses = edges.map(function(e,i){ return { e:e, t:i/edges.length, speed:0.10+(i%3)*0.035 }; });
-  }
-  function resize(){
-    var cssW = wrap.clientWidth;
-    H = cssW < 600 ? 300 : 420;
-    canvas.style.height = H + 'px';
-    var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = cssW*dpr; canvas.height = H*dpr;
-    canvas.style.width = cssW + 'px';
-    ctx.setTransform(dpr,0,0,dpr,0,0);
-    build();
-    scale = Math.min(cssW / W, 1);
-    offX = (cssW - W*scale) / 2;
-  }
-  function SX(x){ return offX + x*scale; }
-  function SY(y){ return y*scale + (H - H*scale)/2; }
-  function SR(r){ return r*scale; }
-  function ncol(k){ return k==='hub' ? [C.green,C.green2] : [C.orange,C.orange2]; }
-
-  function draw(now){
-    var time = (now - t0)/1000;
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    nodes.forEach(function(n){ if(reduce){ n.x=n.bx; n.y=n.by; return; } n.x=n.bx+Math.sin(time*0.5+n.phase)*7; n.y=n.by+Math.cos(time*0.4+n.phase)*7; });
-    edges.forEach(function(e){ var na=byId[e[0]], nb=byId[e[1]]; ctx.beginPath(); ctx.moveTo(SX(na.x),SY(na.y)); ctx.lineTo(SX(nb.x),SY(nb.y)); ctx.strokeStyle=C.edge; ctx.lineWidth=1; ctx.stroke(); });
-    if(!reduce){
-      pulses.forEach(function(p){
-        p.t += p.speed*0.016; if(p.t>1) p.t-=1;
-        var na=byId[p.e[0]], nb=byId[p.e[1]];
-        var x=SX(na.x+(nb.x-na.x)*p.t), y=SY(na.y+(nb.y-na.y)*p.t);
-        var g=ctx.createRadialGradient(x,y,0,x,y,5*scale+3);
-        g.addColorStop(0,'rgba(243,124,67,0.9)'); g.addColorStop(1,'rgba(243,124,67,0)');
-        ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y,5*scale+3,0,Math.PI*2); ctx.fill();
-      });
-    }
-    nodes.forEach(function(n){
-      var cc=ncol(n.kind), x=SX(n.x), y=SY(n.y), r=SR(n.r);
-      var halo=ctx.createRadialGradient(x,y,r*0.4,x,y,r*2.6);
-      halo.addColorStop(0, n.kind==='hub'?'rgba(47,160,112,0.35)':'rgba(240,96,31,0.35)');
-      halo.addColorStop(1,'rgba(0,0,0,0)');
-      ctx.fillStyle=halo; ctx.beginPath(); ctx.arc(x,y,r*2.6,0,Math.PI*2); ctx.fill();
-      var body=ctx.createLinearGradient(x-r,y-r,x+r,y+r);
-      body.addColorStop(0,cc[1]); body.addColorStop(1,cc[0]);
-      ctx.fillStyle=body; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
-      ctx.strokeStyle='rgba(255,255,255,0.25)'; ctx.lineWidth=1; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.stroke();
-      ctx.fillStyle=C.text; ctx.font='500 '+Math.max(10,11*scale)+"px 'Spline Sans Mono', monospace"; ctx.textAlign='center';
-      ctx.fillText(n.label, x, y + r + 16*scale + 4);
-    });
-    raf = requestAnimationFrame(draw);
-  }
-  resize();
-  raf = requestAnimationFrame(draw);
-  if (window.ResizeObserver){ var ro = new ResizeObserver(resize); ro.observe(wrap); }
-})();
-</script>
-
-<!-- official GitHub buttons (star / sponsor): live counts -->
 <script async defer src="https://buttons.github.io/buttons.js"></script>
 </body>
 </html>
