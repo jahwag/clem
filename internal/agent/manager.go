@@ -1056,6 +1056,28 @@ func NeedsLogin(homeDir string) bool {
 	return !HasRefreshToken(homeDir)
 }
 
+// CodexNeedsLogin returns true when manual `codex login` is required for the
+// user whose home is homeDir: the codex auth cache (~/.codex/auth.json) is
+// missing, unreadable, or carries neither an OAuth refresh token nor an API
+// key. Like Claude's NeedsLogin, the short-lived access token is not checked —
+// codex refreshes it transparently from the refresh token.
+func CodexNeedsLogin(homeDir string) bool {
+	data, err := os.ReadFile(filepath.Join(homeDir, ".codex", "auth.json"))
+	if err != nil {
+		return true
+	}
+	var auth struct {
+		OpenAIAPIKey string `json:"OPENAI_API_KEY"`
+		Tokens       struct {
+			RefreshToken string `json:"refresh_token"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal(data, &auth); err != nil {
+		return true
+	}
+	return auth.Tokens.RefreshToken == "" && auth.OpenAIAPIKey == ""
+}
+
 // ChownPath changes ownership of a path to the given user (best effort).
 // Errors are intentionally swallowed — callers use this for tidy-up where
 // a failure doesn't block the operation. Prefer chownToUser for fatal paths.
@@ -1095,16 +1117,44 @@ func EnsureOwnedDir(path, username string) error {
 }
 
 // InstallRuntime installs the CLI for the given runtime kind as the agent's
-// OS user. Supported: "claude-code" (default), "opencode".
+// OS user. Supported: "claude-code" (default), "opencode", "codex".
 func InstallRuntime(username, kind string) error {
 	switch kind {
 	case "", "claude-code":
 		return InstallClaude(username)
 	case "opencode":
 		return InstallOpencode(username)
+	case "codex":
+		return InstallCodex(username)
 	default:
 		return fmt.Errorf("unknown runtime %q", kind)
 	}
+}
+
+// InstallCodex installs OpenAI's codex CLI for the given user via npm. Codex is
+// distributed on npm (no curl|bash installer like claude/opencode), so this
+// requires Node.js/npm to be present for the agent user. It uses a per-user
+// global prefix so the binary is owned by the agent (self-update works) and
+// lands at the stable path the runner invokes: ~/.npm-global/bin/codex.
+func InstallCodex(username string) error {
+	script := "set -e; " +
+		"command -v npm >/dev/null 2>&1 || { echo 'npm not found: install Node.js/npm for this user before provisioning a codex agent' >&2; exit 1; }; " +
+		"npm config set prefix \"$HOME/.npm-global\"; " +
+		"npm install -g @openai/codex@latest"
+	cmd := exec.Command("sudo", "-iu", username, "bash", "-c", script)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("installing codex for %s: %w\n%s", username, err, out)
+	}
+	binPath := fmt.Sprintf("/home/%s/.npm-global/bin/codex", username)
+	info, err := os.Stat(binPath)
+	if err != nil {
+		return fmt.Errorf("codex not found at %s after install: %w", binPath, err)
+	}
+	if info.Mode()&0111 == 0 {
+		return fmt.Errorf("codex at %s is not executable", binPath)
+	}
+	return nil
 }
 
 // InstallOpencode runs the official opencode install script as the given user.

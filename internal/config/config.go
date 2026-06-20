@@ -409,8 +409,23 @@ func (ac AgentConfig) RuntimeKind() string {
 		return "claude-code"
 	case "opencode":
 		return "opencode"
+	case "codex":
+		return "codex"
 	default:
 		return ac.Runtime
+	}
+}
+
+// InstructionFileName is the per-agent instruction file the agent's runtime
+// reads from its work directory. claude-code reads CLAUDE.local.md; opencode and
+// codex follow the AGENTS.md convention (neither reads CLAUDE.local.md). clem
+// renders the same content; only the filename differs by runtime.
+func (ac AgentConfig) InstructionFileName() string {
+	switch ac.RuntimeKind() {
+	case "opencode", "codex":
+		return "AGENTS.md"
+	default:
+		return "CLAUDE.local.md"
 	}
 }
 
@@ -618,10 +633,10 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("agent key must match ^[a-z][a-z0-9-]{0,30}$, got: %q", key)
 		}
 		switch ac.RuntimeKind() {
-		case "claude-code", "opencode":
+		case "claude-code", "opencode", "codex":
 			// supported
 		default:
-			return nil, fmt.Errorf("agent %s: unknown runtime %q (valid: claude-code, opencode)", key, ac.Runtime)
+			return nil, fmt.Errorf("agent %s: unknown runtime %q (valid: claude-code, opencode, codex)", key, ac.Runtime)
 		}
 		if ac.Model != "" && !modelRe.MatchString(ac.Model) {
 			return nil, fmt.Errorf("agent %s: model %q must match %s (rendered into a quoted shell argument in runner.sh)", key, ac.Model, modelRe.String())

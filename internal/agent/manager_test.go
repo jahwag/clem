@@ -729,6 +729,61 @@ func TestHasRefreshToken(t *testing.T) {
 	}
 }
 
+func writeCodexAuth(t *testing.T, dir string, auth map[string]any) {
+	t.Helper()
+	codexDir := filepath.Join(dir, ".codex")
+	if err := os.MkdirAll(codexDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(auth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "auth.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCodexNeedsLogin(t *testing.T) {
+	// No auth.json at all → needs login.
+	if !CodexNeedsLogin(t.TempDir()) {
+		t.Error("missing auth.json should require login")
+	}
+
+	// auth.json with neither refresh token nor API key → needs login.
+	dir := t.TempDir()
+	writeCodexAuth(t, dir, map[string]any{"tokens": map[string]any{"access_token": "short"}})
+	if !CodexNeedsLogin(dir) {
+		t.Error("auth without refresh token or API key should require login")
+	}
+
+	// OAuth refresh token present → authenticated.
+	dir = t.TempDir()
+	writeCodexAuth(t, dir, map[string]any{"tokens": map[string]any{"refresh_token": "rt_abc"}})
+	if CodexNeedsLogin(dir) {
+		t.Error("auth with refresh token should not require login")
+	}
+
+	// API-key login (no OAuth tokens) → authenticated.
+	dir = t.TempDir()
+	writeCodexAuth(t, dir, map[string]any{"OPENAI_API_KEY": "sk-test"})
+	if CodexNeedsLogin(dir) {
+		t.Error("auth with API key should not require login")
+	}
+
+	// Malformed JSON → needs login (fail safe).
+	dir = t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".codex"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".codex", "auth.json"), []byte("{not json"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if !CodexNeedsLogin(dir) {
+		t.Error("malformed auth.json should require login")
+	}
+}
+
 func TestWriteSettings_WritesExpectedFiles(t *testing.T) {
 	stub := withStub(t)
 	dir := t.TempDir()
