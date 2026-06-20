@@ -141,7 +141,7 @@ Download the latest release (Linux):
 
 ```bash
 # x86-64
-curl -fsSL https://github.com/jahwag/clem/releases/latest/download/clem_linux_amd64 -o /usr/local/bin/clem && sudo chmod +x /usr/local/bin/clem
+sudo curl -fsSL https://github.com/jahwag/clem/releases/latest/download/clem_linux_amd64 -o /usr/local/bin/clem && sudo chmod +x /usr/local/bin/clem
 # arm64: swap clem_linux_amd64 -> clem_linux_arm64
 clem --version
 ```
