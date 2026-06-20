@@ -106,8 +106,9 @@ func TestInitTemplateUsesDiscordBotToolPrefix(t *testing.T) {
 }
 
 // TestInitTemplateContainsOpenPRMaintenance asserts both backend contracts tell
-// agents to keep their own open PRs mergeable (conflicts, failing checks,
-// operator review feedback) instead of treating "PR opened" as the end of a task.
+// agents to keep their own open PRs deliverable — handling conflicts, failing
+// checks, and (critically) operator change requests via reviewDecision — instead
+// of treating "PR opened" or "mergeable" as the end of a task.
 func TestInitTemplateContainsOpenPRMaintenance(t *testing.T) {
 	for _, backend := range []string{"discord", "github"} {
 		content := generateSharedMDBackend(t, backend)
@@ -115,7 +116,10 @@ func TestInitTemplateContainsOpenPRMaintenance(t *testing.T) {
 			"## Your open PRs",
 			"gh pr list",
 			"--author @me",
-			"keep them mergeable",
+			"reviewDecision",
+			"CHANGES_REQUESTED",
+			"does **not** mean done",
+			"unaddressed operator",
 			"rebase it onto the latest base",
 		} {
 			if !strings.Contains(content, want) {
