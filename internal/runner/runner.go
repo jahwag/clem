@@ -130,11 +130,11 @@ while true; do
     PROMPT='{{.Prompt}}'
     RUNNER_WARNINGS=""
 
-    # Guard: CLAUDE.local.md too large (token waste)
-    if [ -f "$WORKDIR/CLAUDE.local.md" ]; then
-        SIZE=$(stat -c %s "$WORKDIR/CLAUDE.local.md" 2>/dev/null || echo 0)
+    # Guard: {{.InstructionFile}} too large (token waste)
+    if [ -f "$WORKDIR/{{.InstructionFile}}" ]; then
+        SIZE=$(stat -c %s "$WORKDIR/{{.InstructionFile}}" 2>/dev/null || echo 0)
         if (( SIZE > MAX_CLAUDE_MD_BYTES )); then
-            log "WARNING: CLAUDE.local.md is ${SIZE} bytes (max ${MAX_CLAUDE_MD_BYTES}) — alerting"
+            log "WARNING: {{.InstructionFile}} is ${SIZE} bytes (max ${MAX_CLAUDE_MD_BYTES}) — alerting"
             source "$HOME/.env" 2>/dev/null
             {{.AlertCurl}}
         fi
@@ -312,11 +312,11 @@ while true; do
     PROMPT='{{.Prompt}}'
     RUNNER_WARNINGS=""
 
-    # Guard: CLAUDE.local.md too large (token waste)
-    if [ -f "$WORKDIR/CLAUDE.local.md" ]; then
-        SIZE=$(stat -c %s "$WORKDIR/CLAUDE.local.md" 2>/dev/null || echo 0)
+    # Guard: {{.InstructionFile}} too large (token waste)
+    if [ -f "$WORKDIR/{{.InstructionFile}}" ]; then
+        SIZE=$(stat -c %s "$WORKDIR/{{.InstructionFile}}" 2>/dev/null || echo 0)
         if (( SIZE > MAX_CLAUDE_MD_BYTES )); then
-            log "WARNING: CLAUDE.local.md is ${SIZE} bytes (max ${MAX_CLAUDE_MD_BYTES}) — alerting"
+            log "WARNING: {{.InstructionFile}} is ${SIZE} bytes (max ${MAX_CLAUDE_MD_BYTES}) — alerting"
             source "$HOME/.env" 2>/dev/null
             {{.AlertCurl}}
         fi
@@ -333,6 +333,152 @@ while true; do
      sleep 10 && tmux send-keys -l -t {{.AgentKey}} "$PROMPT"
      sleep 2 && tmux send-keys -t {{.AgentKey}} Enter) &
     timeout 7200 $OPENCODE $MODEL_ARG
+
+    EXIT_CODE=$?
+    ELAPSED=$(( $(date +%s) - START ))
+    log "Exited $EXIT_CODE after ${ELAPSED}s"
+
+    HOUR=$(date +%H)
+    if [ "$HOUR" -ge 7 ] && [ "$HOUR" -lt 22 ]; then
+        SLEEP_BETWEEN=$SLEEP_ACTIVE
+    else
+        SLEEP_BETWEEN=$SLEEP_NIGHT
+    fi
+
+    if [ $EXIT_CODE -eq 143 ] || [ $ELAPSED -gt $RESET_AFTER ]; then
+        BACKOFF=$SLEEP_BETWEEN
+    else
+        BACKOFF=$(( BACKOFF * 2 ))
+        [ $BACKOFF -gt $MAX_BACKOFF ] && BACKOFF=$MAX_BACKOFF
+    fi
+
+    log "Sleeping ${BACKOFF}s"
+    sleep $BACKOFF
+done
+`
+
+// codexRunnerTemplate is the runner loop for agents using OpenAI's codex CLI.
+// Codex speaks the OpenAI wire format natively (ChatGPT OAuth or OPENAI_API_KEY),
+// so like opencode there is no Anthropic-format translator in the middle. It keeps
+// the same interactive-TUI contract as claude-code: a long-lived TUI, tmux
+// send-keys prompt injection, and the prompt ending in "kill $PPID" to advance
+// the loop. MCP servers are configured via ~/.codex/config.toml (TOML, not JSON).
+// Codex supports streamable-HTTP MCP, so privileged sidecars work here too.
+const codexRunnerTemplate = `#!/bin/bash
+set -m
+BACKOFF=10
+MAX_BACKOFF=900
+RESET_AFTER=300
+CODEX="$HOME/.npm-global/bin/codex"
+WORKDIR="$HOME/{{.Project}}"
+LOGFILE="$HOME/.claude/{{.AgentKey}}-runner.log"
+
+mkdir -p "$HOME/.claude" "$HOME/.codex"
+cd "$WORKDIR" || exit 1
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOGFILE"; }
+tail -500 "$LOGFILE" > "$LOGFILE.tmp" 2>/dev/null && mv "$LOGFILE.tmp" "$LOGFILE" 2>/dev/null
+
+{{.ProxyExport}}
+# Load secrets (written by clem provision, never committed) before the config
+# writer reads them from the environment.
+[ -f "$HOME/.env" ] && source "$HOME/.env"
+
+# Write ~/.codex/config.toml from env. Top-level keys MUST precede any [table]
+# header in TOML, so the auth/trust keys are emitted before the mcp_servers
+# tables. Auth is forced to file-based storage because a systemd OS user has no
+# unlocked OS keyring; forced_login_method=chatgpt matches the clem login flow.
+python3 -c "
+import os
+_backend = '{{.CoordinationBackend}}'
+def _mcp_bin(name):
+    pipx = '/opt/pipx/bin/' + name
+    sysbin = '/usr/local/bin/' + name
+    return pipx if os.path.exists(pipx) else sysbin
+def _s(v):
+    return '\"' + str(v).replace('\\\\', '\\\\\\\\').replace('\"', '\\\\\"') + '\"'
+lines = []
+lines.append('cli_auth_credentials_store = \"file\"')
+lines.append('mcp_oauth_credentials_store = \"file\"')
+lines.append('forced_login_method = \"chatgpt\"')
+lines.append('')
+# Trust the work directory so project-scoped config layers load without a prompt.
+lines.append('[projects.' + _s(os.path.expanduser('~/{{.Project}}')) + ']')
+lines.append('trust_level = \"trusted\"')
+lines.append('')
+def _stdio(name, command, args=None, env=None):
+    lines.append('[mcp_servers.' + name + ']')
+    lines.append('command = ' + _s(command))
+    if args:
+        lines.append('args = [' + ', '.join(_s(a) for a in args) + ']')
+    if env:
+        lines.append('env = { ' + ', '.join(k + ' = ' + _s(v) for k, v in env.items()) + ' }')
+    lines.append('')
+def _http(name, url):
+    lines.append('[mcp_servers.' + name + ']')
+    lines.append('url = ' + _s(url))
+    lines.append('')
+# Discord bot (same gateway-watcher behaviour as the claude runner).
+if _backend != 'github' and os.environ.get('DISCORD_TOKEN'):
+    _denv = {'DISCORD_TOKEN': os.environ['DISCORD_TOKEN']}
+    _watch = '{{.WatchChannelIDs}}'
+    if _watch:
+        _denv['DISCORD_WATCH_CHANNELS'] = _watch
+        _denv['CLEM_TMUX_TARGET'] = '{{.AgentKey}}'
+    _stdio('discord-bot', _mcp_bin('mcp-discord'), env=_denv)
+# Slack (korotovsky/slack-mcp-server), write access on by default.
+if _backend != 'github' and os.environ.get('SLACK_MCP_XOXP_TOKEN'):
+    _sargs = ['--transport', 'stdio']
+    if os.environ.get('SLACK_MCP_ENABLED_TOOLS'):
+        _sargs += ['--enabled-tools', os.environ['SLACK_MCP_ENABLED_TOOLS']]
+    _stdio('slack-mcp', _mcp_bin('slack-mcp-server'), args=_sargs, env={
+        'SLACK_MCP_XOXP_TOKEN': os.environ['SLACK_MCP_XOXP_TOKEN'],
+        'SLACK_MCP_ADD_MESSAGE_TOOL': os.environ.get('SLACK_MCP_ADD_MESSAGE_TOOL', 'true'),
+    })
+# Social media (Typefully backend — local MCP server).
+if os.environ.get('TYPEFULLY_API_KEY'):
+    _stdio('social', _mcp_bin('social-mcp'), env={'TYPEFULLY_API_KEY': os.environ['TYPEFULLY_API_KEY']})
+# Privileged MCP sidecars over loopback streamable-HTTP (codex supports url MCP).
+for _name, _port in {{.SidecarServers}}:
+    _http(_name, 'http://127.0.0.1:%d/mcp' % _port)
+open(os.path.expanduser('~/.codex/config.toml'), 'w').write('\n'.join(lines) + '\n')
+"
+
+SLEEP_ACTIVE={{.SleepActive}}
+SLEEP_NIGHT={{.SleepNight}}
+MAX_CLAUDE_MD_BYTES=12288
+
+while true; do
+    START=$(date +%s)
+    PROMPT='{{.Prompt}}'
+    RUNNER_WARNINGS=""
+
+    # Guard: {{.InstructionFile}} too large (token waste)
+    if [ -f "$WORKDIR/{{.InstructionFile}}" ]; then
+        SIZE=$(stat -c %s "$WORKDIR/{{.InstructionFile}}" 2>/dev/null || echo 0)
+        if (( SIZE > MAX_CLAUDE_MD_BYTES )); then
+            log "WARNING: {{.InstructionFile}} is ${SIZE} bytes (max ${MAX_CLAUDE_MD_BYTES}) — alerting"
+            source "$HOME/.env" 2>/dev/null
+            {{.AlertCurl}}
+        fi
+    fi
+
+    log "Updating codex"
+    npm install -g @openai/codex@latest 2>&1 | tail -3 | tee -a "$LOGFILE" || log "codex update failed, continuing with current version"
+
+    {{.SkillsSyncCmd}}
+
+    [ -n "$RUNNER_WARNINGS" ] && PROMPT="${RUNNER_WARNINGS}${PROMPT}"
+
+    log "Starting {{.AgentName}} (fresh session)"
+    (sleep 1 && tmux send-keys -t {{.AgentKey}} "" Enter
+     sleep 25 && tmux send-keys -l -t {{.AgentKey}} "$PROMPT"
+     sleep 2 && tmux send-keys -t {{.AgentKey}} Enter) &
+    MODEL_ARG=""
+    [ -n '{{.Model}}' ] && MODEL_ARG="--model {{.Model}}"
+    timeout 7200 "$CODEX" --dangerously-bypass-approvals-and-sandbox \
+        $MODEL_ARG \
+        -C "$WORKDIR"
 
     EXIT_CODE=$?
     ELAPSED=$(( $(date +%s) - START ))
@@ -458,6 +604,10 @@ type RunnerParams struct {
 	// to refresh the agent's ~/.claude/skills/ symlinks from the team skills
 	// repo. Empty when cfg.SkillsRepo is unset, in which case no sync runs.
 	SkillsSyncCmd string
+	// InstructionFile is the per-agent instruction file the runtime reads from
+	// the work dir (CLAUDE.local.md for claude-code, AGENTS.md for opencode/codex).
+	// Used by the oversize guard so it checks the file the runtime actually reads.
+	InstructionFile string
 }
 
 // bashDoubleQuoteEscaper escapes the four characters that stay live inside a
@@ -505,7 +655,7 @@ func Generate(cfg *config.Config, agentKey string) string {
 
 	alertChannel := cfg.Coordination.Channels["alerts"]
 	backend, _ := coordination.Known(cfg.Coordination.Backend) // validated at load time
-	alertMsg := fmt.Sprintf(`⚠️ %s: CLAUDE.local.md is ${SIZE} bytes (>${MAX_CLAUDE_MD_BYTES}). Trim it to reduce token waste.`, escapeForAlert(ac.Name))
+	alertMsg := fmt.Sprintf(`⚠️ %s: %s is ${SIZE} bytes (>${MAX_CLAUDE_MD_BYTES}). Trim it to reduce token waste.`, escapeForAlert(ac.Name), ac.InstructionFileName())
 	alertCurlBody := coordination.RenderAlert(backend, coordination.AlertParams{
 		Repo:    cfg.Coordination.GithubRepo,
 		Channel: alertChannel,
@@ -557,10 +707,13 @@ func Generate(cfg *config.Config, agentKey string) string {
 		ProxyExport:         proxyExportBlock(cfg, agentKey),
 		SidecarServers:      sidecarServersLiteral(cfg, agentKey),
 		SkillsSyncCmd:       skillsSyncCmd,
+		InstructionFile:     ac.InstructionFileName(),
 	}
 	switch ac.RuntimeKind() {
 	case "opencode":
 		return renderTemplate(opencodeRunnerTemplate, p)
+	case "codex":
+		return renderTemplate(codexRunnerTemplate, p)
 	default:
 		return renderTemplate(runnerTemplate, p)
 	}
@@ -608,8 +761,8 @@ func buildHardeningDirectives(homeDir, _ string) string {
 	// when present, not required.
 	return fmt.Sprintf(
 		"NoNewPrivileges=yes\nProtectSystem=strict\nPrivateTmp=yes\n"+
-			"ReadOnlyPaths=-%s/CLAUDE.md -%s/CLAUDE.local.md\n",
-		homeDir, homeDir,
+			"ReadOnlyPaths=-%s/CLAUDE.md -%s/CLAUDE.local.md -%s/AGENTS.md\n",
+		homeDir, homeDir, homeDir,
 	)
 }
 
@@ -717,6 +870,7 @@ func renderTemplate(tmpl string, p RunnerParams) string {
 		"{{.CoordinationBackend}}", p.CoordinationBackend,
 		"{{.GitHubWatchUnitDeps}}", p.GitHubWatchUnitDeps,
 		"{{.SkillsSyncCmd}}", p.SkillsSyncCmd,
+		"{{.InstructionFile}}", p.InstructionFile,
 	)
 	return r.Replace(tmpl)
 }

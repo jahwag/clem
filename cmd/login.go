@@ -52,6 +52,26 @@ func runLogin(cmd *cobra.Command, args []string) error {
 		fmt.Printf("[%s] %s (%s)\n", agentKey, ac.Name, osUser)
 
 		homeDir := fmt.Sprintf("/home/%s", osUser)
+
+		if ac.RuntimeKind() == "codex" {
+			if !agent.CodexNeedsLogin(homeDir) {
+				fmt.Printf("  codex already authenticated — skipping\n")
+				continue
+			}
+			// Device-auth prints a URL + code rather than opening a browser,
+			// which is what a headless agent host needs. The binary lives at
+			// the per-user npm prefix, off the default PATH, so call it directly.
+			fmt.Printf("  running codex login as %s\n", osUser)
+			loginCmd := exec.Command("su", "-", osUser, "-c", `"$HOME/.npm-global/bin/codex" login --device-auth`)
+			loginCmd.Stdin = os.Stdin
+			loginCmd.Stdout = os.Stdout
+			loginCmd.Stderr = os.Stderr
+			if err := loginCmd.Run(); err != nil {
+				return fmt.Errorf("codex login for %s: %w", osUser, err)
+			}
+			continue
+		}
+
 		if !agent.NeedsLogin(homeDir) {
 			expiry := agent.TokenExpiry(homeDir)
 			fmt.Printf("  token valid until %s — skipping\n", expiry.Format("2006-01-02"))

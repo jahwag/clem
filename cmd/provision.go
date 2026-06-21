@@ -206,10 +206,12 @@ func provisionAgent(agentKey string, ac config.AgentConfig) error {
 	}
 	content, mode, err := agentdoc.Render(cfg, agentKey, ".")
 	if err != nil {
-		return fmt.Errorf("rendering CLAUDE.local.md for %s: %w", agentKey, err)
+		return fmt.Errorf("rendering instruction file for %s: %w", agentKey, err)
 	}
 	if content != nil {
-		dst := filepath.Join(workDir, "CLAUDE.local.md")
+		// Each runtime reads a different instruction file from the work dir:
+		// claude-code → CLAUDE.local.md, opencode/codex → AGENTS.md.
+		dst := filepath.Join(workDir, ac.InstructionFileName())
 		if err := os.WriteFile(dst, content, 0644); err != nil {
 			return fmt.Errorf("writing %s: %w", dst, err)
 		}

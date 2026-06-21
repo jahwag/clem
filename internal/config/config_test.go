@@ -1958,6 +1958,43 @@ func TestValidateMCPSidecars_OpencodeRejected(t *testing.T) {
 	}
 }
 
+func TestValidateMCPSidecars_CodexAllowed(t *testing.T) {
+	// codex speaks streamable-HTTP MCP, so sidecars are supported (unlike opencode).
+	cfg := &Config{
+		Project: "t",
+		MCPSidecars: MCPSidecarsConfig{Servers: []SidecarServer{
+			{Name: "es-ro", Identity: "shared", Command: "/bin/x", Secrets: []string{"K"}, SecretsVault: "infra"},
+		}},
+		Agents: map[string]AgentConfig{
+			"lead": {Name: "L", Runtime: "codex", Sidecars: []string{"es-ro"}},
+		},
+	}
+	if err := cfg.validateMCPSidecars(); err != nil {
+		t.Fatalf("codex sidecars should be allowed, got: %v", err)
+	}
+}
+
+func TestRuntimeKind_Codex(t *testing.T) {
+	if got := (AgentConfig{Runtime: "codex"}).RuntimeKind(); got != "codex" {
+		t.Fatalf("RuntimeKind() = %q, want codex", got)
+	}
+}
+
+func TestInstructionFileName(t *testing.T) {
+	cases := map[string]string{
+		"":            "CLAUDE.local.md", // default = claude-code
+		"claude-code": "CLAUDE.local.md",
+		"claude":      "CLAUDE.local.md",
+		"opencode":    "AGENTS.md",
+		"codex":       "AGENTS.md",
+	}
+	for runtime, want := range cases {
+		if got := (AgentConfig{Runtime: runtime}).InstructionFileName(); got != want {
+			t.Errorf("runtime %q: InstructionFileName() = %q, want %q", runtime, got, want)
+		}
+	}
+}
+
 func TestValidateMCPSidecars_AgentVaultPortCollision(t *testing.T) {
 	cfg := &Config{
 		Project: "t",
