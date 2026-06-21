@@ -66,6 +66,21 @@ var vaultDeleteCmd = &cobra.Command{
 	},
 }
 
+var vaultRenameCmd = &cobra.Command{
+	Use:   "rename <vault> <new-vault> | <vault> <old-key> <new-key>",
+	Short: "Rename a vault, or a secret key within a vault, in secrets.sops.yaml",
+	Long: "Two args renames a vault; three args renames a key within a vault.\n" +
+		"Each secret is re-encrypted under the new name (sops binds the YAML\n" +
+		"key path into every value's AAD, so a raw key edit breaks decryption).",
+	Args: cobra.RangeArgs(2, 3),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 2 {
+			return vault.RenameVault(args[0], args[1])
+		}
+		return vault.RenameKey(args[0], args[1], args[2])
+	},
+}
+
 var vaultMigrateAddr string
 
 var vaultMigrateCmd = &cobra.Command{
@@ -109,6 +124,6 @@ var vaultMigrateCmd = &cobra.Command{
 
 func init() {
 	vaultMigrateCmd.Flags().StringVar(&vaultMigrateAddr, "addr", "", "agent-vault management API address")
-	vaultCmd.AddCommand(vaultInitCmd, vaultSetCmd, vaultGetCmd, vaultListCmd, vaultDeleteCmd, vaultMigrateCmd)
+	vaultCmd.AddCommand(vaultInitCmd, vaultSetCmd, vaultGetCmd, vaultListCmd, vaultDeleteCmd, vaultRenameCmd, vaultMigrateCmd)
 	rootCmd.AddCommand(vaultCmd)
 }
