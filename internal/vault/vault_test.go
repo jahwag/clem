@@ -132,6 +132,81 @@ func TestSet_AddsKeyToExistingFile(t *testing.T) {
 	}
 }
 
+func TestRenameVault_ReEncryptsUnderNewName(t *testing.T) {
+	requireSopsAndAge(t)
+	cleanup := setupVaultDir(t)
+	defer cleanup()
+
+	// Legacy underscore name that ValidateVaultName now rejects: Set won't make
+	// it, so seed it straight via sops (mirrors a pre-existing illegal vault).
+	if err := Set("seed", "K=1"); err != nil {
+		t.Fatalf("Set seed: %v", err)
+	}
+	if out, err := exec.Command("sops", "--set",
+		`["vaults"]["dev_to"]["DEV_TO_API_KEY"] "tok123"`, secretsFile).CombinedOutput(); err != nil {
+		t.Fatalf("seed dev_to: %v\n%s", err, out)
+	}
+	if err := RenameVault("dev_to", "dev-to"); err != nil {
+		t.Fatalf("RenameVault: %v", err)
+	}
+
+	out, err := exec.Command("sops", "-d", secretsFile).CombinedOutput()
+	if err != nil {
+		t.Fatalf("sops -d: %v\n%s", err, out)
+	}
+	plain := string(out)
+	if !strings.Contains(plain, "dev-to:") {
+		t.Errorf("expected new vault dev-to: after rename, got:\n%s", plain)
+	}
+	if strings.Contains(plain, "dev_to:") {
+		t.Errorf("old vault dev_to: still present after rename:\n%s", plain)
+	}
+	if !strings.Contains(plain, "tok123") {
+		t.Errorf("secret value not preserved through rename:\n%s", plain)
+	}
+}
+
+func TestRenameVault_RefusesOverwrite(t *testing.T) {
+	requireSopsAndAge(t)
+	cleanup := setupVaultDir(t)
+	defer cleanup()
+
+	if err := Set("a", "K=1"); err != nil {
+		t.Fatalf("Set a: %v", err)
+	}
+	if err := Set("b", "K=2"); err != nil {
+		t.Fatalf("Set b: %v", err)
+	}
+	if err := RenameVault("a", "b"); err == nil {
+		t.Fatal("expected error renaming onto an existing vault, got nil")
+	}
+}
+
+func TestRenameKey_ReEncryptsUnderNewKey(t *testing.T) {
+	requireSopsAndAge(t)
+	cleanup := setupVaultDir(t)
+	defer cleanup()
+
+	if err := Set("v1", "OLD_KEY=val42"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := RenameKey("v1", "OLD_KEY", "NEW_KEY"); err != nil {
+		t.Fatalf("RenameKey: %v", err)
+	}
+
+	out, err := exec.Command("sops", "-d", secretsFile).CombinedOutput()
+	if err != nil {
+		t.Fatalf("sops -d: %v\n%s", err, out)
+	}
+	plain := string(out)
+	if !strings.Contains(plain, "NEW_KEY:") || strings.Contains(plain, "OLD_KEY:") {
+		t.Errorf("expected OLD_KEY renamed to NEW_KEY, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "val42") {
+		t.Errorf("value not preserved through key rename:\n%s", plain)
+	}
+}
+
 func TestSet_RejectsMalformedKeyval(t *testing.T) {
 	cleanup := setupVaultDir(t)
 	defer cleanup()
