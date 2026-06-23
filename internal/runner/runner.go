@@ -883,7 +883,13 @@ func sidecarServersLiteral(cfg *config.Config, agentKey string) string {
 	for _, l := range cfg.SidecarListeners() {
 		for _, ak := range l.Subscribers {
 			if ak == agentKey {
-				parts = append(parts, fmt.Sprintf("[%q, %d]", l.Server.ToolName(), l.Port))
+				// Single-quote the tool name: this literal is interpolated into the
+				// runner's `python3 -c "..."` block, which is itself double-quoted at
+				// the shell level. %q's double quotes would close that shell string,
+				// so the name reached python as a bare identifier (NameError, 0-byte
+				// .mcp.json). ToolName is validated to validName (no quotes), so
+				// single-quoting is safe.
+				parts = append(parts, fmt.Sprintf("['%s', %d]", l.Server.ToolName(), l.Port))
 				break
 			}
 		}

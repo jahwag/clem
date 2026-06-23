@@ -774,7 +774,7 @@ func TestGenerate_SidecarHTTPEntryForSubscriber(t *testing.T) {
 	cfg := sidecarRunnerCfg()
 	out := Generate(cfg, "lead")
 	for _, want := range []string{
-		`for _name, _port in [["es-ro", 14500]]:`,
+		`for _name, _port in [['es-ro', 14500]]:`,
 		`'type': 'http'`,
 		`'url': 'http://127.0.0.1:%d/mcp' % _port`,
 	} {
@@ -794,7 +794,10 @@ func TestGenerate_NoSidecarEntryForNonSubscriber(t *testing.T) {
 
 func TestSidecarServersLiteral(t *testing.T) {
 	cfg := sidecarRunnerCfg()
-	if got := sidecarServersLiteral(cfg, "lead"); got != `[["es-ro", 14500]]` {
+	// Single-quoted: the literal is interpolated into the runner's double-quoted
+	// `python3 -c "..."` block, so double quotes would break out of the shell
+	// string and python would see a bare identifier (NameError).
+	if got := sidecarServersLiteral(cfg, "lead"); got != `[['es-ro', 14500]]` {
 		t.Errorf("subscriber literal = %q", got)
 	}
 	if got := sidecarServersLiteral(cfg, "solo"); got != `[]` {
