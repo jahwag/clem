@@ -1306,11 +1306,25 @@ func InstallSkill(username string, s config.SkillConfig) error {
 // run as the agent user so files land with correct ownership.
 func SyncSkillsRepo(username, homeDir, agentKey, repoURL string) error {
 	run := func(name string, args ...string) ([]byte, error) {
-		return sys.Run("sudo", append([]string{"-iu", username, name}, args...)...)
+		argv := append([]string{"-iu", username, "bash", "-lc", sourceEnvExec, "_", name}, args...)
+		return sys.Run("sudo", argv...)
 	}
 	mkDir := func(path string) error { return EnsureOwnedDir(path, username) }
 	return syncSkillsCommon(homeDir, agentKey, repoURL, run, mkDir)
 }
+
+// sourceEnvExec sources the agent's brokered egress env (~/.env: HTTPS_PROXY →
+// agent-vault + GIT_SSL_CAINFO / http.proxySSLCAInfo CA trust) then execs its
+// positional args. The skills git clone/pull run through it so their egress
+// matches the agent's own git: routed through the broker and authenticated by
+// proxy injection (the github-git service rule), with no agent-side credential.
+// Without it the clone goes direct to github.com and depends on a real PAT in
+// ~/.git-credentials — which fails on the first provision (before any gh login)
+// and, when it works, only works because a live token was left readable in the
+// agent's home, defeating the whole point of brokering. Mirrors the runner,
+// which sources ~/.env before `clem sync-skills`.
+// Invoke as: bash -lc sourceEnvExec _ <cmd> <args...>   ($0=_, "$@"=cmd+args)
+const sourceEnvExec = `[ -f "$HOME/.env" ] && . "$HOME/.env"; exec "$@"`
 
 // SyncSkillsRepoAsSelf is the runtime variant. Called by the runner inside
 // each iteration as the agent user, so no sudo wrapping. Dirs created
@@ -1320,7 +1334,10 @@ func SyncSkillsRepo(username, homeDir, agentKey, repoURL string) error {
 // `clem provision`: PR → merge → next iteration's runner pulls and re-symlinks
 // before launching the TUI.
 func SyncSkillsRepoAsSelf(homeDir, agentKey, repoURL string) error {
-	run := sys.Run
+	run := func(name string, args ...string) ([]byte, error) {
+		argv := append([]string{"-lc", sourceEnvExec, "_", name}, args...)
+		return sys.Run("bash", argv...)
+	}
 	mkDir := func(path string) error { return os.MkdirAll(path, 0755) }
 	return syncSkillsCommon(homeDir, agentKey, repoURL, run, mkDir)
 }

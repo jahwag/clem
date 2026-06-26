@@ -1348,6 +1348,11 @@ func (s *skillsStub) Run(name string, args ...string) ([]byte, error) {
 		cmd = name
 		cargs = args
 	}
+	// Unwrap the env-sourcing login shell: bash -lc <script> _ <cmd> <args...>
+	if cmd == "bash" && len(cargs) >= 4 && cargs[0] == "-lc" && cargs[2] == "_" {
+		cmd = cargs[3]
+		cargs = cargs[4:]
+	}
 	switch cmd {
 	case "ln":
 		if len(cargs) >= 3 && cargs[0] == "-sfn" {
@@ -1369,6 +1374,24 @@ func (s *skillsStub) Run(name string, args ...string) ([]byte, error) {
 		// git -C <dir> pull --ff-only — no-op
 	}
 	return nil, nil
+}
+
+// gitArgsOf returns the git subcommand+args from a recorded skillsStub call,
+// unwrapping the `sudo -iu <user>` and `bash -lc <script> _` egress wrappers.
+// Returns nil if the call is not a git invocation. Keeps call-shape assertions
+// independent of how the broker egress env is applied.
+func gitArgsOf(call []string) []string {
+	a := call
+	if len(a) >= 4 && a[0] == "sudo" && a[1] == "-iu" {
+		a = a[3:]
+	}
+	if len(a) >= 4 && a[0] == "bash" && a[1] == "-lc" && a[3] == "_" {
+		a = a[4:]
+	}
+	if len(a) >= 1 && a[0] == "git" {
+		return a[1:]
+	}
+	return nil
 }
 
 func withSkillsStub(t *testing.T) *skillsStub {
@@ -1448,7 +1471,7 @@ func TestSyncSkillsRepo_SymlinksSharedAndAgent(t *testing.T) {
 	// is what should have fired).
 	sawPull := false
 	for _, c := range stub.calls {
-		if len(c) >= 5 && c[0] == "sudo" && c[3] == "git" && c[4] == "-C" {
+		if g := gitArgsOf(c); len(g) >= 3 && g[0] == "-C" && g[2] == "pull" {
 			sawPull = true
 		}
 	}
@@ -1596,10 +1619,10 @@ func TestSyncSkillsRepo_ClonesWhenCacheMissing(t *testing.T) {
 
 	sawClone := false
 	for _, c := range stub.calls {
-		if len(c) >= 5 && c[0] == "sudo" && c[3] == "git" && c[4] == "clone" {
+		if g := gitArgsOf(c); len(g) >= 2 && g[0] == "clone" {
 			sawClone = true
-			if c[5] != repoURL {
-				t.Errorf("clone URL = %q, want %q", c[5], repoURL)
+			if g[1] != repoURL {
+				t.Errorf("clone URL = %q, want %q", g[1], repoURL)
 			}
 		}
 	}
@@ -1609,6 +1632,49 @@ func TestSyncSkillsRepo_ClonesWhenCacheMissing(t *testing.T) {
 
 	if _, err := os.Readlink(filepath.Join(home, ".claude", "skills", "first-skill")); err != nil {
 		t.Errorf("first-skill should be symlinked after clone: %v", err)
+	}
+}
+
+// TestSyncSkillsRepo_RoutesGitThroughBrokerEnv guards the security-relevant
+// behavior: skills git ops must source ~/.env (HTTPS_PROXY → agent-vault) so
+// they authenticate via broker injection, never a PAT in ~/.git-credentials.
+// A regression that drops the wrapper would re-introduce the first-provision
+// failure and leave a live token in the agent's home.
+func TestSyncSkillsRepo_RoutesGitThroughBrokerEnv(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		sync func(home string) error
+	}{
+		{"provision", func(home string) error { return SyncSkillsRepo("testuser", home, "worker", "https://example.com/owner/team-skills.git") }},
+		{"self", func(home string) error { return SyncSkillsRepoAsSelf(home, "worker", "https://example.com/owner/team-skills.git") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := withSkillsStub(t)
+			home := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(home, ".cache", "team-skills", "shared", "s"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := tc.sync(home); err != nil {
+				t.Fatalf("sync: %v", err)
+			}
+			var sawGit, sourced bool
+			for _, c := range stub.calls {
+				if gitArgsOf(c) == nil {
+					continue
+				}
+				sawGit = true
+				joined := strings.Join(c, " ")
+				if strings.Contains(joined, "bash -lc") && strings.Contains(joined, ".env") {
+					sourced = true
+				}
+			}
+			if !sawGit {
+				t.Fatalf("no git call recorded; calls: %v", stub.calls)
+			}
+			if !sourced {
+				t.Errorf("skills git must source ~/.env (broker egress); calls: %v", stub.calls)
+			}
+		})
 	}
 }
 
