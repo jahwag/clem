@@ -199,6 +199,17 @@ func (ac AgentConfig) IsBrokered(key string) bool {
 // can use and on brokered secrets with no service to inject them.
 func (cfg *Config) validateVaultServices() error {
 	if len(cfg.Vault.Services) == 0 {
+		// No services configured: any brokered secret will egress as a placeholder
+		// at runtime with no service to inject the real value. Warn so the operator
+		// notices rather than shipping a broken/placeholder credential silently.
+		for key, ac := range cfg.Agents {
+			if !ac.VaultBroker {
+				continue
+			}
+			for _, s := range ac.BrokeredSecrets {
+				fmt.Fprintf(os.Stderr, "warning: agent %s: brokered secret %q has no matching vault.service — it would egress as a placeholder\n", key, s)
+			}
+		}
 		return nil
 	}
 	if !cfg.Vault.IsAgentVault() {

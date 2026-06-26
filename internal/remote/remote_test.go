@@ -117,6 +117,64 @@ func TestAgeKeyPath_UnderHomeConfig(t *testing.T) {
 	}
 }
 
+func TestRemoteCloneCmd_NoTokenInURL(t *testing.T) {
+	cmd := remoteCloneCmd("clem", "https://github.com/org/clem.git", "ghp_secrettoken") // clem:allow-secret
+	if strings.Contains(cmd, "oauth2:") || strings.Contains(cmd, "ghp_secrettoken@") {
+		t.Fatalf("token must not be embedded in clone URL:\n%s", cmd)
+	}
+	for _, want := range []string{
+		`http.extraheader`,
+		`AUTHORIZATION: bearer ghp_secrettoken`,
+		`clone https://github.com/org/clem.git`,
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("clone cmd missing %q:\n%s", want, cmd)
+		}
+	}
+}
+
+func TestRemoteCloneCmd_PublicRepoNoHeader(t *testing.T) {
+	cmd := remoteCloneCmd("clem", "https://github.com/org/clem.git", "")
+	if strings.Contains(cmd, "extraheader") {
+		t.Fatalf("public clone should not set extraheader:\n%s", cmd)
+	}
+}
+
+func TestProvision_AbortsBeforeStep3WhenCloneFails(t *testing.T) {
+	chdirTempGitRepo(t, "git@github.com:org/clem.git")
+	oldSSH := remoteSSH
+	oldSCP := remoteSCP
+	defer func() {
+		remoteSSH = oldSSH
+		remoteSCP = oldSCP
+	}()
+	var calls []string
+	remoteSSH = func(host, cmd string) error {
+		calls = append(calls, cmd)
+		if strings.Contains(cmd, "mkdir -p ~/.config/sops/age") {
+			return nil
+		}
+		if strings.Contains(cmd, "git ") {
+			return fmt.Errorf("simulated clone failure")
+		}
+		return fmt.Errorf("unexpected ssh: %s", cmd)
+	}
+	remoteSCP = func(localPath, host, remotePath string) error { return nil }
+
+	err := Provision("myhost", "ghp_secrettoken") // clem:allow-secret
+	if err == nil {
+		t.Fatal("expected Provision to fail when clone fails")
+	}
+	if !strings.Contains(err.Error(), "cloning repo") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, cmd := range calls {
+		if strings.Contains(cmd, "clem provision") {
+			t.Fatalf("step 3/3 must not run after clone failure, saw: %q", cmd)
+		}
+	}
+}
+
 func TestBug118_MaliciousRepoNameInjectsShellCommand(t *testing.T) {
 	malicious := `legit; touch /tmp/pwned #`
 	// Same pattern as Provision/Login — repoName is unquoted in SSH shell.

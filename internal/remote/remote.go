@@ -74,6 +74,10 @@ func SSH(host, command string) error {
 	return cmd.Run()
 }
 
+// remoteSSH is the SSH implementation used by remote provisioning helpers.
+// Tests may replace it to simulate failures.
+var remoteSSH = SSH
+
 // SSHT runs a command on the remote host with a TTY allocated (required for interactive prompts).
 func SSHT(host, command string) error {
 	cmd := exec.Command("ssh", "-t", "-o", "StrictHostKeyChecking=accept-new", host, command)
@@ -85,11 +89,19 @@ func SSHT(host, command string) error {
 
 // CopyFile copies a local file to the remote host via scp.
 func CopyFile(localPath, host, remotePath string) error {
+	return remoteSCP(localPath, host, remotePath)
+}
+
+func scpCopy(localPath, host, remotePath string) error {
 	cmd := exec.Command("scp", "-o", "StrictHostKeyChecking=accept-new", localPath, fmt.Sprintf("%s:%s", host, remotePath))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
+
+// remoteSCP is the SCP implementation used by remote provisioning helpers.
+// Tests may replace it to simulate failures.
+var remoteSCP = scpCopy
 
 // AgeKeyPath returns the default local age private key path.
 func AgeKeyPath() string {
@@ -106,16 +118,12 @@ func Provision(host, ghToken string) error {
 	if err != nil {
 		return err
 	}
-	cloneURL, err := CloneURL(ghToken)
-	if err != nil {
-		return err
-	}
 
 	fmt.Printf("Remote: %s\n", host)
 	fmt.Printf("Repo:   %s\n\n", repoName)
 
 	fmt.Println("--- step 1/3: copy age key")
-	if err := SSH(host, "mkdir -p ~/.config/sops/age"); err != nil {
+	if err := remoteSSH(host, "mkdir -p ~/.config/sops/age"); err != nil {
 		return fmt.Errorf("creating age dir on remote: %w", err)
 	}
 	if err := CopyFile(AgeKeyPath(), host, "~/.config/sops/age/keys.txt"); err != nil {
@@ -123,20 +131,18 @@ func Provision(host, ghToken string) error {
 	}
 
 	fmt.Println("\n--- step 2/3: clone repo")
-	cleanURL, _ := CloneURL("") // URL without embedded token (for fixing remote after clone)
-	cloneCmd := fmt.Sprintf("git clone %s ~/%s 2>/dev/null || (cd ~/%s && git pull)", cloneURL, repoName, repoName)
-	if err := SSH(host, cloneCmd); err != nil {
-		return fmt.Errorf("cloning repo: %w\nManual: ssh %s 'git clone https://oauth2:<token>@github.com/... ~/%s'", err, host, repoName)
+	cleanURL, err := CloneURL("")
+	if err != nil {
+		return err
 	}
-	// Strip token from saved remote URL so it doesn't persist in .git/config
-	if cleanURL != "" {
-		fixRemote := fmt.Sprintf("cd ~/%s && git remote set-url origin %s", repoName, cleanURL)
-		_ = SSH(host, fixRemote) // best-effort
+	cloneCmd := remoteCloneCmd(repoName, cleanURL, ghToken)
+	if err := remoteSSH(host, cloneCmd); err != nil {
+		return fmt.Errorf("cloning repo: %w\nManual: ssh %s 'cd ~ && git clone %s ~/%s'", err, host, cleanURL, repoName)
 	}
 
 	fmt.Println("\n--- step 3/3: clem provision")
 	provisionCmd := fmt.Sprintf("cd ~/%s && clem provision", repoName)
-	if err := SSH(host, provisionCmd); err != nil {
+	if err := remoteSSH(host, provisionCmd); err != nil {
 		return fmt.Errorf("remote provision: %w\nManual: ssh %s 'cd ~/%s && clem provision'", err, host, repoName)
 	}
 

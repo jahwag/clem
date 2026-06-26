@@ -148,11 +148,11 @@ func Delete(vaultName, key string) error {
 
 	var unsetExpr string
 	if key == "" {
-		unsetExpr = fmt.Sprintf(`["vaults"]["%s"]`, strings.ReplaceAll(vaultName, `"`, `\"`))
+		unsetExpr = fmt.Sprintf(`["vaults"]["%s"]`, jqEscape(vaultName))
 	} else {
 		unsetExpr = fmt.Sprintf(`["vaults"]["%s"]["%s"]`,
-			strings.ReplaceAll(vaultName, `"`, `\"`),
-			strings.ReplaceAll(key, `"`, `\"`),
+			jqEscape(vaultName),
+			jqEscape(key),
 		)
 	}
 

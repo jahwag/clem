@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2455,5 +2456,39 @@ func TestLoad_RevealSecretsAccepted(t *testing.T) {
 	}
 	if len(cfg.Agents["lead"].RevealSecrets) != 2 {
 		t.Errorf("reveal_secrets = %v, want 2 entries", cfg.Agents["lead"].RevealSecrets)
+	}
+}
+
+func TestLoad_BrokeredSecretWithZeroServicesWarns(t *testing.T) {
+	raw := `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+operator:
+  discord_ids: ["277434478803156993"]
+vault:
+  backend: agent-vault
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+    vaults: [anthropic]
+    vault_broker: true
+    brokered_secrets: [GH_TOKEN]
+`
+	r, w, _ := os.Pipe()
+	old := os.Stderr
+	os.Stderr = w
+	_, err := Load(writeYAML(t, raw))
+	w.Close()
+	os.Stderr = old
+	out, _ := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("zero-services brokered config must load without error, got: %v", err)
+	}
+	if !strings.Contains(string(out), "GH_TOKEN") || !strings.Contains(string(out), "placeholder") {
+		t.Errorf("expected placeholder warning for GH_TOKEN, got stderr: %q", string(out))
 	}
 }
