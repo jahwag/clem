@@ -1047,6 +1047,44 @@ func HasRefreshToken(homeDir string) bool {
 	return ok && creds.ClaudeAiOauth.RefreshToken != ""
 }
 
+// AuthMode reports the non-interactive credential an agent is configured with,
+// read from <homeDir>/.env (written by provision). Returns "api-key" when
+// ANTHROPIC_API_KEY is set, "env-token" when CLAUDE_CODE_OAUTH_TOKEN is set, or
+// "" when neither is present — in which case the agent relies on the
+// interactive ~/.claude/.credentials.json login, reported via TokenExpiry.
+// When both are set this reports "api-key"; it's a status hint, not a claim
+// about which credential Claude Code picks at runtime. A brokered key appears
+// in .env as a placeholder (the real secret stays in agent-vault); that still
+// counts as api-key, since the agent authenticates with a key either way.
+func AuthMode(homeDir string) string {
+	env, err := os.ReadFile(filepath.Join(homeDir, ".env"))
+	if err != nil {
+		return ""
+	}
+	if envHasValue(env, "ANTHROPIC_API_KEY") {
+		return "api-key"
+	}
+	if envHasValue(env, "CLAUDE_CODE_OAUTH_TOKEN") {
+		return "env-token"
+	}
+	return ""
+}
+
+// envHasValue reports whether env exports key with a non-empty value, matching
+// the `export KEY='value'` form WriteEnvFile writes. Commented lines and
+// empty values do not count.
+func envHasValue(env []byte, key string) bool {
+	prefix := "export " + key + "="
+	for _, raw := range strings.Split(string(env), "\n") {
+		line := strings.TrimSpace(raw)
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		return strings.Trim(strings.TrimPrefix(line, prefix), "'\"") != ""
+	}
+	return false
+}
+
 // NeedsLogin returns true only when manual `claude /login` is actually
 // required: the credentials file is missing, unreadable, or carries no
 // refresh token. Access-token expiry is intentionally NOT checked — those

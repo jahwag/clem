@@ -58,6 +58,12 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		expiry := agent.TokenExpiry(homeDir)
 		hasRefresh := agent.HasRefreshToken(homeDir)
 		expiryStr := tokenExpiryDisplay(expiry, hasRefresh)
+		// A non-interactive credential (API key or setup-token) means there is
+		// no interactive .credentials.json to read, so report the auth mode
+		// instead of a misleading "missing".
+		if mode := agent.AuthMode(homeDir); mode != "" {
+			expiryStr = mode
+		}
 
 		logPath := fmt.Sprintf("/home/%s/.claude/%s-runner.log", osUser, agentKey)
 		lastLog := agent.LastLogLine(logPath)

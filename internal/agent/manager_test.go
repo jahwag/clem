@@ -1940,3 +1940,57 @@ func TestWriteWranglerConfig_SkipsWhenSecretsAbsent(t *testing.T) {
 		t.Error("config file should not be written when secrets absent")
 	}
 }
+
+func TestEnvHasValue(t *testing.T) {
+	// ESCAPED mirrors the WriteEnvFile escaping for a value with an embedded
+	// single quote (a'b -> 'a'\''b'): the value must still read as non-empty.
+	env := []byte("export FOO='bar'\nexport EMPTY=''\nexport ESCAPED='a'\\''b'\nexport CLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-abc'\n# export COMMENTED='x'\n")
+	cases := []struct {
+		key  string
+		want bool
+	}{
+		{"FOO", true},
+		{"ESCAPED", true}, // embedded-quote escaping still non-empty
+		{"CLAUDE_CODE_OAUTH_TOKEN", true},
+		{"EMPTY", false},     // exported but empty
+		{"MISSING", false},   // not present
+		{"COMMENTED", false}, // commented out, not a real export
+	}
+	for _, c := range cases {
+		if got := envHasValue(env, c.key); got != c.want {
+			t.Errorf("envHasValue(%q) = %v, want %v", c.key, got, c.want)
+		}
+	}
+}
+
+func TestAuthMode(t *testing.T) {
+	cases := []struct {
+		name    string
+		envBody string
+		want    string
+	}{
+		{"env-token", "export CLAUDE_CODE_OAUTH_TOKEN='sk-ant-oat01-x'\n", "env-token"},
+		{"api-key", "export ANTHROPIC_API_KEY='sk-ant-api03-x'\n", "api-key"},
+		{"api-key reported when both set", "export ANTHROPIC_API_KEY='k'\nexport CLAUDE_CODE_OAUTH_TOKEN='t'\n", "api-key"},
+		{"brokered placeholder still api-key", "export ANTHROPIC_API_KEY='__anthropic_api_key__'\n", "api-key"},
+		{"neither — interactive login", "export DISCORD_TOKEN='x'\n", ""},
+		{"empty token ignored", "export CLAUDE_CODE_OAUTH_TOKEN=''\n", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home := t.TempDir()
+			if err := os.WriteFile(filepath.Join(home, ".env"), []byte(c.envBody), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if got := AuthMode(home); got != c.want {
+				t.Errorf("AuthMode = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestAuthMode_NoEnvFile(t *testing.T) {
+	if got := AuthMode(t.TempDir()); got != "" {
+		t.Errorf("AuthMode with no .env = %q, want empty", got)
+	}
+}

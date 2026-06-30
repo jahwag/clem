@@ -146,12 +146,17 @@ while true; do
     {{.SkillsSyncCmd}}
 
     # Surface a near-expired OAuth token to the agent itself: a dead token
-    # mid-session shows up as opaque 401/407 API errors otherwise.
-    EXP_MS=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.claude/.credentials.json'))).get('claudeAiOauth',{}).get('expiresAt',0))" 2>/dev/null || echo 0)
-    NOW_MS=$(( $(date +%s) * 1000 ))
-    if [ "$EXP_MS" -gt 0 ] 2>/dev/null && [ "$EXP_MS" -lt $(( NOW_MS + 3600000 )) ]; then
-        log "WARNING: OAuth token expires within 1h (or already expired)"
-        RUNNER_WARNINGS="${RUNNER_WARNINGS}[runner] Your OAuth token expires within 1h or is already expired; if you hit 401/407 API errors, escalate to the alerts channel. "
+    # mid-session shows up as opaque 401/407 API errors otherwise. Skipped when
+    # a non-interactive credential (API key or setup-token) is configured —
+    # there is no interactive .credentials.json to expire, so the check would
+    # inject a false warning into every prompt.
+    if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+        EXP_MS=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.claude/.credentials.json'))).get('claudeAiOauth',{}).get('expiresAt',0))" 2>/dev/null || echo 0)
+        NOW_MS=$(( $(date +%s) * 1000 ))
+        if [ "$EXP_MS" -gt 0 ] 2>/dev/null && [ "$EXP_MS" -lt $(( NOW_MS + 3600000 )) ]; then
+            log "WARNING: OAuth token expires within 1h (or already expired)"
+            RUNNER_WARNINGS="${RUNNER_WARNINGS}[runner] Your OAuth token expires within 1h or is already expired; if you hit 401/407 API errors, escalate to the alerts channel. "
+        fi
     fi
 
     # Per-agent quota snapshot (TTL 25m). Agents read this file instead of

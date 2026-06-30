@@ -50,6 +50,22 @@ func TestGenerate_CavemanInjectsLevel(t *testing.T) {
 	}
 }
 
+func TestGenerate_GatesExpiryWarningOnNonInteractiveCreds(t *testing.T) {
+	cfg := baseCfg("lead", config.AgentConfig{
+		Name:      "Lead",
+		Model:     "claude-opus-4-7",
+		Iteration: "1m",
+		Prompt:    "do the thing",
+	})
+	out := Generate(cfg, "lead")
+	// When ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN is set, the runner must
+	// not inject the ".credentials.json expires soon" warning (false alarm).
+	want := `if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then`
+	if !strings.Contains(out, want) {
+		t.Errorf("expected expiry-warning guard %q in runner, got:\n%s", want, out)
+	}
+}
+
 func TestGenerate_CavemanOffNoInjection(t *testing.T) {
 	cfg := baseCfg("lead", config.AgentConfig{
 		Name:      "Lead",
