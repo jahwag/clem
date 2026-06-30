@@ -206,7 +206,13 @@ while true; do
     (sleep 1 && tmux send-keys -t {{.AgentKey}} "" Enter
      sleep 25 && tmux send-keys -l -t {{.AgentKey}} "$PROMPT"
      sleep 2 && tmux send-keys -t {{.AgentKey}} Enter) &
-    timeout 7200 $CLAUDE --dangerously-skip-permissions \
+    # DISABLE_AUTOUPDATER is scoped to the interactive session only: Claude
+    # Code's in-session updater can't reach downloads.claude.ai through the
+    # brokered https:// proxy (curl can, its bun fetch closes the socket), so it
+    # shows a persistent "Auto-update failed" banner. Updates still happen via
+    # the explicit "claude install" above, which runs without this and is
+    # unaffected.
+    DISABLE_AUTOUPDATER=1 timeout 7200 $CLAUDE --dangerously-skip-permissions \
         --model '{{.Model}}' \
         --name '{{.AgentName}}' \
         --add-dir ~/.claude

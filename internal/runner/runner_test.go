@@ -66,6 +66,25 @@ func TestGenerate_GatesExpiryWarningOnNonInteractiveCreds(t *testing.T) {
 	}
 }
 
+func TestGenerate_DisablesAutoUpdaterForSessionOnly(t *testing.T) {
+	cfg := baseCfg("lead", config.AgentConfig{
+		Name:      "Lead",
+		Model:     "claude-opus-4-7",
+		Iteration: "1m",
+		Prompt:    "do the thing",
+	})
+	out := Generate(cfg, "lead")
+	// The interactive TUI launch disables the in-session auto-updater (its
+	// banner can't be cleared on a brokered-proxy host).
+	if !strings.Contains(out, "DISABLE_AUTOUPDATER=1 timeout 7200 $CLAUDE") {
+		t.Errorf("expected DISABLE_AUTOUPDATER on the claude launch, got:\n%s", out)
+	}
+	// ...but the explicit `claude install` must stay enabled so updates happen.
+	if strings.Contains(out, `DISABLE_AUTOUPDATER=1 "$CLAUDE" install`) {
+		t.Error("claude install must not be neutered by DISABLE_AUTOUPDATER")
+	}
+}
+
 func TestGenerate_CavemanOffNoInjection(t *testing.T) {
 	cfg := baseCfg("lead", config.AgentConfig{
 		Name:      "Lead",
