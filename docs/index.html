@@ -697,6 +697,10 @@ agents:
            <p>Any Linux host with <code>systemd</code>: a spare laptop, a Pi, a home server, a small VPS. A Claude Code login or API key per agent, and a Discord or Slack space for coordination. That is it.</p>
          </div>
          <div class="qa">
+           <h3>How do agents authenticate?</h3>
+           <p>Each agent authenticates independently &mdash; an Anthropic API key, a Claude Code login, or a local or third-party model through Ollama. For automated, always-on, or multi-agent use an API key is the route Anthropic's terms designate; a personal interactive login suits a single agent you watch. clem stays out of it &mdash; it runs the official CLI with whatever credential you provide. Check Anthropic's <a href="https://www.anthropic.com/legal/aup" rel="noopener">Usage Policy</a> for your setup; the README covers the per-method details.</p>
+         </div>
+         <div class="qa">
            <h3>What can a compromised agent reach?</h3>
            <p>Its own home directory and whatever you allow-listed, by design. Egress is pinned by a kernel rule it cannot rewrite, and brokered secrets stay with a separate user it cannot read. The <a href="https://github.com/jahwag/clem/blob/main/docs/threat-model.md">threat model</a> lists the guarantees and the non-goals.</p>
          </div>
