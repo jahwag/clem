@@ -690,7 +690,7 @@ agents:
          </div>
          <div class="qa">
            <h3>Is this allowed by Anthropic's terms?</h3>
-           <p>clem runs the unmodified official Claude Code CLI (or whatever model runtime you choose) under your own account, on hardware you own &mdash; the same binary you run by hand. clem makes no compliance claims and takes no position on your provider or plan. Choosing a credential that fits your usage &mdash; an API key, a local model, or a subscription where its terms allow &mdash; is your call, especially for automated, always-on, or multi-agent setups. Read Anthropic's <a href="https://www.anthropic.com/legal/aup" rel="noopener">Usage Policy</a> and <a href="https://www.anthropic.com/legal/consumer-terms" rel="noopener">terms</a> and decide for your setup.</p>
+           <p>clem runs the unmodified official Claude Code CLI (or whatever model runtime you choose) under your own account, on hardware you own &mdash; the same binary you run by hand, and Anthropic itself documents headless and CI use of Claude Code. clem makes no compliance claims and takes no position on your provider or plan. Choosing a credential that fits your usage &mdash; an API key, a local model, or a subscription where its terms allow &mdash; is your call, especially for automated, always-on, or multi-agent setups. Read Anthropic's <a href="https://www.anthropic.com/legal/aup" rel="noopener">Usage Policy</a> and <a href="https://www.anthropic.com/legal/consumer-terms" rel="noopener">terms</a> and decide for your setup.</p>
          </div>
          <div class="qa">
            <h3>What do I need to run a fleet?</h3>
@@ -698,7 +698,7 @@ agents:
          </div>
          <div class="qa">
            <h3>How do agents authenticate?</h3>
-           <p>Each agent authenticates independently &mdash; an Anthropic API key, a Claude Code login, or a local or third-party model through Ollama. For automated, always-on, or multi-agent use an API key is the route Anthropic's terms designate; a personal interactive login suits a single agent you watch. clem stays out of it &mdash; it runs the official CLI with whatever credential you provide. Check Anthropic's <a href="https://www.anthropic.com/legal/aup" rel="noopener">Usage Policy</a> for your setup; the README covers the per-method details.</p>
+           <p>Each agent authenticates independently &mdash; an Anthropic API key, a Claude Code login, or a local or third-party model through Ollama. For automated, always-on, or multi-agent use an API key is the natural fit &mdash; Anthropic's terms allow automated access only through the API; a personal interactive login suits a single agent you watch. clem stays out of it &mdash; it runs the official CLI with whatever credential you provide. Check Anthropic's <a href="https://www.anthropic.com/legal/aup" rel="noopener">Usage Policy</a> for your setup; the README covers the per-method details.</p>
          </div>
          <div class="qa">
            <h3>What can a compromised agent reach?</h3>
@@ -714,7 +714,7 @@ agents:
          </div>
          <div class="qa">
            <h3>Won't agents running 24/7 burn a fortune in tokens?</h3>
-           <p>You set the ceiling. "Always on" is not "always calling": each agent sleeps a duration you choose between iterations, and clem stretches it overnight. Run a local model through Ollama for zero inference spend, or pick a cheaper model per agent and meter it with an API key &mdash; usage stays visible and bounded, billed to whatever credential you supply. Nothing runs that you did not schedule.</p>
+           <p>You set the ceiling. "Always on" is not "always calling": each agent sleeps a duration you choose between iterations, and clem stretches it overnight. Run a local model through Ollama for zero inference cost, or pick a cheaper model per agent and meter it with an API key &mdash; usage stays visible and bounded, billed to whatever credential you supply. Nothing runs that you did not schedule.</p>
          </div>
          <div class="qa">
            <h3>Don't I still have to review everything they produce?</h3>
