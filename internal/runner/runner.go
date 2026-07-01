@@ -203,9 +203,14 @@ while true; do
     [ -n "$RUNNER_WARNINGS" ] && PROMPT="${RUNNER_WARNINGS}${PROMPT}"
 
     log "Starting {{.AgentName}} (fresh session)"
+    # Claude Code debounces large multi-line pastes: a single Enter sent right
+    # after the prompt is swallowed as a soft newline, leaving the prompt typed
+    # but never submitted (the agent looks "stuck" with its prompt in the box).
+    # Retry the Enter a few times over a wider settle window — once the prompt
+    # submits the input box is empty and any further Enter is a harmless no-op.
     (sleep 1 && tmux send-keys -t {{.AgentKey}} "" Enter
      sleep 25 && tmux send-keys -l -t {{.AgentKey}} "$PROMPT"
-     sleep 2 && tmux send-keys -t {{.AgentKey}} Enter) &
+     for _ in 1 2 3 4 5; do sleep 3; tmux send-keys -t {{.AgentKey}} Enter; done) &
     # DISABLE_AUTOUPDATER is scoped to the interactive session only: Claude
     # Code's in-session updater can't reach downloads.claude.ai through the
     # brokered https:// proxy (curl can, its bun fetch closes the socket), so it
@@ -482,9 +487,14 @@ while true; do
     [ -n "$RUNNER_WARNINGS" ] && PROMPT="${RUNNER_WARNINGS}${PROMPT}"
 
     log "Starting {{.AgentName}} (fresh session)"
+    # Claude Code debounces large multi-line pastes: a single Enter sent right
+    # after the prompt is swallowed as a soft newline, leaving the prompt typed
+    # but never submitted (the agent looks "stuck" with its prompt in the box).
+    # Retry the Enter a few times over a wider settle window — once the prompt
+    # submits the input box is empty and any further Enter is a harmless no-op.
     (sleep 1 && tmux send-keys -t {{.AgentKey}} "" Enter
      sleep 25 && tmux send-keys -l -t {{.AgentKey}} "$PROMPT"
-     sleep 2 && tmux send-keys -t {{.AgentKey}} Enter) &
+     for _ in 1 2 3 4 5; do sleep 3; tmux send-keys -t {{.AgentKey}} Enter; done) &
     MODEL_ARG=""
     [ -n '{{.Model}}' ] && MODEL_ARG="--model {{.Model}}"
     timeout 7200 "$CODEX" --dangerously-bypass-approvals-and-sandbox \
