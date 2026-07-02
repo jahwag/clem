@@ -85,6 +85,21 @@ func TestGenerate_DisablesAutoUpdaterForSessionOnly(t *testing.T) {
 	}
 }
 
+func TestGenerate_SkipsClaudeInstallOnProxyHosts(t *testing.T) {
+	cfg := baseCfg("lead", config.AgentConfig{
+		Name:      "Lead",
+		Model:     "claude-opus-4-7",
+		Iteration: "1m",
+		Prompt:    "do the thing",
+	})
+	out := Generate(cfg, "lead")
+	// claude install (bun fetch) can't traverse the pipelock proxy — it fails
+	// "Socket is closed" every iteration. Skip it when HTTPS_PROXY is set.
+	if !strings.Contains(out, `if [ -n "$HTTPS_PROXY" ]; then`) {
+		t.Errorf("expected claude install gated on HTTPS_PROXY, got:\n%s", out)
+	}
+}
+
 func TestGenerate_CavemanOffNoInjection(t *testing.T) {
 	cfg := baseCfg("lead", config.AgentConfig{
 		Name:      "Lead",
@@ -472,7 +487,7 @@ func TestGenerate_NoProxyExportWhenEgressDisabled(t *testing.T) {
 	})
 
 	out := Generate(cfg, "worker")
-	if strings.Contains(out, "HTTPS_PROXY") {
+	if strings.Contains(out, "export HTTPS_PROXY") {
 		t.Errorf("expected no HTTPS_PROXY export when egress disabled, got:\n%s", out)
 	}
 }

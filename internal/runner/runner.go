@@ -140,8 +140,15 @@ while true; do
         fi
     fi
 
-    log "Updating claude"
-    "$CLAUDE" install 2>&1 | tail -5 | tee -a "$LOGFILE" || log "claude install failed, continuing with current version"
+    # claude install (bun fetch) can't traverse the pipelock proxy — it fails
+    # "Socket is closed" every iteration on egress-contained hosts. Skip it
+    # there; updates for contained agents happen at (re)provision time.
+    if [ -n "$HTTPS_PROXY" ]; then
+        log "Skipping claude update (egress proxy host)"
+    else
+        log "Updating claude"
+        "$CLAUDE" install 2>&1 | tail -5 | tee -a "$LOGFILE" || log "claude install failed, continuing with current version"
+    fi
 
     {{.SkillsSyncCmd}}
 
@@ -214,9 +221,9 @@ while true; do
     # DISABLE_AUTOUPDATER is scoped to the interactive session only: Claude
     # Code's in-session updater can't reach downloads.claude.ai through the
     # brokered https:// proxy (curl can, its bun fetch closes the socket), so it
-    # shows a persistent "Auto-update failed" banner. Updates still happen via
-    # the explicit "claude install" above, which runs without this and is
-    # unaffected.
+    # shows a persistent "Auto-update failed" banner. On non-proxy hosts updates
+    # still happen via the explicit "claude install" above; proxy hosts skip it
+    # (same bun fetch limitation) and update at provision time.
     DISABLE_AUTOUPDATER=1 timeout 7200 $CLAUDE --dangerously-skip-permissions \
         --model '{{.Model}}' \
         --name '{{.AgentName}}' \
