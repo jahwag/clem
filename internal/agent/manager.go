@@ -1294,16 +1294,22 @@ func InstallClaude(username string) error {
 	return nil
 }
 
-// InstallHeadroom installs the Headroom context-compression proxy (pipx
+// InstallHeadroom installs the Headroom context-compression proxy (PyPI
 // package headroom-ai) as the given user, landing at ~/.local/bin/headroom.
-// Idempotent: install if absent, upgrade if present. Requires pipx on the
-// host. The runner falls back to a direct claude launch when the binary is
-// missing, so callers may treat a failure here as a warning rather than
-// aborting the provision.
+// Idempotent: install if absent, upgrade if present. Portable across hosts:
+// prefers pipx when available, otherwise falls back to a pip --user install
+// (adding --break-system-packages on PEP 668 externally-managed environments
+// like Ubuntu 24.04). The runner falls back to a direct claude launch when the
+// binary is missing, so callers may treat a failure here as a warning rather
+// than aborting the provision.
 func InstallHeadroom(username string) error {
 	cmd := exec.Command("sudo", "-iu", username, "bash", "-c",
-		"command -v pipx >/dev/null || { echo 'pipx not found on host' >&2; exit 1; }; "+
-			"pipx install headroom-ai 2>/dev/null || pipx upgrade headroom-ai")
+		"if command -v pipx >/dev/null; then "+
+			"pipx install headroom-ai 2>/dev/null || pipx upgrade headroom-ai; "+
+			"else "+
+			"python3 -m pip install --user --upgrade headroom-ai 2>/dev/null || "+
+			"python3 -m pip install --user --upgrade --break-system-packages headroom-ai; "+
+			"fi")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("installing headroom for %s: %w\n%s", username, err, out)
