@@ -1296,19 +1296,28 @@ func InstallClaude(username string) error {
 
 // InstallHeadroom installs the Headroom context-compression proxy (PyPI
 // package headroom-ai) as the given user, landing at ~/.local/bin/headroom.
-// Idempotent: install if absent, upgrade if present. Portable across hosts:
-// prefers pipx when available, otherwise falls back to a pip --user install
-// (adding --break-system-packages on PEP 668 externally-managed environments
-// like Ubuntu 24.04). The runner falls back to a direct claude launch when the
-// binary is missing, so callers may treat a failure here as a warning rather
-// than aborting the provision.
+// The [proxy] extra is required: `headroom wrap` starts a FastAPI-based proxy
+// and dies at startup ("Proxy dependencies not installed" / "No module named
+// 'fastapi'") if the extra is absent, so we always install "headroom-ai[proxy]".
+// Portable across hosts: prefers pipx when available, otherwise falls back to a
+// pip --user install (adding --break-system-packages on PEP 668
+// externally-managed environments like Ubuntu 24.04).
+//
+// The pipx path uses `install --force` unconditionally: a plain `pipx install`
+// refuses to touch an existing venv and `pipx upgrade` never adds missing
+// extras, so a host that already has the bare package would stay broken. The
+// forced reinstall is idempotent and costs only a few seconds per provision.
+//
+// The runner falls back to a direct claude launch when the binary is missing,
+// so callers may treat a failure here as a warning rather than aborting the
+// provision.
 func InstallHeadroom(username string) error {
 	cmd := exec.Command("sudo", "-iu", username, "bash", "-c",
 		"if command -v pipx >/dev/null; then "+
-			"pipx install headroom-ai 2>/dev/null || pipx upgrade headroom-ai; "+
+			"pipx install --force \"headroom-ai[proxy]\"; "+
 			"else "+
-			"python3 -m pip install --user --upgrade headroom-ai 2>/dev/null || "+
-			"python3 -m pip install --user --upgrade --break-system-packages headroom-ai; "+
+			"python3 -m pip install --user --upgrade \"headroom-ai[proxy]\" 2>/dev/null || "+
+			"python3 -m pip install --user --upgrade --break-system-packages \"headroom-ai[proxy]\"; "+
 			"fi")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
