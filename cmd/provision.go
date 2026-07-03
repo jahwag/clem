@@ -21,8 +21,9 @@ import (
 )
 
 var (
-	provisionRemote  string
-	provisionGHToken string
+	provisionRemote      string
+	provisionGHToken     string
+	provisionRotateCreds bool
 )
 
 var provisionCmd = &cobra.Command{
@@ -35,6 +36,7 @@ func init() {
 	rootCmd.AddCommand(provisionCmd)
 	provisionCmd.Flags().StringVar(&provisionRemote, "remote", "", "provision on a remote host via SSH (e.g. root@1.2.3.4)")
 	provisionCmd.Flags().StringVar(&provisionGHToken, "gh-token", "", "GitHub token for cloning the repo on the remote (falls back to GH_TOKEN env)")
+	provisionCmd.Flags().BoolVar(&provisionRotateCreds, "rotate-credentials", false, "force-rotate brokered agent-vault tokens even if the current ones still work (restarts running brokered agents)")
 }
 
 // decryptForAgent is the vault decryption entry point used by provisioning.
@@ -123,7 +125,7 @@ func provisionAgent(agentKey string, ac config.AgentConfig) error {
 	}
 
 	// 2. Decrypt and write .env (merged with provider env vars)
-	secrets, ghToken, err := writeAgentEnv(agentKey, ac, osUser, homeDir)
+	secrets, ghToken, envChanged, err := writeAgentEnv(agentKey, ac, osUser, homeDir)
 	if err != nil {
 		return err
 	}
@@ -265,36 +267,43 @@ func provisionAgent(agentKey string, ac config.AgentConfig) error {
 		fmt.Printf("  installed %s (port %d)\n", ttydSvcName, ac.WebTerminalPort)
 	}
 
-	// 7. Brokered agents: EnsureAgentIdentity rotated the agent-vault proxy
-	// token and invalidated the old one, but a running agent keeps the stale
-	// credential in its frozen process env and 407s on every API call until
-	// restarted. try-restart picks up the new .env for running agents only —
-	// an operator-stopped agent stays stopped.
-	if ac.VaultBroker && secrets != nil {
+	// 7. A running agent keeps its process env frozen from the .env it was
+	// started with: a rotated broker token 407s on every API call, and new or
+	// changed secrets never arrive. When provision changed .env, try-restart
+	// running services so they pick it up — try-restart is a no-op for
+	// operator-stopped units, so those stay stopped. Unchanged .env (the
+	// common re-provision) restarts nothing.
+	if envChanged {
 		restart := []string{cfg.ServiceName(agentKey)}
 		if ac.WebTerminalPort > 0 {
 			restart = append(restart, cfg.TtydServiceName(agentKey))
 		}
 		for _, svc := range restart {
 			if err := agent.TryRestartService(svc); err != nil {
-				return fmt.Errorf("restarting %s after credential rotation: %w", svc, err)
+				// .env on disk is already correct; a manual restart recovers.
+				fmt.Printf("  warning: restarting %s after .env change: %v\n", svc, err)
+				continue
 			}
+			fmt.Printf("  restarted %s if running (.env changed)\n", svc)
 		}
-		fmt.Printf("  restarted running services for %s (brokered credential rotated)\n", agentKey)
 	}
 	return nil
 }
 
 // writeAgentEnv decrypts the agent's vaults and writes /home/<user>/.env —
-// plain values, or placeholders plus a freshly-minted inject-only token when
-// the agent is brokered. Returns the qualified secrets map (for extensions'
-// vault refs) and the agent's GH_TOKEN (for signing-key registration). A
-// decrypt failure is a warning, not an error: provider-only env still lets an
-// agent run without a vault.
-func writeAgentEnv(agentKey string, ac config.AgentConfig, osUser, homeDir string) (map[string]string, string, error) {
+// plain values, or placeholders plus an inject-only agent-vault token when
+// the agent is brokered. The existing token is reused when it still
+// authenticates (verified through the proxy), so a no-op re-provision leaves
+// .env byte-identical; rotation happens only when the token is missing, dead,
+// or --rotate-credentials is set. Returns the qualified secrets map (for
+// extensions' vault refs), the agent's GH_TOKEN (for signing-key
+// registration), and whether .env content changed (caller restarts running
+// services only then). A decrypt failure is a warning, not an error:
+// provider-only env still lets an agent run without a vault.
+func writeAgentEnv(agentKey string, ac config.AgentConfig, osUser, homeDir string) (map[string]string, string, bool, error) {
 	providerEnv, pErr := ac.ProviderEnv()
 	if pErr != nil {
-		return nil, "", fmt.Errorf("agent %s: %w", agentKey, pErr)
+		return nil, "", false, fmt.Errorf("agent %s: %w", agentKey, pErr)
 	}
 	if ac.Provider != "" && ac.Provider != "anthropic" {
 		fmt.Printf("  provider: %s\n", ac.Provider)
@@ -305,14 +314,15 @@ func writeAgentEnv(agentKey string, ac config.AgentConfig, osUser, homeDir strin
 		fmt.Printf("  warning: could not decrypt secrets for %s: %v\n", agentKey, err)
 		if len(providerEnv) > 0 {
 			// still write provider env so agents can run without vault
-			if err := agent.WriteEnvFile(osUser, homeDir, providerEnv); err != nil {
-				return nil, "", fmt.Errorf("writing .env for %s: %w", agentKey, err)
+			changed, err := agent.WriteEnvFile(osUser, homeDir, providerEnv)
+			if err != nil {
+				return nil, "", false, fmt.Errorf("writing .env for %s: %w", agentKey, err)
 			}
 			fmt.Printf("  wrote %s/.env (provider only, no vault)\n", homeDir)
-		} else {
-			fmt.Println("  skipping .env — run clem vault init and set secrets first")
+			return nil, "", changed, nil
 		}
-		return nil, "", nil
+		fmt.Println("  skipping .env — run clem vault init and set secrets first")
+		return nil, "", false, nil
 	}
 
 	flatSecrets := vault.FlatSecrets(secrets)
@@ -322,7 +332,7 @@ func writeAgentEnv(agentKey string, ac config.AgentConfig, osUser, homeDir strin
 			msg := fmt.Sprintf("agent %s: %d granted key(s) neither brokered nor revealed: %s\n  (add to brokered_secrets, reveal_secrets, or set vault.exposure_policy: off)",
 				agentKey, len(violations), strings.Join(violations, ", "))
 			if policy == "strict" {
-				return nil, "", fmt.Errorf("%s", msg)
+				return nil, "", false, fmt.Errorf("%s", msg)
 			}
 			fmt.Fprintf(os.Stderr, "  warning: %s\n", msg)
 		}
@@ -339,17 +349,26 @@ func writeAgentEnv(agentKey string, ac config.AgentConfig, osUser, homeDir strin
 		addr := cfg.Vault.AddrOrDefault()
 		consolidated, brokeredKV, svcs, bErr := brokeredSeedInputs(osUser, ac, cfg.Vault.Services, flatSecrets)
 		if bErr != nil {
-			return nil, "", fmt.Errorf("agent %s: %w", agentKey, bErr)
+			return nil, "", false, fmt.Errorf("agent %s: %w", agentKey, bErr)
 		}
 		if err := vault.SeedVault(addr, consolidated, brokeredKV); err != nil {
-			return nil, "", fmt.Errorf("agent %s: seeding consolidated vault: %w", agentKey, err)
+			return nil, "", false, fmt.Errorf("agent %s: seeding consolidated vault: %w", agentKey, err)
 		}
 		if err := vault.ApplyServices(addr, consolidated, svcs); err != nil {
-			return nil, "", fmt.Errorf("agent %s: applying service rules: %w", agentKey, err)
+			return nil, "", false, fmt.Errorf("agent %s: applying service rules: %w", agentKey, err)
 		}
-		token, terr := vault.EnsureAgentIdentity(addr, osUser, []string{consolidated})
-		if terr != nil {
-			return nil, "", fmt.Errorf("agent %s: minting agent-vault token: %w", agentKey, terr)
+		// Reuse the agent's current token when it still authenticates: rotation
+		// invalidates the old token, which forces a restart of the running
+		// agent. Rotate only when the token is missing, dead (self-heals the
+		// stale-credential 407 state), or explicitly requested.
+		token := agent.ReadEnvValue(homeDir, "AGENT_VAULT_TOKEN")
+		if token != "" && !provisionRotateCreds && agent.ProxyTokenValid(cfg.Vault, token, consolidated) {
+			fmt.Printf("  reusing agent-vault token for %s (still valid)\n", osUser)
+		} else {
+			token, err = vault.EnsureAgentIdentity(addr, osUser, []string{consolidated})
+			if err != nil {
+				return nil, "", false, fmt.Errorf("agent %s: minting agent-vault token: %w", agentKey, err)
+			}
 		}
 		merged = agent.BrokeredEnv(cfg.Vault, ac, token, consolidated, flatSecrets)
 		for k, v := range providerEnv {
@@ -366,8 +385,9 @@ func writeAgentEnv(agentKey string, ac config.AgentConfig, osUser, homeDir strin
 		}
 		fmt.Printf("  wrote %s/.env (%d secrets + %d provider)\n", homeDir, len(secrets), len(providerEnv))
 	}
-	if err := agent.WriteEnvFile(osUser, homeDir, merged); err != nil {
-		return nil, "", fmt.Errorf("writing .env for %s: %w", agentKey, err)
+	envChanged, err := agent.WriteEnvFile(osUser, homeDir, merged)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("writing .env for %s: %w", agentKey, err)
 	}
 
 	// If wrangler credentials are present, write the wrangler config file
@@ -381,7 +401,7 @@ func writeAgentEnv(agentKey string, ac config.AgentConfig, osUser, homeDir strin
 	if ghToken != "" && ac.GitEmail == "" {
 		fmt.Printf("  warning: agent %s has GH_TOKEN but no git_email in clem.yaml — commits may leak operator identity\n", agentKey)
 	}
-	return secrets, ghToken, nil
+	return secrets, ghToken, envChanged, nil
 }
 
 // exposureViolations returns the sorted set of keys present in flat that are

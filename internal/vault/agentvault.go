@@ -219,8 +219,11 @@ func SeedVault(addr, vaultName string, kv map[string]string) error {
 // given vaults and returns a freshly-minted token. The agent is created with
 // instance role no-access and vault role proxy ONLY — this is the inject-only
 // guarantee: a proxy-role token can cause the proxy to inject the real secret
-// on an outbound request but can never read the plaintext back. Re-provision
-// rotates the token (old one invalidated), which is the intended idempotency.
+// on an outbound request but can never read the plaintext back. Calling this
+// for an enrolled agent rotates the token and invalidates the old one — a
+// running agent holding it breaks until restarted, so provision only calls
+// this when the agent's current token is missing, dead, or rotation is
+// explicitly requested (--rotate-credentials).
 func EnsureAgentIdentity(addr, agentName string, vaultNames []string) (string, error) {
 	env := avEnv(addr)
 	args := []string{"agent", "create", agentName, "--role", "no-access", "--token-only"}

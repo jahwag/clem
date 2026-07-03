@@ -369,14 +369,57 @@ func BrokeredEnv(av config.VaultBackend, ac config.AgentConfig, token, vaultName
 	return env
 }
 
+// ReadEnvValue extracts a single key's value from <homeDir>/.env as written
+// by WriteEnvFile (export KEY='value', single-quote escaped). Returns "" if
+// the file or key is missing. Used to recover the agent's current agent-vault
+// token so re-provision can reuse it instead of rotating.
+func ReadEnvValue(homeDir, key string) string {
+	data, err := os.ReadFile(filepath.Join(homeDir, ".env"))
+	if err != nil {
+		return ""
+	}
+	prefix := "export " + key + "='"
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, prefix) && strings.HasSuffix(line, "'") && len(line) > len(prefix) {
+			return strings.ReplaceAll(line[len(prefix):len(line)-1], `'\''`, "'")
+		}
+	}
+	return ""
+}
+
+// ProxyTokenValid reports whether an agent-vault proxy token still
+// authenticates, by attempting one request through the broker proxy with it.
+// An invalid/rotated token gets 407 at CONNECT and curl exits non-zero. Any
+// failure (proxy down, timeout) counts as invalid — the caller then rotates,
+// which is the safe pre-existing behavior.
+func ProxyTokenValid(av config.VaultBackend, token, vaultName string) bool {
+	proxyURL := (&url.URL{
+		Scheme: "https",
+		User:   url.UserPassword(token, config.AgentVaultName(vaultName)),
+		Host:   av.ProxyHostOrDefault(),
+	}).String()
+	_, err := sys.Run("curl", "-sS", "-o", "/dev/null", "--max-time", "10",
+		"--proxy", proxyURL, "--proxy-cacert", av.CACertPathOrDefault(),
+		"https://api.anthropic.com/")
+	return err == nil
+}
+
 // WriteEnvFile writes decrypted secrets to <homeDir>/.env with mode 0600.
 // Also writes a global gitignore that blocks .env, .git-credentials, and
-// secrets.sops.yaml from accidental commits.
-func WriteEnvFile(username, homeDir string, secrets map[string]string) error {
+// secrets.sops.yaml from accidental commits. Keys are written sorted so the
+// file is byte-stable across provisions; the returned bool reports whether
+// the content actually changed (callers restart running agents only then).
+func WriteEnvFile(username, homeDir string, secrets map[string]string) (bool, error) {
 	envPath := filepath.Join(homeDir, ".env")
 
+	keys := make([]string, 0, len(secrets))
+	for k := range secrets {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 	var sb strings.Builder
-	for k, v := range secrets {
+	for _, k := range keys {
+		v := secrets[k]
 		// Strip vault-name prefix ("vaultName.keyName" → "keyName") so the
 		// exported name is the bare secret key. Keys without a dot pass through.
 		envKey := k
@@ -389,12 +432,15 @@ func WriteEnvFile(username, homeDir string, secrets map[string]string) error {
 		sb.WriteString(fmt.Sprintf("export %s='%s'\n", envKey, escaped))
 	}
 
+	old, _ := os.ReadFile(envPath)
+	changed := string(old) != sb.String()
+
 	if err := os.WriteFile(envPath, []byte(sb.String()), 0600); err != nil {
-		return fmt.Errorf("writing .env for %s: %w", username, err)
+		return false, fmt.Errorf("writing .env for %s: %w", username, err)
 	}
 
 	if out, err := sys.Run("chown", fmt.Sprintf("%s:%s", username, username), envPath); err != nil {
-		return fmt.Errorf("chown .env for %s: %w\n%s", username, err, out)
+		return false, fmt.Errorf("chown .env for %s: %w\n%s", username, err, out)
 	}
 
 	// Defense: write a global gitignore that blocks secret-bearing files.
@@ -410,10 +456,10 @@ id_rsa
 *.key
 `
 	if err := os.WriteFile(globalIgnore, []byte(ignoreContent), 0644); err != nil {
-		return fmt.Errorf("writing gitignore_global: %w", err)
+		return false, fmt.Errorf("writing gitignore_global: %w", err)
 	}
 	if err := chownToUser(globalIgnore, username); err != nil {
-		return fmt.Errorf("chowning %s: %w", globalIgnore, err)
+		return false, fmt.Errorf("chowning %s: %w", globalIgnore, err)
 	}
 
 	// Write/update ~/.gitconfig directly to avoid sudo subshell quoting issues
@@ -422,14 +468,14 @@ id_rsa
 	if !strings.Contains(string(existing), "excludesfile") {
 		appended := string(existing) + fmt.Sprintf("\n[core]\n\texcludesfile = %s\n", globalIgnore)
 		if err := os.WriteFile(gitConfigPath, []byte(appended), 0644); err != nil {
-			return fmt.Errorf("writing %s: %w", gitConfigPath, err)
+			return false, fmt.Errorf("writing %s: %w", gitConfigPath, err)
 		}
 		if err := chownToUser(gitConfigPath, username); err != nil {
-			return fmt.Errorf("chowning %s: %w", gitConfigPath, err)
+			return false, fmt.Errorf("chowning %s: %w", gitConfigPath, err)
 		}
 	}
 
-	return nil
+	return changed, nil
 }
 
 // chownToUser sets owner/group on path to username:username. Fatal for the
