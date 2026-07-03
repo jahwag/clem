@@ -1294,6 +1294,31 @@ func InstallClaude(username string) error {
 	return nil
 }
 
+// InstallHeadroom installs the Headroom context-compression proxy (pipx
+// package headroom-ai) as the given user, landing at ~/.local/bin/headroom.
+// Idempotent: install if absent, upgrade if present. Requires pipx on the
+// host. The runner falls back to a direct claude launch when the binary is
+// missing, so callers may treat a failure here as a warning rather than
+// aborting the provision.
+func InstallHeadroom(username string) error {
+	cmd := exec.Command("sudo", "-iu", username, "bash", "-c",
+		"command -v pipx >/dev/null || { echo 'pipx not found on host' >&2; exit 1; }; "+
+			"pipx install headroom-ai 2>/dev/null || pipx upgrade headroom-ai")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("installing headroom for %s: %w\n%s", username, err, out)
+	}
+	binPath := fmt.Sprintf("/home/%s/.local/bin/headroom", username)
+	info, err := os.Stat(binPath)
+	if err != nil {
+		return fmt.Errorf("headroom not found at %s after install: %w", binPath, err)
+	}
+	if info.Mode()&0111 == 0 {
+		return fmt.Errorf("headroom at %s is not executable", binPath)
+	}
+	return nil
+}
+
 // InstallCaveman installs the caveman plugin for the agent user. Idempotent.
 // https://github.com/JuliusBrussee/caveman
 func InstallCaveman(username string) error {

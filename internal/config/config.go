@@ -245,6 +245,12 @@ type AgentConfig struct {
 	// Empty = use Claude Code's own default (currently medium). Lowering trims
 	// output tokens — the dominant cost driver in agent loops.
 	Effort string `yaml:"effort"`
+	// Headroom routes the claude-code session through a local Headroom
+	// proxy (pipx package headroom-ai) that compresses context before it
+	// reaches the API (~12% fewer tokens measured), stretching subscription
+	// rate limits. The runner falls back to a direct claude launch when the
+	// binary is missing. claude-code runtime only; ignored for opencode/codex.
+	Headroom bool `yaml:"headroom"`
 	// GitName and GitEmail set the agent's git user identity during provision.
 	// Without these, commits are authored with whatever identity the OAuth login
 	// stored, which may leak the operator's personal email into public history.

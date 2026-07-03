@@ -33,6 +33,42 @@ func baseCfg(agentKey string, ac config.AgentConfig) *config.Config {
 	}
 }
 
+func TestGenerate_HeadroomWrapsClaudeLaunch(t *testing.T) {
+	cfg := baseCfg("lead", config.AgentConfig{
+		Name:      "Lead",
+		Model:     "claude-opus-4-8",
+		Iteration: "1m",
+		Prompt:    "do the thing",
+		Headroom:  true,
+	})
+	out := Generate(cfg, "lead")
+	for _, want := range []string{
+		"headroom wrap claude -p $HEADROOM_PORT --no-context-tool --no-serena",
+		`log "headroom enabled but not installed; launching claude directly"`,
+		"timeout 7200 $LAUNCH --dangerously-skip-permissions",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in runner, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestGenerate_HeadroomOffLaunchesClaudeDirectly(t *testing.T) {
+	cfg := baseCfg("lead", config.AgentConfig{
+		Name:      "Lead",
+		Model:     "claude-opus-4-8",
+		Iteration: "1m",
+		Prompt:    "do the thing",
+	})
+	out := Generate(cfg, "lead")
+	if strings.Contains(out, "headroom") {
+		t.Errorf("headroom disabled but wrap present in runner:\n%s", out)
+	}
+	if !strings.Contains(out, `LAUNCH="$CLAUDE"`) {
+		t.Errorf("expected direct claude launch, got:\n%s", out)
+	}
+}
+
 func TestGenerate_CavemanInjectsLevel(t *testing.T) {
 	for _, level := range []config.CavemanLevel{config.CavemanLite, config.CavemanFull, config.CavemanUltra} {
 		cfg := baseCfg("lead", config.AgentConfig{
@@ -76,7 +112,7 @@ func TestGenerate_DisablesAutoUpdaterForSessionOnly(t *testing.T) {
 	out := Generate(cfg, "lead")
 	// The interactive TUI launch disables the in-session auto-updater (its
 	// banner can't be cleared on a brokered-proxy host).
-	if !strings.Contains(out, "DISABLE_AUTOUPDATER=1 timeout 7200 $CLAUDE") {
+	if !strings.Contains(out, "DISABLE_AUTOUPDATER=1 timeout 7200 $LAUNCH") {
 		t.Errorf("expected DISABLE_AUTOUPDATER on the claude launch, got:\n%s", out)
 	}
 	// ...but the explicit `claude install` must stay enabled so updates happen.

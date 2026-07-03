@@ -124,6 +124,15 @@ func provisionAgent(agentKey string, ac config.AgentConfig) error {
 		return fmt.Errorf("installing %s for %s: %w", runtimeKind, osUser, err)
 	}
 
+	// 1b. Optional headroom context-compression proxy. Non-fatal: the runner
+	// falls back to a direct claude launch when the binary is missing.
+	if ac.Headroom {
+		fmt.Printf("  installing headroom for %s\n", osUser)
+		if err := agent.InstallHeadroom(osUser); err != nil {
+			fmt.Printf("  WARNING: %v (agent will run without headroom)\n", err)
+		}
+	}
+
 	// 2. Decrypt and write .env (merged with provider env vars)
 	secrets, ghToken, envChanged, err := writeAgentEnv(agentKey, ac, osUser, homeDir)
 	if err != nil {

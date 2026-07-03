@@ -224,7 +224,8 @@ while true; do
     # shows a persistent "Auto-update failed" banner. On non-proxy hosts updates
     # still happen via the explicit "claude install" above; proxy hosts skip it
     # (same bun fetch limitation) and update at provision time.
-    DISABLE_AUTOUPDATER=1 timeout 7200 $CLAUDE --dangerously-skip-permissions \
+{{.HeadroomLaunch}}
+    DISABLE_AUTOUPDATER=1 timeout 7200 $LAUNCH --dangerously-skip-permissions \
         --model '{{.Model}}' \
         --name '{{.AgentName}}' \
         --add-dir ~/.claude
@@ -636,6 +637,32 @@ type RunnerParams struct {
 	// the work dir (CLAUDE.local.md for claude-code, AGENTS.md for opencode/codex).
 	// Used by the oversize guard so it checks the file the runtime actually reads.
 	InstructionFile string
+	// HeadroomLaunch is the bash snippet that sets $LAUNCH to either the
+	// plain claude binary or a `headroom wrap claude` invocation when the
+	// agent has headroom: true. claude-code template only.
+	HeadroomLaunch string
+}
+
+// headroomLaunchSnippet returns the bash block that sets $LAUNCH for the
+// claude-code runner. With headroom enabled, the session is wrapped in
+// `headroom wrap claude` — a local context-compression proxy that trims
+// tokens before they reach the API, stretching subscription rate limits.
+// The proxy port is picked fresh each iteration so multiple agents on one
+// host never collide, and a missing binary falls back to a direct launch so
+// a failed install never strands the agent. wrap resolves 'claude' via
+// PATH, hence the export.
+func headroomLaunchSnippet(enabled bool) string {
+	if !enabled {
+		return `    LAUNCH="$CLAUDE"`
+	}
+	return `    if [ -x "$HOME/.local/bin/headroom" ]; then
+        export PATH="$HOME/.local/bin:$PATH"
+        HEADROOM_PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])')
+        LAUNCH="$HOME/.local/bin/headroom wrap claude -p $HEADROOM_PORT --no-context-tool --no-serena"
+    else
+        log "headroom enabled but not installed; launching claude directly"
+        LAUNCH="$CLAUDE"
+    fi`
 }
 
 // bashDoubleQuoteEscaper escapes the four characters that stay live inside a
@@ -736,6 +763,7 @@ func Generate(cfg *config.Config, agentKey string) string {
 		SidecarServers:      sidecarServersLiteral(cfg, agentKey),
 		SkillsSyncCmd:       skillsSyncCmd,
 		InstructionFile:     ac.InstructionFileName(),
+		HeadroomLaunch:      headroomLaunchSnippet(ac.Headroom),
 	}
 	switch ac.RuntimeKind() {
 	case "opencode":
@@ -879,6 +907,7 @@ func renderTemplate(tmpl string, p RunnerParams) string {
 		"{{.AgentName}}", p.AgentName,
 		"{{.Model}}", p.Model,
 		"{{.Prompt}}", p.Prompt,
+		"{{.HeadroomLaunch}}", p.HeadroomLaunch,
 		"{{.OSUser}}", p.OSUser,
 		"{{.HomeDir}}", p.HomeDir,
 		"{{.SleepActive}}", fmt.Sprintf("%d", p.SleepActive),
