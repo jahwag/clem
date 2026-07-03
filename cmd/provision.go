@@ -264,6 +264,24 @@ func provisionAgent(agentKey string, ac config.AgentConfig) error {
 		}
 		fmt.Printf("  installed %s (port %d)\n", ttydSvcName, ac.WebTerminalPort)
 	}
+
+	// 7. Brokered agents: EnsureAgentIdentity rotated the agent-vault proxy
+	// token and invalidated the old one, but a running agent keeps the stale
+	// credential in its frozen process env and 407s on every API call until
+	// restarted. try-restart picks up the new .env for running agents only —
+	// an operator-stopped agent stays stopped.
+	if ac.VaultBroker && secrets != nil {
+		restart := []string{cfg.ServiceName(agentKey)}
+		if ac.WebTerminalPort > 0 {
+			restart = append(restart, cfg.TtydServiceName(agentKey))
+		}
+		for _, svc := range restart {
+			if err := agent.TryRestartService(svc); err != nil {
+				return fmt.Errorf("restarting %s after credential rotation: %w", svc, err)
+			}
+		}
+		fmt.Printf("  restarted running services for %s (brokered credential rotated)\n", agentKey)
+	}
 	return nil
 }
 

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -1992,5 +1993,27 @@ func TestAuthMode(t *testing.T) {
 func TestAuthMode_NoEnvFile(t *testing.T) {
 	if got := AuthMode(t.TempDir()); got != "" {
 		t.Errorf("AuthMode with no .env = %q, want empty", got)
+	}
+}
+
+func TestTryRestartService_UsesTryRestart(t *testing.T) {
+	stub := withStub(t)
+	if err := TryRestartService("clem-cdev-lead.service"); err != nil {
+		t.Fatalf("TryRestartService: %v", err)
+	}
+	if len(stub.calls) != 1 {
+		t.Fatalf("expected one Run call, got %v", stub.calls)
+	}
+	want := []string{"systemctl", "try-restart", "clem-cdev-lead.service"}
+	if !reflect.DeepEqual(stub.calls[0], want) {
+		t.Errorf("call = %v, want %v", stub.calls[0], want)
+	}
+}
+
+func TestTryRestartService_Error(t *testing.T) {
+	stub := withStub(t)
+	stub.failOn = "systemctl"
+	if err := TryRestartService("clem-x.service"); err == nil {
+		t.Error("expected error when systemctl fails")
 	}
 }

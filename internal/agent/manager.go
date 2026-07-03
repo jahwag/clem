@@ -972,6 +972,18 @@ func RestartService(serviceName string) error {
 	return nil
 }
 
+// TryRestartService restarts a systemd service only if it is currently
+// running; a stopped unit stays stopped (systemctl try-restart is a no-op
+// then). Used after re-provision rotates credentials a running agent holds
+// in its frozen process env — an operator-stopped agent must not be revived.
+func TryRestartService(serviceName string) error {
+	out, err := sys.Run("systemctl", "try-restart", serviceName)
+	if err != nil {
+		return fmt.Errorf("systemctl try-restart %s: %w\n%s", serviceName, err, out)
+	}
+	return nil
+}
+
 // StopService stops a systemd service.
 func StopService(serviceName string) error {
 	out, err := sys.Run("systemctl", "stop", serviceName)
