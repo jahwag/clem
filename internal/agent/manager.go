@@ -1578,17 +1578,24 @@ func pruneStaleSkillSymlinks(skillsDir, cache string, expected map[string]string
 	}
 }
 
-// SetMCPServers overwrites the mcpServers key in ~/.claude/settings.json while
-// preserving all other settings. Vault refs in env values are expanded via secrets.
-func SetMCPServers(homeDir string, servers []config.MCPServerConfig, secrets map[string]string) error {
-	settingsPath := filepath.Join(homeDir, ".claude", "settings.json")
-	raw, err := os.ReadFile(settingsPath)
-	if err != nil {
-		return fmt.Errorf("reading settings.json: %w", err)
-	}
-	var doc map[string]any
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return fmt.Errorf("parsing settings.json: %w", err)
+// SetMCPServers overwrites the mcpServers key in the agent's ~/.claude.json
+// while preserving everything else Claude Code keeps there. Claude Code does
+// not load MCP servers from settings.json — only ~/.claude.json or a project
+// .mcp.json count (and the runner regenerates .mcp.json, so it is not ours to
+// write). The file may not exist before the agent's first session. Vault refs
+// in env values are expanded via secrets, so the result is chowned to the
+// agent and kept 0600.
+func SetMCPServers(username, homeDir string, servers []config.MCPServerConfig, secrets map[string]string) error {
+	claudeJSONPath := filepath.Join(homeDir, ".claude.json")
+	doc := map[string]any{}
+	raw, err := os.ReadFile(claudeJSONPath)
+	switch {
+	case err == nil:
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			return fmt.Errorf("parsing .claude.json: %w", err)
+		}
+	case !os.IsNotExist(err):
+		return fmt.Errorf("reading .claude.json: %w", err)
 	}
 	mcpMap := make(map[string]any, len(servers))
 	for _, srv := range servers {
@@ -1615,9 +1622,12 @@ func SetMCPServers(homeDir string, servers []config.MCPServerConfig, secrets map
 	doc["mcpServers"] = mcpMap
 	out, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshaling settings.json: %w", err)
+		return fmt.Errorf("marshaling .claude.json: %w", err)
 	}
-	return os.WriteFile(settingsPath, append(out, '\n'), 0644)
+	if err := os.WriteFile(claudeJSONPath, append(out, '\n'), 0600); err != nil {
+		return fmt.Errorf("writing .claude.json: %w", err)
+	}
+	return chownToUser(claudeJSONPath, username)
 }
 
 // InstallExtensions installs marketplaces, plugins, skills, and MCP servers for
@@ -1649,7 +1659,7 @@ func InstallExtensions(username, homeDir string, ext config.ExtensionsConfig, ca
 		}
 	}
 	if len(ext.MCPServers) > 0 {
-		if err := SetMCPServers(homeDir, ext.MCPServers, secrets); err != nil {
+		if err := SetMCPServers(username, homeDir, ext.MCPServers, secrets); err != nil {
 			return err
 		}
 	}
