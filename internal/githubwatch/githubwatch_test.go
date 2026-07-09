@@ -48,12 +48,18 @@ func TestGenerateScript_PollsGitHubAPI(t *testing.T) {
 	}
 }
 
-func TestGenerateScript_EgressProxyExport(t *testing.T) {
+// A contained watcher inherits the agent-vault HTTPS_PROXY by sourcing the
+// agent's .env (written by agent.BrokeredEnv); it must NOT emit its own
+// credential-less http:// export, which would clobber that value.
+func TestGenerateScript_EgressSourcesEnvNotOwnExport(t *testing.T) {
 	cfg := baseCfg()
 	cfg.Egress.Enabled = true
 	s := GenerateScript(cfg, "worker")
-	if !strings.Contains(s, `export HTTPS_PROXY=http://127.0.0.1:8888`) {
-		t.Fatalf("expected HTTPS_PROXY in watch script:\n%s", s)
+	if !strings.Contains(s, `source "$HOME/.env"`) {
+		t.Fatalf("watch script should source $HOME/.env for the broker proxy:\n%s", s)
+	}
+	if strings.Contains(s, "export HTTPS_PROXY=http://") {
+		t.Fatalf("watch script must not emit its own http:// proxy export:\n%s", s)
 	}
 }
 
@@ -87,13 +93,13 @@ func TestGenerateScript_UsesHadStateFileForWakeDiff(t *testing.T) {
 	}
 }
 
-func TestGenerateService_EgressPipelockDeps(t *testing.T) {
+func TestGenerateService_EgressAgentVaultDeps(t *testing.T) {
 	cfg := baseCfg()
 	cfg.Egress.Enabled = true
 	s := GenerateService(cfg, "worker")
 	for _, want := range []string{
-		"After=clem-pipelock-test.service",
-		"Wants=clem-pipelock-test.service",
+		"After=clem-agent-vault-test.service",
+		"Wants=clem-agent-vault-test.service",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("service missing %q:\n%s", want, s)

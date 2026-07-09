@@ -1357,11 +1357,10 @@ coordination:
   backend: discord
   server_id: "1"
   channels: {general: "g"}
+vault:
+  backend: agent-vault
 egress:
   enabled: true
-  posture: strict
-  proxy_port: 9000
-  proxy_user: clem-proxy
   domains:
     - "*.anthropic.com"
     - github.com
@@ -1370,6 +1369,7 @@ agents:
   lead:
     name: "Lead"
     model: "claude-sonnet-4-6"
+    vault_broker: true
 `)
 	cfg, err := Load(path)
 	if err != nil {
@@ -1378,14 +1378,11 @@ agents:
 	if !cfg.Egress.Enabled {
 		t.Error("egress.enabled not parsed")
 	}
-	if cfg.Egress.Posture != "strict" {
-		t.Errorf("posture=%q, want strict", cfg.Egress.Posture)
-	}
-	if cfg.Egress.ProxyPortOrDefault() != 9000 {
-		t.Errorf("proxy_port=%d, want 9000", cfg.Egress.ProxyPortOrDefault())
-	}
 	if len(cfg.Egress.Domains) != 2 {
 		t.Errorf("domains=%v, want 2 entries", cfg.Egress.Domains)
+	}
+	if len(cfg.Egress.AllowLocalhostPorts) != 1 || cfg.Egress.AllowLocalhostPorts[0] != 11434 {
+		t.Errorf("allow_localhost_ports=%v, want [11434]", cfg.Egress.AllowLocalhostPorts)
 	}
 	if !cfg.EgressEnabledFor("lead") {
 		t.Error("EgressEnabledFor(lead) = false, want true")
@@ -1394,14 +1391,9 @@ agents:
 
 func TestEgress_Defaults(t *testing.T) {
 	var e EgressConfig
-	if e.PostureOrDefault() != "balanced" {
-		t.Errorf("PostureOrDefault=%q, want balanced", e.PostureOrDefault())
-	}
-	if e.ProxyPortOrDefault() != 8888 {
-		t.Errorf("ProxyPortOrDefault=%d, want 8888", e.ProxyPortOrDefault())
-	}
-	if e.ProxyUserOrDefault() != "clem-proxy" {
-		t.Errorf("ProxyUserOrDefault=%q, want clem-proxy", e.ProxyUserOrDefault())
+	got := e.DomainsOrDefault()
+	if len(got) != len(DefaultEgressDomains) || got[0] != DefaultEgressDomains[0] {
+		t.Errorf("DomainsOrDefault=%v, want %v", got, DefaultEgressDomains)
 	}
 }
 
@@ -1412,12 +1404,15 @@ coordination:
   backend: discord
   server_id: "1"
   channels: {general: "g"}
+vault:
+  backend: agent-vault
 egress:
   enabled: true
 agents:
   lead:
     name: "Lead"
     model: "claude-sonnet-4-6"
+    vault_broker: true
   loner:
     name: "Loner"
     model: "claude-sonnet-4-6"
@@ -1442,11 +1437,14 @@ coordination:
   backend: discord
   server_id: "1"
   channels: {general: "g"}
+vault:
+  backend: agent-vault
 agents:
   lead:
     name: "Lead"
     model: "claude-sonnet-4-6"
     egress_restriction_experimental: true
+    vault_broker: true
   worker:
     name: "Worker"
     model: "claude-sonnet-4-6"
@@ -1463,44 +1461,54 @@ agents:
 	}
 }
 
-func TestLoad_EgressInvalidPostureRejects(t *testing.T) {
+// TestLoad_EgressRequiresVaultBroker: egress containment is implemented via
+// agent-vault, so a contained agent that is not brokered must be rejected.
+func TestLoad_EgressRequiresVaultBroker(t *testing.T) {
 	path := writeYAML(t, `
 project: myteam
 coordination:
   backend: discord
   server_id: "1"
   channels: {general: "g"}
+vault:
+  backend: agent-vault
 egress:
   enabled: true
-  posture: paranoid
 agents:
   lead:
     name: "Lead"
     model: "claude-sonnet-4-6"
 `)
-	if _, err := Load(path); err == nil {
-		t.Fatal("expected error for invalid posture, got nil")
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for egress without vault_broker, got nil")
+	}
+	if !strings.Contains(err.Error(), "vault_broker") {
+		t.Errorf("error should mention vault_broker, got: %v", err)
 	}
 }
 
-func TestLoad_EgressProxyPortCollidesWithWebTerminal(t *testing.T) {
+// TestLoad_EgressWithVaultBrokerValid: the previously mutually-exclusive
+// combination (vault_broker + egress) is now the required, valid pairing.
+func TestLoad_EgressWithVaultBrokerValid(t *testing.T) {
 	path := writeYAML(t, `
 project: myteam
 coordination:
   backend: discord
   server_id: "1"
   channels: {general: "g"}
+vault:
+  backend: agent-vault
 egress:
   enabled: true
-  proxy_port: 7681
 agents:
   lead:
     name: "Lead"
     model: "claude-sonnet-4-6"
-    web_terminal_port: 7681
+    vault_broker: true
 `)
-	if _, err := Load(path); err == nil {
-		t.Fatal("expected error for proxy_port colliding with web_terminal_port, got nil")
+	if _, err := Load(path); err != nil {
+		t.Fatalf("vault_broker + egress should be valid, got: %v", err)
 	}
 }
 
@@ -1566,26 +1574,6 @@ agents:
 		if !strings.Contains(err.Error(), "web_terminal_bind") {
 			t.Fatalf("%s: error should name web_terminal_bind, got: %v", name, err)
 		}
-	}
-}
-
-func TestLoad_EgressProxyPortOutOfRange(t *testing.T) {
-	path := writeYAML(t, `
-project: myteam
-coordination:
-  backend: discord
-  server_id: "1"
-  channels: {general: "g"}
-egress:
-  enabled: true
-  proxy_port: 80
-agents:
-  lead:
-    name: "Lead"
-    model: "claude-sonnet-4-6"
-`)
-	if _, err := Load(path); err == nil {
-		t.Fatal("expected error for proxy_port < 1024, got nil")
 	}
 }
 
@@ -1727,30 +1715,6 @@ agents:
 `)
 	if _, err := Load(path); err == nil {
 		t.Fatal("expected error for unknown vault backend")
-	}
-}
-
-func TestLoad_VaultBrokerAndEgressMutuallyExclusive(t *testing.T) {
-	path := writeYAML(t, `
-project: myteam
-coordination:
-  backend: discord
-  server_id: "1"
-  channels: {general: "g"}
-egress:
-  enabled: true
-vault:
-  backend: agent-vault
-agents:
-  lead:
-    name: "Lead"
-    model: "claude-sonnet-4-6"
-    vaults: [anthropic]
-    vault_broker: true
-    brokered_secrets: [ANTHROPIC_API_KEY]
-`)
-	if _, err := Load(path); err == nil {
-		t.Fatal("expected error: vault_broker + egress containment on same agent")
 	}
 }
 

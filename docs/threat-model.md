@@ -16,8 +16,7 @@ clem deliberately splits work across distinct OS principals so the kernel, not t
 |---|---|---|
 | **operator / root** | trusted | provision time only (creates users, writes firewall rules, decrypts sops) |
 | **agent UID** (`<project>-<agent>`) | **untrusted** | continuously, at runtime |
-| **`clem-proxy`** (egress proxy) | trusted, isolated | continuously, separate UID |
-| **`clem-vault`** (credential broker) | trusted, isolated | continuously, separate UID |
+| **`clem-vault`** (credential broker + egress TLS-MITM proxy) | trusted, isolated | continuously, separate UID |
 | **`clem-mcp`** (credential sidecar) | trusted, isolated | continuously, separate UID |
 | **the `clem` binary** | trusted | **provision time only — not in the loop at runtime** |
 
@@ -44,7 +43,7 @@ A per-agent **nftables rule keyed on the agent's UID** rejects all egress except
 
 ## Guarantees
 
-**Read each guarantee against the agent's chosen disposition.** Egress containment and brokering are **mutually exclusive per agent** in this release (a brokered agent's `HTTPS_PROXY` points at the broker, which doesn't chain through the egress proxy). So a given agent is *either* egress-contained *or* brokered — not both — and the guarantees split accordingly. Unifying them is a tracked follow-up.
+**Read each guarantee against the agent's chosen disposition.** Egress containment is implemented **via** the credential broker: agent-vault's TLS-MITM proxy is the only containment path, so **egress containment requires `vault_broker`**. An agent can therefore be brokered-only (its outbound credentials are injected, but it may still reach any host), or brokered **and** egress-contained (the same proxy additionally allowlists approved hosts and denies the rest, with a per-UID kernel firewall pinning its only route out to the proxy). A contained agent's `HTTPS_PROXY` points at agent-vault and is enforced by the kernel firewall, not merely cooperative.
 
 **For an egress-contained agent:**
 1. **Kernel-enforced egress, not cooperative.** A non-root agent cannot flush or rewrite an nftables ruleset it does not own. There is no `--unsandboxed` escape hatch, because containment is not a flag the agent process controls — it is a property of the UID it runs under. This is a class of containment that **does not exist in any in-process or single-shared-container design**, where the sandbox is part of, or reachable by, the very process being sandboxed. So even the *real* secrets such an agent holds in `.env` cannot be sent off the allowlist.
@@ -61,14 +60,14 @@ State these plainly; an acquirer's or auditor's diligence finds them anyway, and
 - **The agent's own model credential.** The agent must authenticate to its LLM (Claude OAuth in `~/.claude/.credentials.json`, or `ANTHROPIC_API_KEY`). You cannot sidecar the brain; this credential lives on the agent. Mitigation is scope (OAuth, refreshed) and the egress firewall (it can only reach the model endpoint).
 - **Secrets the agent must *embed* into an artifact it produces.** If an agent writes a key into a deployment it builds, it needs the real value — the broker injects only on the agent's *own* network egress, not when it writes a file. Such secrets must either stay real, or the *deploy action itself* must move behind a sidecar.
 - **Arbitrary sensitive *data*, as opposed to secrets.** If an agent legitimately reads sensitive data to do its job, the broker/sidecar don't stop it from sending that *data* somewhere. That is the **egress firewall's** job (host allowlist + audit), not the credential layer's.
-- **A loopback daemon on an allowed port is an un-contained egress UID.** `clem-proxy`/`clem-vault`/`clem-mcp` egress freely (that's their function). Anything reachable on an allowed loopback port that can be coerced into outbound requests is an **SSRF pivot**. Only allow ports for services that cannot be so coerced; a dedicated per-UID allowlist for these is tracked hardening.
-- **TLS interception requires CA trust.** Phase-1 egress is CONNECT-only (SNI/host allowlist + audit, no CA needed). Broker injection (Phase 2) intercepts TLS and therefore requires distributing the broker's CA to the agent's trust stores; this trades plaintext-broker-side visibility for a broker that, if itself compromised, sees brokered traffic.
-- **A brokered agent can reach the broker's management API.** Because a brokered agent has no egress firewall, it *can* connect to the broker's management endpoint directly (its `.env` even contains `AGENT_VAULT_ADDR`). The load-bearing control is therefore **the inject-only token role** (instance `no-access` + vault `proxy`), which cannot read secrets back or mutate vaults — **not** network isolation. Firewalling the management port off the agent UID even when brokering is tracked hardening; do not widen the token's role.
-- **Supply-chain trust of the wrapped binaries.** pipelock and agent-vault are installed from pinned, checksum-verified releases (integrity). Signature/attestation pinning (authenticity) is tracked follow-up; until then this is TOFU on a tagged release.
+- **A loopback daemon on an allowed port is an un-contained egress UID.** `clem-vault`/`clem-mcp` egress freely (that's their function). Anything reachable on an allowed loopback port that can be coerced into outbound requests is an **SSRF pivot**. Only allow ports for services that cannot be so coerced; a dedicated per-UID allowlist for these is tracked hardening.
+- **TLS interception requires CA trust, and the proxy sees plaintext.** Both brokering and egress containment run through agent-vault's TLS-MITM, so the agent must trust agent-vault's CA (distributed to its trust stores at provision). The allowlist is host-matched (`--auth-type passthrough` services) and every unmatched host is denied (`unmatched_host_policy=deny`, set per vault over the management API — v0.22.0 has no CLI for it). The trade-off is explicit: agent-vault terminates TLS, so a compromised broker sees the plaintext of brokered and allowlisted traffic. There is no separate audit-log file on disk that clem tails; auditing lives inside agent-vault.
+- **A brokered-but-uncontained agent can reach the broker's management API.** An egress-contained agent **cannot** — the per-UID nftables firewall allows only agent-vault's MITM port, not its management port. A brokered agent *without* egress can still connect to the management endpoint directly (its `.env` contains `AGENT_VAULT_ADDR`), so for that case the load-bearing control is **the inject-only token role** (instance `no-access` + vault `proxy`), which cannot read secrets back or mutate vaults — **not** network isolation. Do not widen the token's role.
+- **Supply-chain trust of the wrapped binary.** agent-vault is installed from a pinned, checksum-verified release (integrity). Signature/attestation pinning (authenticity) is tracked follow-up; until then this is TOFU on a tagged release. Its opt-out product telemetry is disabled in the unit (`AGENT_VAULT_TELEMETRY=false`).
 
 ## Verifying the guarantees
 
-Run as the agent user. The checks differ by disposition (broker and egress are mutually exclusive per agent).
+Run as the agent user. Egress-contained agents are also brokered (containment runs through the broker), so both check sets apply to them.
 
 **Egress-contained agent** — off-allowlist must be blocked, the allowlist reachable:
 
@@ -78,7 +77,7 @@ sudo -u <agent> curl https://1.1.1.1                            # BLOCKED (raw I
 sudo -u <agent> bash -c 'echo > /dev/tcp/93.184.216.34/443'     # BLOCKED
 sudo -u <agent> curl https://api.anthropic.com/v1/models        # ALLOWED host → reaches upstream (401 = auth, not blocked)
 # controls (project = your clem.yaml project:):
-nft list table inet clem_egress_<project> ; systemctl is-active clem-pipelock-<project>.service
+nft list table inet clem_egress_<project> ; systemctl is-active clem-nftables-<project>.service clem-agent-vault-<project>.service
 ```
 
 **Brokered agent** — brokered keys are placeholders, injected on egress:

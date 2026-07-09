@@ -43,11 +43,6 @@ func (c *Config) UsesGitHubCoordination() bool {
 	return c.Coordination.BackendOrDefault() == "github"
 }
 
-// PipelockServiceName returns the systemd service name for the egress proxy.
-func (c *Config) PipelockServiceName() string {
-	return fmt.Sprintf("clem-pipelock-%s.service", c.Project)
-}
-
 // NftablesServiceName returns the systemd service name for the egress firewall.
 func (c *Config) NftablesServiceName() string {
 	return fmt.Sprintf("clem-nftables-%s.service", c.Project)

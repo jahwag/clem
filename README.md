@@ -26,7 +26,7 @@
 
 `clem` runs a team of Claude Code agents 24/7 on any Linux host. Each agent is a separate OS user in a tmux session under systemd. Agents coordinate over **Discord, Slack, or GitHub Issues**, pick up tasks, write code, and open PRs. A watchdog restarts anything that crashes. You write one clem.yaml; clem provisions the OS users and keeps them running.
 
-What sets it apart: **secrets and egress are contained at the OS layer, not by the agent's cooperation.** Each agent takes one disposition — a per-UID kernel firewall that forces all egress through an auditing proxy (a non-root agent can't disable a firewall it doesn't own), *or* a secret-zero broker that hands it only placeholders while a separate user injects the real credential on egress. Enforced by the kernel and a separate user, not by the agent. See the [security model](#security-model).
+What sets it apart: **secrets and egress are contained at the OS layer, not by the agent's cooperation.** A secret-zero broker hands the agent only placeholders while a separate user injects the real credential on its outbound requests; egress containment builds on that same broker — a per-UID kernel firewall forces all egress through agent-vault's TLS-MITM proxy, which allowlists approved hosts and denies the rest (a non-root agent can't disable a firewall it doesn't own). Enforced by the kernel and a separate user, not by the agent. See the [security model](#security-model).
 
 ---
 
@@ -105,16 +105,16 @@ An autonomous agent is an untrusted workload: prompt injection, a poisoned depen
 | **broker** | a credential proxy (separate UID) injects the real value into the agent's own outbound HTTPS | inside the broker | API-key / bearer exfiltration — the agent only holds a placeholder |
 | **sidecar** | a secret-holding MCP server runs as a *separate* user; the agent calls it over loopback and gets a result, never the key | inside the sidecar | non-HTTP creds (gateway tokens, internal DBs) and scoped/read-only access |
 | **remove** | drop the credential/MCP entirely | nowhere | unused attack surface |
-| **egress firewall** | per-agent nftables UID rule forces all traffic through a loopback proxy; everything else is rejected by the kernel | n/a | data exfiltration to unapproved hosts |
+| **egress firewall** | per-agent nftables UID rule forces all traffic through agent-vault's loopback TLS-MITM, which allowlists approved hosts and denies the rest; everything else is rejected by the kernel (requires `vault_broker`) | n/a | data exfiltration to unapproved hosts |
 
 **Why this is stronger than in-process or single-container sandboxes:** the boundary is a **per-OS-UID kernel firewall a non-root agent cannot disable**, plus a credential broker running as a **different user the agent cannot read** — neither depends on the agent's cooperation, and there is no in-process escape hatch. A compromised agent holds no usable secrets and can reach no unapproved network.
 
-Honest about the parts that are borrowed: the egress proxy and credential broker are battle-tested OSS primitives ([pipelock](https://github.com/luckyPipewrench/pipelock), [Infisical agent-vault](https://github.com/Infisical/agent-vault)). clem's contribution is the **OS-level composition** — per-agent UID identity + kernel firewall + secret supply, wired so the agent literally cannot route around either.
+Honest about the parts that are borrowed: the credential broker *and* the TLS-MITM egress proxy are one battle-tested OSS primitive ([Infisical agent-vault](https://github.com/Infisical/agent-vault)); the kernel boundary is nftables. clem's contribution is the **OS-level composition** — per-agent UID identity + kernel firewall + secret supply, wired so the agent literally cannot route around either.
 
 → Full threat model, guarantees, and known limitations: **[docs/threat-model.md](docs/threat-model.md)**.
 → Worked reference config: **[samples/secure-fleet/](samples/secure-fleet/)**.
 
-Both layers are **opt-in and default-off**; existing fleets are unaffected until you enable `egress:` / `vault.backend: agent-vault`.
+Both layers are **opt-in and default-off**; existing fleets are unaffected until you enable `vault.backend: agent-vault` (brokering) and, on top of it, the `egress:` block (containment requires `vault_broker`).
 
 ---
 

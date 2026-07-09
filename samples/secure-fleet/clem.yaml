@@ -9,7 +9,8 @@
 #   broker         — agent's own outbound HTTP; real value injected on egress     (vault.services + brokered_secrets)
 #   sidecar        — non-HTTP / gateway-identity / scoped-internal creds          (mcp_sidecars — coming; see threat-model)
 #   remove         — unused; simply not provisioned                               (omit it)
-#   egress firewall— data containment: all egress forced through a loopback proxy (egress:)
+#   egress firewall— data containment: all egress forced through agent-vault's    (egress: — requires vault_broker)
+#                    TLS-MITM, unmatched hosts denied, per-UID nftables boundary
 #
 # Prerequisites:
 #   clem vault init
@@ -59,18 +60,20 @@ vault:
       token_key: GH_TOKEN
 
 # ── EGRESS FIREWALL ──────────────────────────────────────────────────────────
-# Per-agent nftables UID firewall: all egress is rejected except the loopback
-# proxy. A non-root agent cannot disable a firewall it does not own. DNS/raw
-# sockets blocked; the proxy resolves on the agent's behalf.
+# Egress containment is enforced VIA agent-vault. The `domains` become
+# agent-vault passthrough services; every unmatched host is denied at the MITM.
+# A per-agent nftables UID firewall pins the agent's only route out to
+# agent-vault's loopback MITM port — a non-root agent cannot disable a firewall
+# it does not own, and DNS/raw sockets are blocked (agent-vault resolves on the
+# agent's behalf). Because agent-vault is the containment proxy, egress REQUIRES
+# vault_broker on each contained agent.
 egress:
   enabled: true
-  posture: balanced
   domains: ["*.anthropic.com", "github.com", "*.githubusercontent.com", "gateway.internal.example.com"]
 
-# NOTE: brokering and egress containment are mutually exclusive PER AGENT in v1
-# (a brokered agent's proxy points at agent-vault, which does not chain through
-# pipelock). Below, the lead is brokered; the worker is egress-contained — pick
-# the disposition that fits each agent. (A future release unifies them.)
+# NOTE: egress + vault_broker now compose (they are the required pairing).
+# Below, the lead is brokered but opts OUT of egress (egress: false) — brokering
+# without containment; the worker is BOTH brokered and egress-contained.
 
 agents:
   lead:
@@ -98,8 +101,11 @@ agents:
     provider: anthropic
     iteration: 5m
     vaults: [anthropic, github, discord-worker]
-    # EGRESS-CONTAINED instead of brokered: hard kernel boundary, all egress via
-    # the loopback proxy, audited. (egress: block above applies to this agent.)
+    # BROKERED + EGRESS-CONTAINED: inherits the global egress: block (hard kernel
+    # boundary, all egress via agent-vault's MITM, unmatched hosts denied) AND
+    # brokers its own outbound credentials. Containment requires vault_broker.
+    vault_broker: true
+    brokered_secrets: [ANTHROPIC_API_KEY, GH_TOKEN]
     prompt: >-
       Act as {{agent.name}}. Pick up an assigned task, implement it, open a PR.
       When done, run: kill $PPID

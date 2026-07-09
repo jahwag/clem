@@ -43,6 +43,7 @@ func TestGenerate_HeadroomWrapsClaudeLaunch(t *testing.T) {
 	})
 	out := Generate(cfg, "lead")
 	for _, want := range []string{
+		`"$CLAUDE" mcp remove headroom`,
 		"headroom wrap claude -p $HEADROOM_PORT --no-context-tool --no-serena",
 		`log "headroom enabled but not installed; launching claude directly"`,
 		"timeout 7200 $LAUNCH --dangerously-skip-permissions",
@@ -129,7 +130,7 @@ func TestGenerate_SkipsClaudeInstallOnProxyHosts(t *testing.T) {
 		Prompt:    "do the thing",
 	})
 	out := Generate(cfg, "lead")
-	// claude install (bun fetch) can't traverse the pipelock proxy — it fails
+	// claude install (bun fetch) can't traverse the egress proxy — it fails
 	// "Socket is closed" every iteration. Skip it when HTTPS_PROXY is set.
 	if !strings.Contains(out, `if [ -n "$HTTPS_PROXY" ]; then`) {
 		t.Errorf("expected claude install gated on HTTPS_PROXY, got:\n%s", out)
@@ -439,12 +440,12 @@ func TestGenerateService_EgressEnabledLoopbackOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateService: %v", err)
 	}
-	// Loopback-only block + pipelock/nftables unit ordering, no hardcoded CIDRs.
+	// Loopback-only block + agent-vault/nftables unit ordering, no hardcoded CIDRs.
 	for _, want := range []string{
 		"IPAddressDeny=any",
 		"IPAddressAllow=127.0.0.0/8",
-		"After=clem-pipelock-test.service clem-nftables-test.service",
-		"Wants=clem-pipelock-test.service",
+		"After=clem-agent-vault-test.service clem-nftables-test.service",
+		"Wants=clem-agent-vault-test.service",
 		"Requires=clem-nftables-test.service", // firewall is fail-closed
 	} {
 		if !strings.Contains(out, want) {
@@ -491,26 +492,27 @@ func TestGenerateService_EgressDisabled(t *testing.T) {
 	if strings.Contains(out, "IPAddressDeny") {
 		t.Fatalf("expected no IPAddressDeny when egress unset, got:\n%s", out)
 	}
-	if strings.Contains(out, "clem-pipelock") {
-		t.Fatalf("expected no pipelock unit deps when egress unset, got:\n%s", out)
+	if strings.Contains(out, "clem-agent-vault") {
+		t.Fatalf("expected no agent-vault unit deps when egress unset, got:\n%s", out)
 	}
 }
 
-func TestGenerate_ProxyExportPresentWhenEgressEnabled(t *testing.T) {
+// The runner no longer emits its own HTTPS_PROXY export for contained agents:
+// egress requires vault_broker, and the authenticated agent-vault proxy URL is
+// written into the agent's .env by agent.BrokeredEnv (a plain http:// export
+// here would be wrong for the credential-carrying MITM).
+func TestGenerate_NoOwnProxyExportWhenEgressEnabled(t *testing.T) {
 	cfg := baseCfg("worker", config.AgentConfig{
 		Name:      "Worker",
 		Model:     "claude-opus-4-7",
 		Iteration: "1m",
 		Prompt:    "do the thing",
 	})
-	cfg.Egress = config.EgressConfig{Enabled: true, ProxyPort: 9001}
+	cfg.Egress = config.EgressConfig{Enabled: true}
 
 	out := Generate(cfg, "worker")
-	if !strings.Contains(out, "export HTTPS_PROXY=http://127.0.0.1:9001") {
-		t.Errorf("expected HTTPS_PROXY export at configured port, got:\n%s", out)
-	}
-	if !strings.Contains(out, "export NO_PROXY=127.0.0.1,localhost,::1") {
-		t.Errorf("expected NO_PROXY export, got:\n%s", out)
+	if strings.Contains(out, "export HTTPS_PROXY") {
+		t.Errorf("runner must not export its own HTTPS_PROXY (comes from .env), got:\n%s", out)
 	}
 }
 

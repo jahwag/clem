@@ -21,87 +21,28 @@ func stubUIDs(t *testing.T, uids map[string]int) {
 	t.Cleanup(func() { userUIDLookup = orig })
 }
 
+// testCfg builds an egress-contained project on the agent-vault backend: egress
+// containment now requires vault_broker, so both agents are brokered and their
+// outbound traffic is pinned to agent-vault's MITM port (14322).
 func testCfg() *config.Config {
 	return &config.Config{
 		Project: "myteam",
+		Vault:   config.VaultBackend{Backend: "agent-vault"},
 		Egress: config.EgressConfig{
 			Enabled:             true,
-			Posture:             "strict",
 			Domains:             []string{"*.anthropic.com", "github.com"},
-			ProxyPort:           8888,
 			AllowLocalhostPorts: []int{11434},
 		},
 		Agents: map[string]config.AgentConfig{
-			"lead":   {Name: "Lead"},
-			"worker": {Name: "Worker"},
+			"lead":   {Name: "Lead", VaultBroker: true},
+			"worker": {Name: "Worker", VaultBroker: true},
 		},
-	}
-}
-
-func TestGeneratePipelockConfig(t *testing.T) {
-	cfg := testCfg()
-	out := GeneratePipelockConfig(cfg)
-	for _, want := range []string{
-		"mode: strict",
-		"enforce: true",
-		`listen: "127.0.0.1:8888"`,
-		"enabled: true", // forward_proxy
-		"sni_verification: true",
-		"enabled: false", // tls_interception (CONNECT-only)
-		`- "*.anthropic.com"`,
-		`- "github.com"`,
-		"file: /var/log/clem/pipelock-myteam-audit.jsonl",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("pipelock config missing %q\n---\n%s", want, out)
-		}
-	}
-}
-
-func TestGeneratePipelockConfig_DefaultDomains(t *testing.T) {
-	cfg := testCfg()
-	cfg.Egress.Domains = nil
-	out := GeneratePipelockConfig(cfg)
-	if !strings.Contains(out, "*.anthropic.com") || !strings.Contains(out, "github.com") {
-		t.Errorf("expected default domains, got:\n%s", out)
-	}
-	if strings.Contains(out, "api.github.com") {
-		t.Errorf("api.github.com should not be in default domains without github backend, got:\n%s", out)
-	}
-}
-
-func TestGeneratePipelockConfig_GitHubBackendAddsAPIDomain(t *testing.T) {
-	cfg := testCfg()
-	cfg.Egress.Domains = nil
-	cfg.Coordination = config.Coordination{
-		Backend:    "github",
-		GithubRepo: "org/repo",
-		Channels:   map[string]string{"tasks": "clem:todo"},
-	}
-	out := GeneratePipelockConfig(cfg)
-	if !strings.Contains(out, `api.github.com`) {
-		t.Errorf("expected api.github.com for github coordination, got:\n%s", out)
-	}
-}
-
-func TestGeneratePipelockService(t *testing.T) {
-	cfg := testCfg()
-	out := GeneratePipelockService(cfg)
-	for _, want := range []string{
-		"User=clem-proxy",
-		"ExecStart=/usr/local/bin/pipelock run --config /etc/clem/pipelock-myteam.yaml --listen 127.0.0.1:8888",
-		"After=network-online.target clem-nftables-myteam.service",
-		"ReadWritePaths=/var/log/clem",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("pipelock service missing %q\n---\n%s", want, out)
-		}
 	}
 }
 
 func TestGenerateNftables(t *testing.T) {
 	stubUIDs(t, map[string]int{
-		"clem-proxy":    900,
+		"clem-vault":    900,
 		"myteam-lead":   1001,
 		"myteam-worker": 1002,
 	})
@@ -114,11 +55,11 @@ func TestGenerateNftables(t *testing.T) {
 		"table inet clem_egress_myteam {",
 		"delete table inet clem_egress_myteam",
 		"type filter hook output priority 0; policy accept;",
-		"meta skuid 900 accept", // proxy egresses freely
-		"meta skuid 1001 ip daddr 127.0.0.1 tcp dport { 8888, 11434 } accept",
-		"meta skuid 1001 ip6 daddr ::1 tcp dport { 8888, 11434 } accept",
+		"meta skuid 900 accept", // agent-vault egresses freely
+		"meta skuid 1001 ip daddr 127.0.0.1 tcp dport { 11434, 14322 } accept",
+		"meta skuid 1001 ip6 daddr ::1 tcp dport { 11434, 14322 } accept",
 		"meta skuid 1001 reject with icmpx type admin-prohibited",
-		"meta skuid 1002 ip daddr 127.0.0.1 tcp dport { 8888, 11434 } accept",
+		"meta skuid 1002 ip daddr 127.0.0.1 tcp dport { 11434, 14322 } accept",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("nftables missing %q\n---\n%s", want, out)
@@ -132,10 +73,10 @@ func TestGenerateNftables(t *testing.T) {
 }
 
 func TestGenerateNftables_TtydEstablishedScopedToPort(t *testing.T) {
-	stubUIDs(t, map[string]int{"clem-proxy": 900, "myteam-lead": 1001})
+	stubUIDs(t, map[string]int{"clem-vault": 900, "myteam-lead": 1001})
 	cfg := testCfg()
 	cfg.Agents = map[string]config.AgentConfig{
-		"lead": {Name: "Lead", WebTerminalPort: 7681},
+		"lead": {Name: "Lead", VaultBroker: true, WebTerminalPort: 7681},
 	}
 	out, err := GenerateNftables(cfg)
 	if err != nil {
@@ -153,7 +94,7 @@ func TestGenerateNftables_TtydEstablishedScopedToPort(t *testing.T) {
 
 func TestGenerateNftables_SkipsDisabledAgent(t *testing.T) {
 	stubUIDs(t, map[string]int{
-		"clem-proxy":    900,
+		"clem-vault":    900,
 		"myteam-lead":   1001,
 		"myteam-worker": 1002,
 	})
@@ -176,10 +117,10 @@ func TestGenerateNftables_SkipsDisabledAgent(t *testing.T) {
 }
 
 func TestGenerateNftables_HyphenProjectSanitized(t *testing.T) {
-	stubUIDs(t, map[string]int{"clem-proxy": 900, "my-team-lead": 1001})
+	stubUIDs(t, map[string]int{"clem-vault": 900, "my-team-lead": 1001})
 	cfg := testCfg()
 	cfg.Project = "my-team"
-	cfg.Agents = map[string]config.AgentConfig{"lead": {Name: "Lead"}}
+	cfg.Agents = map[string]config.AgentConfig{"lead": {Name: "Lead", VaultBroker: true}}
 	out, err := GenerateNftables(cfg)
 	if err != nil {
 		t.Fatalf("GenerateNftables: %v", err)
@@ -207,6 +148,9 @@ func TestGenerateAgentVaultService(t *testing.T) {
 	cfg := testCfg()
 	cfg.Vault = config.VaultBackend{Backend: "agent-vault"}
 	out := GenerateAgentVaultService(cfg)
+	if strings.Contains(out, "--data") {
+		t.Errorf("agent-vault server has no --data flag; unit must not pass it\n---\n%s", out)
+	}
 	for _, want := range []string{
 		"User=clem-vault",
 		"EnvironmentFile=/etc/clem/agent-vault.env",
@@ -214,10 +158,9 @@ func TestGenerateAgentVaultService(t *testing.T) {
 		"ReadWritePaths=/var/lib/clem-vault",
 		"--port 14321",
 		"--mitm-port 14322",
+		// Telemetry (PostHog product analytics) must be opted out in the unit.
+		"Environment=AGENT_VAULT_TELEMETRY=false",
 	} {
-		if strings.Contains(out, "--data") {
-			t.Errorf("agent-vault server has no --data flag; unit must not pass it\n---\n%s", out)
-		}
 		if !strings.Contains(out, want) {
 			t.Errorf("agent-vault service missing %q\n---\n%s", want, out)
 		}
@@ -225,23 +168,25 @@ func TestGenerateAgentVaultService(t *testing.T) {
 }
 
 func TestGenerateNftables_BrokeredAgentAllowsAgentVaultPort(t *testing.T) {
-	stubUIDs(t, map[string]int{"clem-proxy": 900, "myteam-lead": 1001, "myteam-worker": 1002})
+	stubUIDs(t, map[string]int{"clem-vault": 900, "myteam-lead": 1001, "myteam-worker": 1002})
 	cfg := testCfg()
-	cfg.Vault = config.VaultBackend{Backend: "agent-vault"}
-	lead := cfg.Agents["lead"]
-	lead.VaultBroker = true
-	cfg.Agents["lead"] = lead
+	// Only lead is brokered/contained here; worker is a plain agent.
+	worker := cfg.Agents["worker"]
+	worker.VaultBroker = false
+	off := false
+	worker.Egress = &off
+	cfg.Agents["worker"] = worker
 
 	out, err := GenerateNftables(cfg)
 	if err != nil {
 		t.Fatalf("GenerateNftables: %v", err)
 	}
 	// Brokered lead may reach agent-vault's MITM port (14322); plain worker may not.
-	if !strings.Contains(out, "meta skuid 1001 ip daddr 127.0.0.1 tcp dport { 8888, 11434, 14322 } accept") {
+	if !strings.Contains(out, "meta skuid 1001 ip daddr 127.0.0.1 tcp dport { 11434, 14322 } accept") {
 		t.Errorf("brokered agent should be allowed loopback to 14322:\n%s", out)
 	}
-	if strings.Contains(out, "meta skuid 1002 ip daddr 127.0.0.1 tcp dport { 8888, 11434, 14322 }") {
-		t.Errorf("non-brokered agent must NOT get the agent-vault port:\n%s", out)
+	if strings.Contains(out, "meta skuid 1002") {
+		t.Errorf("non-contained agent must NOT appear in the egress ruleset:\n%s", out)
 	}
 }
 
@@ -349,17 +294,19 @@ func TestGenerateSidecarNftablesService(t *testing.T) {
 // firewall) to reach the sidecar's loopback port, or egress's per-UID reject
 // would block it before the sidecar firewall even applies.
 func TestGenerateNftables_AllowsSidecarPortForContainedSubscriber(t *testing.T) {
-	stubUIDs(t, map[string]int{"clem-proxy": 900, "myteam-lead": 1001})
+	stubUIDs(t, map[string]int{"clem-vault": 900, "myteam-lead": 1001})
 	cfg := sidecarCfg()
-	cfg.Egress = config.EgressConfig{Enabled: true, Posture: "strict", ProxyPort: 8888}
+	cfg.Vault = config.VaultBackend{Backend: "agent-vault"}
+	cfg.Egress = config.EgressConfig{Enabled: true}
 	cfg.Agents = map[string]config.AgentConfig{
-		"lead": {Name: "Lead", Sidecars: []string{"es-ro"}},
+		"lead": {Name: "Lead", VaultBroker: true, Sidecars: []string{"es-ro"}},
 	}
 	out, err := GenerateNftables(cfg)
 	if err != nil {
 		t.Fatalf("GenerateNftables: %v", err)
 	}
-	want := "meta skuid 1001 ip daddr 127.0.0.1 tcp dport { 8888, 14500 } accept"
+	// agent-vault MITM port (14322) plus the subscribed sidecar port (14500).
+	want := "meta skuid 1001 ip daddr 127.0.0.1 tcp dport { 14322, 14500 } accept"
 	if !strings.Contains(out, want) {
 		t.Errorf("contained subscriber should be allowed to its sidecar port\nwant %q\n---\n%s", want, out)
 	}

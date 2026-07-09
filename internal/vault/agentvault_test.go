@@ -2,6 +2,7 @@ package vault
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -278,5 +279,99 @@ func TestApplyServices_BuildsCorrectFlagsPerAuthType(t *testing.T) {
 				t.Errorf("service add must not set AGENT_VAULT_TOKEN, got %q", e)
 			}
 		}
+	}
+}
+
+func TestApplyPassthroughServices_AllowlistsHostsIdempotently(t *testing.T) {
+	calls := withAVRun(t, func(env []string, args ...string) ([]byte, error) {
+		// Second host simulates a re-provision: agent-vault reports it exists.
+		if strings.Contains(strings.Join(args, " "), "github-com") {
+			return []byte("service already exists"), errStub
+		}
+		return nil, nil
+	})
+	err := ApplyPassthroughServices("http://127.0.0.1:14321", "team_worker",
+		[]string{"*.anthropic.com", "github.com"})
+	if err != nil {
+		t.Fatalf("ApplyPassthroughServices should tolerate an existing service: %v", err)
+	}
+	if len(*calls) != 2 {
+		t.Fatalf("expected 2 passthrough add calls, got %d", len(*calls))
+	}
+	first := strings.Join((*calls)[0].args, " ")
+	for _, frag := range []string{
+		"vault service add", "--name allow-anthropic-com", "--host *.anthropic.com",
+		"--auth-type passthrough", "--vault team-worker",
+	} {
+		if !strings.Contains(first, frag) {
+			t.Errorf("passthrough add missing %q: %s", frag, first)
+		}
+	}
+}
+
+func TestApplyPassthroughServices_RealErrorPropagates(t *testing.T) {
+	withAVRun(t, func(env []string, args ...string) ([]byte, error) {
+		return []byte("connection refused"), errStub
+	})
+	if err := ApplyPassthroughServices("http://127.0.0.1:14321", "w", []string{"github.com"}); err == nil {
+		t.Fatal("a non-existence error must propagate")
+	}
+}
+
+func TestLoginOwnerAndSetUnmatchedHostPolicy(t *testing.T) {
+	var patchBody, patchAuth, patchPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/auth/login":
+			_, _ = w.Write([]byte(`{"token":"owner-bearer-xyz"}`))
+		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/settings"):
+			b, _ := io.ReadAll(r.Body)
+			patchBody = string(b)
+			patchAuth = r.Header.Get("Authorization")
+			patchPath = r.URL.Path
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	ownerBearer = "" // reset the package-level session cache
+	if err := LoginOwner(srv.URL, "owner@example.com", "pw"); err != nil {
+		t.Fatalf("LoginOwner: %v", err)
+	}
+	if ownerBearer != "owner-bearer-xyz" {
+		t.Fatalf("expected cached bearer, got %q", ownerBearer)
+	}
+	// Vault name is sanitized (agent-vault rejects '_').
+	if err := SetUnmatchedHostPolicy(srv.URL, "team_worker", "deny"); err != nil {
+		t.Fatalf("SetUnmatchedHostPolicy: %v", err)
+	}
+	if patchPath != "/v1/vaults/team-worker/settings" {
+		t.Errorf("PATCH path = %q, want /v1/vaults/team-worker/settings", patchPath)
+	}
+	if patchBody != `{"unmatched_host_policy":"deny"}` {
+		t.Errorf("PATCH body = %q", patchBody)
+	}
+	if patchAuth != "Bearer owner-bearer-xyz" {
+		t.Errorf("PATCH auth = %q, want Bearer owner-bearer-xyz", patchAuth)
+	}
+}
+
+func TestSetUnmatchedHostPolicy_RequiresLogin(t *testing.T) {
+	ownerBearer = ""
+	if err := SetUnmatchedHostPolicy("http://127.0.0.1:14321", "w", "deny"); err == nil {
+		t.Fatal("SetUnmatchedHostPolicy must fail without an owner session")
+	}
+}
+
+func TestSetUnmatchedHostPolicy_Non200Errors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+	ownerBearer = "stale"
+	if err := SetUnmatchedHostPolicy(srv.URL, "w", "deny"); err == nil {
+		t.Fatal("a non-200 settings response must error (containment must fail loudly)")
 	}
 }

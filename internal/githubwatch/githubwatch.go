@@ -198,14 +198,13 @@ func GenerateService(cfg *config.Config, agentKey string) string {
 	return render(serviceTemplate, p)
 }
 
+// proxyExportBlock is retained as a seam but emits nothing. Egress containment
+// now requires vault_broker, and the watcher sources $HOME/.env (above this
+// block in the template), which already carries the authenticated agent-vault
+// HTTPS_PROXY written by agent.BrokeredEnv. Emitting a plain http:// export here
+// would clobber that correct value with a credential-less one.
 func proxyExportBlock(cfg *config.Config, agentKey string) string {
-	if !cfg.EgressEnabledFor(agentKey) {
-		return ""
-	}
-	port := cfg.Egress.ProxyPortOrDefault()
-	return fmt.Sprintf(`export HTTPS_PROXY=http://127.0.0.1:%d
-export HTTP_PROXY=http://127.0.0.1:%d
-export NO_PROXY=127.0.0.1,localhost,::1`, port, port)
+	return ""
 }
 
 const egressDirectivesBlock = `# Same loopback-only egress guard as the agent service.
@@ -221,14 +220,15 @@ func egressDirectives(cfg *config.Config, agentKey string) string {
 	return ""
 }
 
-// proxyUnitDeps ties the watcher to the pipelock proxy when egress containment
-// is active for the agent, so polls do not fail open against a down proxy.
+// proxyUnitDeps ties the watcher to the agent-vault proxy when egress
+// containment is active for the agent, so polls do not fail open against a down
+// proxy.
 func proxyUnitDeps(cfg *config.Config, agentKey string) string {
 	if !cfg.EgressEnabledFor(agentKey) {
 		return ""
 	}
 	return fmt.Sprintf("After=%s\nWants=%s\n",
-		cfg.PipelockServiceName(), cfg.PipelockServiceName())
+		cfg.AgentVaultServiceName(), cfg.AgentVaultServiceName())
 }
 
 func render(tmpl string, p params) string {

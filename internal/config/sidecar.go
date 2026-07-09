@@ -286,7 +286,6 @@ func (cfg *Config) validateMCPSidecars() error {
 		}
 	}
 	if egressInUse {
-		reserved[cfg.Egress.ProxyPortOrDefault()] = "egress proxy_port"
 		for _, p := range cfg.Egress.AllowLocalhostPorts {
 			reserved[p] = "egress allow_localhost_ports"
 		}

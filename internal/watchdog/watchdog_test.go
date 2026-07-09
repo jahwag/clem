@@ -177,31 +177,17 @@ func TestGenerateScript_OOMCheckPresent(t *testing.T) {
 	}
 }
 
-func TestGenerateScript_EgressCheckPresentWhenEnabled(t *testing.T) {
+// Egress containment is now enforced by agent-vault + nftables and no longer
+// produces a clem-owned audit log, so the watchdog must not tail one.
+func TestGenerateScript_NoEgressAuditTailing(t *testing.T) {
 	cfg := baseCfg()
 	cfg.Egress.Enabled = true
 	s := GenerateScript(cfg)
-	for _, want := range []string{
-		"check_egress()",
-		"/var/log/clem/pipelock-test-audit.jsonl",
-		"blocked/DLP event(s)",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("expected %q in watchdog script:\n%s", want, s)
-		}
-	}
-	// check_egress must be defined before it is invoked.
-	defIdx := strings.Index(s, "check_egress()")
-	callIdx := strings.LastIndex(s, "check_egress")
-	if defIdx == -1 || callIdx <= defIdx {
-		t.Errorf("check_egress must be defined then invoked (def=%d call=%d)", defIdx, callIdx)
-	}
-}
-
-func TestGenerateScript_NoEgressCheckWhenDisabled(t *testing.T) {
-	s := GenerateScript(baseCfg())
 	if strings.Contains(s, "check_egress") {
-		t.Errorf("expected no check_egress when egress disabled:\n%s", s)
+		t.Errorf("watchdog must not tail an egress audit log that no longer exists:\n%s", s)
+	}
+	if strings.Contains(s, "pipelock") {
+		t.Errorf("watchdog must not reference pipelock:\n%s", s)
 	}
 }
 

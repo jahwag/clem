@@ -77,8 +77,10 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Egress containment (pipelock proxy + nftables UID firewall), host-level.
-	// Runs after the agent loop so all agent OS users exist for UID resolution.
+	// Egress containment (nftables UID firewall pinning agents to agent-vault's
+	// MITM), host-level. Runs after the agent loop so all agent OS users exist
+	// for UID resolution (the agent-vault allowlist + deny policy are applied
+	// per-agent-vault inside the loop).
 	if err := provisionEgress(); err != nil {
 		return err
 	}
@@ -366,6 +368,20 @@ func writeAgentEnv(agentKey string, ac config.AgentConfig, osUser, homeDir strin
 		if err := vault.ApplyServices(addr, consolidated, svcs); err != nil {
 			return nil, "", false, fmt.Errorf("agent %s: applying service rules: %w", agentKey, err)
 		}
+		// Egress containment: allowlist the configured domains as agent-vault
+		// passthrough services and flip the vault to deny every unmatched host.
+		// The deny policy is what makes containment real — without it agent-vault
+		// forwards unmatched hosts — so fail provisioning loudly if it errors.
+		if cfg.EgressEnabledFor(agentKey) {
+			domains := cfg.EgressDomainsOrDefault()
+			if err := vault.ApplyPassthroughServices(addr, consolidated, domains); err != nil {
+				return nil, "", false, fmt.Errorf("agent %s: allowlisting egress domains: %w", agentKey, err)
+			}
+			if err := vault.SetUnmatchedHostPolicy(addr, consolidated, "deny"); err != nil {
+				return nil, "", false, fmt.Errorf("agent %s: setting egress deny policy: %w", agentKey, err)
+			}
+			fmt.Printf("  egress contained: %d allowlisted domain(s), unmatched hosts denied\n", len(domains))
+		}
 		// Reuse the agent's current token when it still authenticates: rotation
 		// invalidates the old token, which forces a restart of the running
 		// agent. Rotate only when the token is missing, dead (self-heals the
@@ -564,6 +580,14 @@ func provisionAgentVaultHost() error {
 	if err := vault.EnsureOwner(addr, ownerEmail, ownerPassword); err != nil {
 		return fmt.Errorf("agent-vault: owner auth: %w", err)
 	}
+	// Egress containment needs the vault-settings deny policy, which has no CLI
+	// in v0.22.0 — obtain an owner API Bearer now so the per-agent loop can PATCH
+	// it. Only when at least one agent is contained.
+	if anyEgressEnabled() {
+		if err := vault.LoginOwner(addr, ownerEmail, ownerPassword); err != nil {
+			return fmt.Errorf("agent-vault: owner API login (needed for egress deny policy): %w", err)
+		}
+	}
 	if err := vault.FetchCA(addr, cfg.Vault.CACertPathOrDefault()); err != nil {
 		return fmt.Errorf("agent-vault: fetching CA: %w", err)
 	}
@@ -607,47 +631,32 @@ func waitHealthy(addr string, attempts int) error {
 	return fmt.Errorf("agent-vault did not become healthy at %s after %ds", addr, attempts)
 }
 
-// provisionEgress installs the host-level egress containment stack — the
-// pipelock forward proxy and the per-agent nftables UID firewall — when any
-// agent has egress containment enabled. No-op otherwise. Must run after agent
-// OS users exist, since the firewall ruleset is keyed on their UIDs.
-func provisionEgress() error {
-	anyEgress := false
+// provisionEgress installs the per-agent nftables UID firewall that pins every
+// egress-contained agent's outbound traffic to agent-vault's MITM port. The
+// containment proxy itself is agent-vault (stood up by provisionAgentVaultHost);
+// the domain allowlist + deny policy are applied per-agent-vault during the
+// agent loop. No-op unless an agent has egress containment enabled. Must run
+// after agent OS users exist, since the firewall ruleset is keyed on their UIDs.
+// anyEgressEnabled reports whether at least one agent has egress containment on.
+func anyEgressEnabled() bool {
 	for key := range cfg.Agents {
 		if cfg.EgressEnabledFor(key) {
-			anyEgress = true
-			break
+			return true
 		}
 	}
-	if !anyEgress {
+	return false
+}
+
+func provisionEgress() error {
+	if !anyEgressEnabled() {
 		return nil
 	}
 
 	fmt.Printf("\n[egress]\n")
-	proxyUser := cfg.Egress.ProxyUserOrDefault()
-	if err := agent.EnsureSystemUser(proxyUser); err != nil {
-		return fmt.Errorf("egress: %w", err)
-	}
-	if err := agent.InstallPipelock(); err != nil {
-		return fmt.Errorf("egress: %w", err)
-	}
-
-	// /etc/clem holds the generated proxy config + firewall ruleset (root-owned,
-	// no secrets). /var/log/clem holds the signed audit log, written by the
-	// proxy user.
+	// /etc/clem holds the generated firewall ruleset (root-owned, no secrets).
 	if err := os.MkdirAll("/etc/clem", 0755); err != nil {
 		return fmt.Errorf("egress: creating /etc/clem: %w", err)
 	}
-	if err := os.MkdirAll(proxy.AuditLogPath, 0750); err != nil {
-		return fmt.Errorf("egress: creating %s: %w", proxy.AuditLogPath, err)
-	}
-	agent.ChownPath(proxy.AuditLogPath, proxyUser)
-
-	cfgPath := proxy.PipelockConfigPath(cfg.Project)
-	if err := os.WriteFile(cfgPath, []byte(proxy.GeneratePipelockConfig(cfg)), 0644); err != nil {
-		return fmt.Errorf("egress: writing %s: %w", cfgPath, err)
-	}
-	fmt.Printf("  wrote %s\n", cfgPath)
 
 	nft, err := proxy.GenerateNftables(cfg)
 	if err != nil {
@@ -659,8 +668,6 @@ func provisionEgress() error {
 	}
 	fmt.Printf("  wrote %s\n", nftPath)
 
-	// Firewall first (so the proxy comes up behind a closed boundary), then the
-	// proxy. The agent units order After= both via runner.proxyUnitDeps.
 	if err := agent.InstallServiceByName(cfg.NftablesServiceName(), proxy.GenerateNftablesService(cfg)); err != nil {
 		return fmt.Errorf("egress: installing firewall service: %w", err)
 	}
@@ -668,14 +675,6 @@ func provisionEgress() error {
 		return fmt.Errorf("egress: starting firewall: %w", err)
 	}
 	fmt.Printf("  installed + started %s\n", cfg.NftablesServiceName())
-
-	if err := agent.InstallServiceByName(cfg.PipelockServiceName(), proxy.GeneratePipelockService(cfg)); err != nil {
-		return fmt.Errorf("egress: installing pipelock service: %w", err)
-	}
-	if err := agent.StartService(cfg.PipelockServiceName()); err != nil {
-		return fmt.Errorf("egress: starting pipelock: %w", err)
-	}
-	fmt.Printf("  installed + started %s (port %d)\n", cfg.PipelockServiceName(), cfg.Egress.ProxyPortOrDefault())
 	return nil
 }
 
