@@ -125,9 +125,11 @@ User={{.VaultUser}}
 # Point HOME at the dedicated data dir so the store lands under ReadWritePaths.
 Environment=HOME={{.DataDir}}
 # Opt out of agent-vault's PostHog product-analytics telemetry.
+# --log-level debug: the watchdog's deny-event alerting tails per-request
+# proxy_request journal lines, which agent-vault only emits at debug level.
 Environment=AGENT_VAULT_TELEMETRY=false
 EnvironmentFile={{.EnvFile}}
-ExecStart=/usr/local/bin/agent-vault server --port {{.MgmtPort}} --mitm-port {{.MitmPort}}
+ExecStart=/usr/local/bin/agent-vault server --port {{.MgmtPort}} --mitm-port {{.MitmPort}} --log-level debug
 Restart=always
 RestartSec=2
 NoNewPrivileges=yes
