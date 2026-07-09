@@ -78,8 +78,6 @@ jobs:
               iteration: 5m
               subagent_model: "claude-sonnet-4-6"
               vaults: [github]
-              vault_broker: true
-              brokered_secrets: [GH_TOKEN]
           EOF
           "$GITHUB_WORKSPACE/clem" vault init
           "$GITHUB_WORKSPACE/clem" vault set github GH_TOKEN=ghfakefortestingonly
@@ -274,8 +272,12 @@ jobs:
           sudo -u egtest-lead timeout 6 bash -c 'echo > /dev/tcp/93.184.216.34/443' 2>/dev/null; chk "arbitrary outbound TCP" BLOCK $?
           sudo -u egtest-lead curl -sk --max-time 6 https://127.0.0.1:14322/ >/dev/null 2>&1; chk "loopback to agent-vault MITM :14322" ALLOW $?
           # Through-the-broker: allowlisted host tunnels; unlisted host is denied (403).
-          sudo -u egtest-lead bash -c 'source ~/.env && curl -s --proxy-insecure -k --max-time 20 -x "$HTTPS_PROXY" https://github.com >/dev/null 2>&1'; chk "allowlisted github.com via broker" ALLOW $?
-          sudo -u egtest-lead bash -c 'source ~/.env && curl -s --proxy-insecure -k --max-time 10 -x "$HTTPS_PROXY" https://example.com >/dev/null 2>&1'; chk "unlisted example.com via broker" BLOCK $?
+          # Through a MITM broker, a denied host returns HTTP 403 (a completed
+          # transaction, curl exit 0), so assert on the status code, not exit code.
+          code_al=$(sudo -u egtest-lead bash -c 'source ~/.env && curl -s -o /dev/null -w "%{http_code}" --proxy-insecure -k --max-time 20 -x "$HTTPS_PROXY" https://github.com')
+          [ "$code_al" != 403 ] && [ -n "$code_al" ] && [ "$code_al" != 000 ]; chk "allowlisted github.com via broker ($code_al)" ALLOW $?
+          code_dn=$(sudo -u egtest-lead bash -c 'source ~/.env && curl -s -o /dev/null -w "%{http_code}" --proxy-insecure -k --max-time 10 -x "$HTTPS_PROXY" https://example.com')
+          [ "$code_dn" = 403 ]; chk "unlisted example.com via broker denied ($code_dn)" ALLOW $?
           curl -s --max-time 5 http://127.0.0.1:7681/ >/dev/null 2>&1; chk "B2 ttyd reply (sport 7681)" ALLOW $?
           curl -s --max-time 5 http://127.0.0.1:9999/ >/dev/null 2>&1; chk "B2 rogue reply (sport 9999)" BLOCK $?
           exit $fail
@@ -382,8 +384,6 @@ jobs:
               model: "claude-sonnet-4-6"
               iteration: 5m
               vaults: [github]
-              vault_broker: true
-              brokered_secrets: [GH_TOKEN]
           EOF
           "$GITHUB_WORKSPACE/clem" vault init
           "$GITHUB_WORKSPACE/clem" vault set github GH_TOKEN=ghfakefortestingonly
