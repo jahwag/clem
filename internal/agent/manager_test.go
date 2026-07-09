@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -2149,5 +2150,33 @@ func TestSetMCPServersWritesClaudeJSON(t *testing.T) {
 	}
 	if _, ok := doc["mcpServers"].(map[string]any)["old"]; ok {
 		t.Error("mcpServers must be overwritten, not merged")
+	}
+}
+
+// TestStartService_EnablesUnit pins that 'clem start' re-enables units: after
+// 'clem stop' the units are disabled, and a plain 'systemctl
+// start' would leave them invisible to the watchdog (which skips disabled
+// units) and lost on reboot.
+func TestStartService_EnablesUnit(t *testing.T) {
+	stub := withStub(t)
+	if err := StartService("foo.service"); err != nil {
+		t.Fatalf("StartService: %v", err)
+	}
+	want := []string{"systemctl", "enable", "--now", "foo.service"}
+	if len(stub.calls) != 1 || !slices.Equal(stub.calls[0], want) {
+		t.Errorf("calls = %v, want [%v]", stub.calls, want)
+	}
+}
+
+// TestDisableNowService_DisablesUnit pins the permanent-stop primitive:
+// disable --now is what makes the watchdog leave the unit alone.
+func TestDisableNowService_DisablesUnit(t *testing.T) {
+	stub := withStub(t)
+	if err := DisableNowService("foo.service"); err != nil {
+		t.Fatalf("DisableNowService: %v", err)
+	}
+	want := []string{"systemctl", "disable", "--now", "foo.service"}
+	if len(stub.calls) != 1 || !slices.Equal(stub.calls[0], want) {
+		t.Errorf("calls = %v, want [%v]", stub.calls, want)
 	}
 }

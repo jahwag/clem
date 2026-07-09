@@ -999,9 +999,12 @@ func InstallWatchdogTimer(cfg *config.Config, serviceContent, timerContent strin
 
 // StartService starts a systemd service.
 func StartService(serviceName string) error {
-	out, err := sys.Run("systemctl", "start", serviceName)
+	// enable --now rather than start: units disabled by 'clem stop'
+	// must come back enabled, or the watchdog (which skips disabled units)
+	// would never recover them after a crash.
+	out, err := sys.Run("systemctl", "enable", "--now", serviceName)
 	if err != nil {
-		return fmt.Errorf("systemctl start %s: %w\n%s", serviceName, err, out)
+		return fmt.Errorf("systemctl enable --now %s: %w\n%s", serviceName, err, out)
 	}
 	return nil
 }
@@ -1035,6 +1038,16 @@ func StopService(serviceName string) error {
 	out, err := sys.Run("systemctl", "stop", serviceName)
 	if err != nil {
 		return fmt.Errorf("systemctl stop %s: %w\n%s", serviceName, err, out)
+	}
+	return nil
+}
+
+// DisableNowService stops a systemd unit and disables it, so the watchdog
+// (which skips disabled units) and reboots leave it stopped.
+func DisableNowService(serviceName string) error {
+	out, err := sys.Run("systemctl", "disable", "--now", serviceName)
+	if err != nil {
+		return fmt.Errorf("systemctl disable --now %s: %w\n%s", serviceName, err, out)
 	}
 	return nil
 }

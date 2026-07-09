@@ -7,23 +7,43 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var upCmd = &cobra.Command{
-	Use:   "up",
-	Short: "Start all agent systemd services",
-	RunE:  runUp,
+var startCmd = &cobra.Command{
+	Use:     "start",
+	Aliases: []string{"up"},
+	Short:   "Start all agent systemd services",
+	Long: `Start all agents for the project in the current directory.
+
+Units are enabled ('systemctl enable --now'), so agents survive reboots and
+the watchdog resumes guarding them — including agents previously stopped with
+'clem stop'.
+
+'clem up' is a deprecated alias.`,
+	RunE: runStart,
+}
+
+var restartCmd = &cobra.Command{
+	Use:   "restart",
+	Short: "Restart all agent systemd services (stop, then start)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := runStop(cmd, args); err != nil {
+			return err
+		}
+		return runStart(cmd, args)
+	},
 }
 
 func init() {
-	rootCmd.AddCommand(upCmd)
+	rootCmd.AddCommand(startCmd)
+	rootCmd.AddCommand(restartCmd)
 }
 
-func runUp(cmd *cobra.Command, args []string) error {
+func runStart(cmd *cobra.Command, args []string) error {
 	if err := requireRoot(); err != nil {
 		return err
 	}
 
 	// Re-arm the watchdog timer on the way out even if an agent fails to
-	// start (clem down stops it to keep agents down): a partially started
+	// start (clem stop disables it to keep agents down): a partially started
 	// fleet should still get watchdog recovery rather than no protection.
 	defer func() {
 		timerName := cfg.WatchdogTimerName()
