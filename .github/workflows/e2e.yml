@@ -78,9 +78,14 @@ jobs:
               iteration: 5m
               subagent_model: "claude-sonnet-4-6"
               vaults: [github]
+              vault_broker: true
+              brokered_secrets: [GH_TOKEN]
           EOF
           "$GITHUB_WORKSPACE/clem" vault init
           "$GITHUB_WORKSPACE/clem" vault set github GH_TOKEN=ghfakefortestingonly
+          "$GITHUB_WORKSPACE/clem" vault set clem-vault AGENT_VAULT_MASTER_PASSWORD=egtest-master-pw-1
+          "$GITHUB_WORKSPACE/clem" vault set clem-vault AGENT_VAULT_OWNER_EMAIL=egtest@example.com
+          "$GITHUB_WORKSPACE/clem" vault set clem-vault AGENT_VAULT_OWNER_PASSWORD=egtest-owner-pw-1
 
       - name: Run clem provision
         run: |
@@ -155,11 +160,12 @@ jobs:
           [ "$count" = "1" ] || { echo "gitconfig has $count signingkey lines after second provision, want 1"; exit 1; }
 
   egress-containment:
-    # End-to-end test of Phase 1 hard egress containment (pipelock + nftables
+    # End-to-end test of hard egress containment (agent-vault broker + nftables
     # UID firewall). Unit tests prove the GENERATED ruleset is correct; this
-    # job proves the ruleset actually CONTAINS a process in the kernel — the
-    # security claim that cannot be unit-tested. A pipelock shim stands in for
-    # the real binary so the job needs no network download.
+    # job proves the ruleset actually CONTAINS a process in the kernel and the
+    # broker enforces the allowlist (deny unmatched) — the security claims that
+    # cannot be unit-tested. Uses the real pinned agent-vault binary, installed
+    # by provision itself.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -181,21 +187,6 @@ jobs:
             https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
 
-      - name: Install pipelock shim
-        # Stands in for the pinned pipelock release so InstallPipelock's version
-        # check skips the download and the systemd unit has something to run.
-        # `run` listens on 127.0.0.1:8888 so the loopback→proxy probe succeeds.
-        run: |
-          sudo tee /usr/local/bin/pipelock >/dev/null <<'SH'
-          #!/bin/bash
-          case "$1" in
-            --version|version) echo "pipelock 2.5.0" ;;
-            run) exec python3 -m http.server 8888 --bind 127.0.0.1 ;;
-            *) exit 0 ;;
-          esac
-          SH
-          sudo chmod +x /usr/local/bin/pipelock
-
       - name: Build clem
         run: go build -o clem .
 
@@ -208,9 +199,10 @@ jobs:
             backend: discord
             server_id: "1"
             channels: {general: "2", alerts: "3"}
+          vault:
+            backend: agent-vault
           egress:
             enabled: true
-            posture: strict
             domains: ["*.anthropic.com", "github.com"]
           agents:
             lead:
@@ -219,47 +211,55 @@ jobs:
               iteration: 5m
               web_terminal_port: 7681
               vaults: [github]
+              vault_broker: true
+              brokered_secrets: [GH_TOKEN]
           EOF
           "$GITHUB_WORKSPACE/clem" vault init
           "$GITHUB_WORKSPACE/clem" vault set github GH_TOKEN=ghfakefortestingonly
+          "$GITHUB_WORKSPACE/clem" vault set clem-vault AGENT_VAULT_MASTER_PASSWORD=egtest-master-pw-1
+          "$GITHUB_WORKSPACE/clem" vault set clem-vault AGENT_VAULT_OWNER_EMAIL=egtest@example.com
+          "$GITHUB_WORKSPACE/clem" vault set clem-vault AGENT_VAULT_OWNER_PASSWORD=egtest-owner-pw-1
 
       - name: Run clem provision
         run: |
           cd /tmp/eg
+          set -o pipefail
           sudo -E "$GITHUB_WORKSPACE/clem" provision 2>&1 | tee /tmp/eg-provision.log
           tail -25 /tmp/eg-provision.log
 
       - name: Assert - egress artifacts written
         run: |
-          sudo test -f /etc/clem/pipelock-egtest.yaml
-          sudo grep -q 'mode: strict' /etc/clem/pipelock-egtest.yaml
-          sudo grep -q 'enabled: false' /etc/clem/pipelock-egtest.yaml   # tls_interception (CONNECT-only)
-          sudo grep -q '"\*.anthropic.com"' /etc/clem/pipelock-egtest.yaml
+          # agent-vault is the egress boundary now; no pipelock artifacts.
+          sudo test ! -f /etc/clem/pipelock-egtest.yaml
           nft=/etc/clem/clem-egress-egtest.nft
           sudo test -f "$nft"
           sudo grep -q 'meta skuid .* reject with icmpx' "$nft"
-          sudo grep -q 'tcp sport 7681 ct state established,related accept' "$nft"   # B2: ttyd-scoped
-          ! sudo grep -qE 'meta skuid [0-9]+ ct state established' "$nft"            # B2: no blanket allow
+          sudo grep -q '14322' "$nft"                                              # agent-vault MITM port allowlisted
+          sudo grep -q 'tcp sport 7681 ct state established,related accept' "$nft" # B2: ttyd-scoped
+          ! sudo grep -qE 'meta skuid [0-9]+ ct state established' "$nft"          # B2: no blanket allow
 
       - name: Assert - systemd units installed + parse + fail-closed dep
         run: |
-          sudo systemd-analyze verify /etc/systemd/system/clem-pipelock-egtest.service
+          sudo systemd-analyze verify /etc/systemd/system/clem-agent-vault-egtest.service
           sudo systemd-analyze verify /etc/systemd/system/clem-nftables-egtest.service
           sudo grep -q 'Requires=clem-nftables-egtest.service' /etc/systemd/system/clem-egtest-lead.service
-          sudo grep -q 'export HTTPS_PROXY=http://127.0.0.1:8888' /home/egtest-lead/.local/bin/clem-runner.sh
+          sudo grep -q 'Wants=clem-agent-vault-egtest.service' /etc/systemd/system/clem-egtest-lead.service
+          # deny-event alerting needs per-request logs (only emitted at debug)
+          sudo grep -q -- '--log-level debug' /etc/systemd/system/clem-agent-vault-egtest.service
+          # brokered proxy env lives in ~/.env, not the runner script
+          sudo grep -q 'HTTPS_PROXY=' /home/egtest-lead/.env
 
       - name: Assert - firewall + proxy active after provision
         run: |
           sudo nft list table inet clem_egress_egtest >/dev/null
           systemctl is-active clem-nftables-egtest.service
-          systemctl is-active clem-pipelock-egtest.service
+          systemctl is-active clem-agent-vault-egtest.service
 
       - name: Assert - live containment (the security claim)
         run: |
           # This step deliberately runs commands expected to FAIL (blocked egress)
           # and inspects their exit codes, so disable errexit — otherwise the first
-          # correctly-blocked probe (curl exits 6, DNS unresolvable) would abort the
-          # step before chk records it. The final `exit $fail` enforces the result.
+          # correctly-blocked probe would abort the step before chk records it.
           set +e
           # Start a rogue + ttyd listener as the agent to test the B2 sport scoping.
           sudo -u egtest-lead bash -c 'nohup python3 -m http.server 7681 --bind 127.0.0.1 >/tmp/l7681 2>&1 &' || true
@@ -272,7 +272,10 @@ jobs:
           sudo -u egtest-lead curl -s --max-time 6 https://example.com >/dev/null 2>&1; chk "direct internet HTTPS" BLOCK $?
           sudo -u egtest-lead curl -s --max-time 6 https://1.1.1.1 >/dev/null 2>&1;     chk "raw-IP HTTPS (no DNS)" BLOCK $?
           sudo -u egtest-lead timeout 6 bash -c 'echo > /dev/tcp/93.184.216.34/443' 2>/dev/null; chk "arbitrary outbound TCP" BLOCK $?
-          sudo -u egtest-lead curl -s --max-time 6 http://127.0.0.1:8888/ >/dev/null 2>&1; chk "loopback to proxy :8888" ALLOW $?
+          sudo -u egtest-lead curl -sk --max-time 6 https://127.0.0.1:14322/ >/dev/null 2>&1; chk "loopback to agent-vault MITM :14322" ALLOW $?
+          # Through-the-broker: allowlisted host tunnels; unlisted host is denied (403).
+          sudo -u egtest-lead bash -c 'source ~/.env && curl -s --proxy-insecure -k --max-time 20 -x "$HTTPS_PROXY" https://github.com >/dev/null 2>&1'; chk "allowlisted github.com via broker" ALLOW $?
+          sudo -u egtest-lead bash -c 'source ~/.env && curl -s --proxy-insecure -k --max-time 10 -x "$HTTPS_PROXY" https://example.com >/dev/null 2>&1'; chk "unlisted example.com via broker" BLOCK $?
           curl -s --max-time 5 http://127.0.0.1:7681/ >/dev/null 2>&1; chk "B2 ttyd reply (sport 7681)" ALLOW $?
           curl -s --max-time 5 http://127.0.0.1:9999/ >/dev/null 2>&1; chk "B2 rogue reply (sport 9999)" BLOCK $?
           exit $fail
@@ -379,9 +382,14 @@ jobs:
               model: "claude-sonnet-4-6"
               iteration: 5m
               vaults: [github]
+              vault_broker: true
+              brokered_secrets: [GH_TOKEN]
           EOF
           "$GITHUB_WORKSPACE/clem" vault init
           "$GITHUB_WORKSPACE/clem" vault set github GH_TOKEN=ghfakefortestingonly
+          "$GITHUB_WORKSPACE/clem" vault set clem-vault AGENT_VAULT_MASTER_PASSWORD=egtest-master-pw-1
+          "$GITHUB_WORKSPACE/clem" vault set clem-vault AGENT_VAULT_OWNER_EMAIL=egtest@example.com
+          "$GITHUB_WORKSPACE/clem" vault set clem-vault AGENT_VAULT_OWNER_PASSWORD=egtest-owner-pw-1
 
       - name: Run clem provision
         run: |
