@@ -57,8 +57,9 @@ func TestGenerateScript_PostRestartRecheckSuppressesAlert(t *testing.T) {
 func TestGenerateScript_SkipsDisabledUnits(t *testing.T) {
 	s := GenerateScript(baseCfg())
 	// 'systemctl disable --now' is the operator's permanent-stop escape hatch;
-	// the watchdog must not resurrect a deliberately disabled agent.
-	guard := `if [ "$(systemctl is-enabled "$service" 2>/dev/null)" = "disabled" ]; then`
+	// the watchdog must not resurrect a deliberately disabled (or masked)
+	// agent — retrying a masked unit only fires spurious failure alerts.
+	guard := `disabled|masked) return ;;`
 	if !strings.Contains(s, guard) {
 		t.Errorf("generated script missing disabled-unit guard %q\n---\n%s", guard, s)
 	}

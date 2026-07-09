@@ -19,6 +19,9 @@ it. The watchdog exists to recover crashes — a deliberate stop is not a crash,
 so operator intent always wins.
 
 'clem down' is a deprecated alias.`,
+	// Fleet-wide kill switch: reject args so 'clem stop <agent>' errors
+	// loudly instead of silently stopping everything.
+	Args: cobra.NoArgs,
 	RunE: runStop,
 }
 

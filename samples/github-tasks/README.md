@@ -39,7 +39,7 @@ clem vault init
 clem vault set github GH_TOKEN="ghp_..."
 sudo clem provision
 sudo clem login
-sudo clem up
+sudo clem start
 ```
 
 ## Task board convention

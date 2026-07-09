@@ -18,12 +18,14 @@ the watchdog resumes guarding them — including agents previously stopped with
 'clem stop'.
 
 'clem up' is a deprecated alias.`,
+	Args: cobra.NoArgs,
 	RunE: runStart,
 }
 
 var restartCmd = &cobra.Command{
 	Use:   "restart",
 	Short: "Restart all agent systemd services (stop, then start)",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := runStop(cmd, args); err != nil {
 			return err
