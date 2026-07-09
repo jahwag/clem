@@ -365,22 +365,43 @@ func writeAgentEnv(agentKey string, ac config.AgentConfig, osUser, homeDir strin
 		if err := vault.SeedVault(addr, consolidated, brokeredKV); err != nil {
 			return nil, "", false, fmt.Errorf("agent %s: seeding consolidated vault: %w", agentKey, err)
 		}
+		// MUST run before the ApplyPassthroughServices/deny-policy block below:
+		// agent-vault breaks ties between equally-scoring host matches
+		// first-declared-wins (verified against v0.22.0), so a host present in
+		// both the credential-injecting services list and the passthrough
+		// allowlist must have its real service rule land first. Swapping this
+		// order would silently disable credential injection for any host on
+		// both lists — the passthrough (no-credential) rule would win instead.
 		if err := vault.ApplyServices(addr, consolidated, svcs); err != nil {
 			return nil, "", false, fmt.Errorf("agent %s: applying service rules: %w", agentKey, err)
 		}
 		// Egress containment: allowlist the configured domains as agent-vault
-		// passthrough services and flip the vault to deny every unmatched host.
-		// The deny policy is what makes containment real — without it agent-vault
-		// forwards unmatched hosts — so fail provisioning loudly if it errors.
+		// passthrough services, reconcile away any stale allowlist entries for
+		// domains no longer configured, and flip the vault to deny every
+		// unmatched host. The deny policy is what makes containment real —
+		// without it agent-vault forwards unmatched hosts — so fail
+		// provisioning loudly if any of these error.
 		if cfg.EgressEnabledFor(agentKey) {
 			domains := cfg.EgressDomainsOrDefault()
 			if err := vault.ApplyPassthroughServices(addr, consolidated, domains); err != nil {
 				return nil, "", false, fmt.Errorf("agent %s: allowlisting egress domains: %w", agentKey, err)
 			}
+			if err := vault.ReconcilePassthroughServices(addr, consolidated, domains); err != nil {
+				return nil, "", false, fmt.Errorf("agent %s: reconciling egress allowlist: %w", agentKey, err)
+			}
 			if err := vault.SetUnmatchedHostPolicy(addr, consolidated, "deny"); err != nil {
 				return nil, "", false, fmt.Errorf("agent %s: setting egress deny policy: %w", agentKey, err)
 			}
 			fmt.Printf("  egress contained: %d allowlisted domain(s), unmatched hosts denied\n", len(domains))
+		} else {
+			// Sticky-deny guard: an agent that had egress containment enabled
+			// in a previous provision, then had it turned off in clem.yaml,
+			// must not be left with a stale "deny" unmatched-host policy — that
+			// would silently break all its egress with no allowlist to explain
+			// why. Explicitly reset to agent-vault's permissive default.
+			if err := vault.SetUnmatchedHostPolicy(addr, consolidated, "passthrough"); err != nil {
+				return nil, "", false, fmt.Errorf("agent %s: resetting unmatched-host policy: %w", agentKey, err)
+			}
 		}
 		// Reuse the agent's current token when it still authenticates: rotation
 		// invalidates the old token, which forces a restart of the running
@@ -562,8 +583,17 @@ func provisionAgentVaultHost() error {
 	if ownerEmail == "" || ownerPassword == "" {
 		return fmt.Errorf("agent-vault: set the owner account: clem vault set clem-vault AGENT_VAULT_OWNER_EMAIL=... AGENT_VAULT_OWNER_PASSWORD=...")
 	}
+	envFile := "AGENT_VAULT_MASTER_PASSWORD=" + master + "\n"
+	if anyEgressEnabled() {
+		// agent-vault's proxy_request log line (matched_service, host, err, status)
+		// logs at slog Debug level by default, so the watchdog's deny-event check
+		// (check_deny_events, journalctl-based) sees nothing unless the unit's log
+		// level is raised. Only worth the extra log volume when some agent actually
+		// has egress containment on.
+		envFile += "AGENT_VAULT_LOG_LEVEL=debug\n"
+	}
 	if err := os.WriteFile(proxy.AgentVaultEnvFile,
-		[]byte("AGENT_VAULT_MASTER_PASSWORD="+master+"\n"), 0600); err != nil {
+		[]byte(envFile), 0600); err != nil {
 		return fmt.Errorf("agent-vault: writing master env file: %w", err)
 	}
 
@@ -580,12 +610,14 @@ func provisionAgentVaultHost() error {
 	if err := vault.EnsureOwner(addr, ownerEmail, ownerPassword); err != nil {
 		return fmt.Errorf("agent-vault: owner auth: %w", err)
 	}
-	// Egress containment needs the vault-settings deny policy, which has no CLI
-	// in v0.22.0 — obtain an owner API Bearer now so the per-agent loop can PATCH
-	// it. Only when at least one agent is contained.
-	if anyEgressEnabled() {
+	// The vault-settings PATCH (unmatched_host_policy) has no CLI in v0.22.0 —
+	// obtain an owner API Bearer now so the per-agent loop can call it. Needed
+	// whenever any agent is brokered, not just when egress is contained: a
+	// brokered agent with containment OFF still gets an explicit policy reset
+	// to "passthrough" (the sticky-deny guard), which is the same PATCH.
+	if anyVaultBrokerEnabled() {
 		if err := vault.LoginOwner(addr, ownerEmail, ownerPassword); err != nil {
-			return fmt.Errorf("agent-vault: owner API login (needed for egress deny policy): %w", err)
+			return fmt.Errorf("agent-vault: owner API login (needed for unmatched-host policy): %w", err)
 		}
 	}
 	if err := vault.FetchCA(addr, cfg.Vault.CACertPathOrDefault()); err != nil {
@@ -631,12 +663,6 @@ func waitHealthy(addr string, attempts int) error {
 	return fmt.Errorf("agent-vault did not become healthy at %s after %ds", addr, attempts)
 }
 
-// provisionEgress installs the per-agent nftables UID firewall that pins every
-// egress-contained agent's outbound traffic to agent-vault's MITM port. The
-// containment proxy itself is agent-vault (stood up by provisionAgentVaultHost);
-// the domain allowlist + deny policy are applied per-agent-vault during the
-// agent loop. No-op unless an agent has egress containment enabled. Must run
-// after agent OS users exist, since the firewall ruleset is keyed on their UIDs.
 // anyEgressEnabled reports whether at least one agent has egress containment on.
 func anyEgressEnabled() bool {
 	for key := range cfg.Agents {
@@ -647,6 +673,24 @@ func anyEgressEnabled() bool {
 	return false
 }
 
+// anyVaultBrokerEnabled reports whether at least one agent has agent-vault
+// credential brokering on (config validation guarantees this implies
+// cfg.Vault.IsAgentVault()).
+func anyVaultBrokerEnabled() bool {
+	for _, ac := range cfg.Agents {
+		if ac.VaultBroker {
+			return true
+		}
+	}
+	return false
+}
+
+// provisionEgress installs the per-agent nftables UID firewall that pins every
+// egress-contained agent's outbound traffic to agent-vault's MITM port. The
+// containment proxy itself is agent-vault (stood up by provisionAgentVaultHost);
+// the domain allowlist + deny policy are applied per-agent-vault during the
+// agent loop. No-op unless an agent has egress containment enabled. Must run
+// after agent OS users exist, since the firewall ruleset is keyed on their UIDs.
 func provisionEgress() error {
 	if !anyEgressEnabled() {
 		return nil

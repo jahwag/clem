@@ -44,7 +44,6 @@ tail -500 "$LOGFILE" > "$LOGFILE.tmp" 2>/dev/null && mv "$LOGFILE.tmp" "$LOGFILE
 export ENABLE_CLAUDEAI_MCP_SERVERS=false
 # Skip IDE extension auto-install probe — agents run in headless tmux, no IDE.
 export CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL=1
-{{.ProxyExport}}
 # Load secrets (written by clem provision, never committed)
 [ -f "$HOME/.env" ] && source "$HOME/.env"
 {{.SubagentExport}}
@@ -272,7 +271,6 @@ cd "$WORKDIR" || exit 1
 log() { echo "$(date -Iseconds) $1" | tee -a "$LOGFILE"; }
 
 tail -500 "$LOGFILE" > "$LOGFILE.tmp" 2>/dev/null && mv "$LOGFILE.tmp" "$LOGFILE" 2>/dev/null
-{{.ProxyExport}}
 [ -f "$HOME/.env" ] && source "$HOME/.env"
 {{.SubagentExport}}
 # Write opencode.json with Ollama provider + discord-bot MCP (if token is set).
@@ -403,7 +401,6 @@ cd "$WORKDIR" || exit 1
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOGFILE"; }
 tail -500 "$LOGFILE" > "$LOGFILE.tmp" 2>/dev/null && mv "$LOGFILE.tmp" "$LOGFILE" 2>/dev/null
 
-{{.ProxyExport}}
 # Load secrets (written by clem provision, never committed) before the config
 # writer reads them from the environment.
 [ -f "$HOME/.env" ] && source "$HOME/.env"
@@ -611,9 +608,6 @@ type RunnerParams struct {
 	EgressDirectives    string
 	HardeningDirectives string
 	ResourceDirectives  string
-	// ProxyExport is the HTTPS_PROXY/NO_PROXY export block injected into the
-	// runner when egress containment is enabled for the agent. Empty otherwise.
-	ProxyExport string
 	// ProxyUnitDeps is the After=/Wants= block tying the agent service to the
 	// agent-vault + nftables units when egress containment is enabled.
 	ProxyUnitDeps string
@@ -751,7 +745,7 @@ func Generate(cfg *config.Config, agentKey string) string {
 		Prompt:         strings.ReplaceAll(promptText, "'", `'\''`),
 		OSUser:         cfg.OSUsername(agentKey),
 		HomeDir:        fmt.Sprintf("/home/%s", cfg.OSUsername(agentKey)),
-		SleepActive: iterSec,
+		SleepActive:    iterSec,
 		// Night sleep defaults to the active value; iteration_night overrides.
 		// History: a hardcoded 2x night doubler was removed on the belief the
 		// prompt-cache TTL was 5 min. Subscription Claude Code actually gets
@@ -763,7 +757,6 @@ func Generate(cfg *config.Config, agentKey string) string {
 		WatchChannelIDs:     watchChannelIDs(cfg),
 		CoordinationBackend: cfg.Coordination.BackendOrDefault(),
 		GitHubWatchUnitDeps: githubWatchUnitDeps(cfg, agentKey),
-		ProxyExport:         proxyExportBlock(cfg, agentKey),
 		SidecarServers:      sidecarServersLiteral(cfg, agentKey),
 		SkillsSyncCmd:       skillsSyncCmd,
 		InstructionFile:     ac.InstructionFileName(),
@@ -824,16 +817,6 @@ func buildHardeningDirectives(homeDir, _ string) string {
 			"ReadOnlyPaths=-%s/CLAUDE.md -%s/CLAUDE.local.md -%s/AGENTS.md\n",
 		homeDir, homeDir, homeDir,
 	)
-}
-
-// proxyExportBlock is retained as a seam but emits nothing: egress containment
-// now requires vault_broker, and the brokered agent's authoritative
-// HTTPS_PROXY (an authenticated https:// URL pointing at agent-vault's MITM,
-// with the CA-trust env) is written into $HOME/.env by agent.BrokeredEnv. A
-// plain http:// export here would be both redundant and wrong (agent-vault
-// requires the token in the proxy URL), so there is nothing to add.
-func proxyExportBlock(cfg *config.Config, agentKey string) string {
-	return ""
 }
 
 // proxyUnitDeps returns the [Unit] dependency block tying the agent service to
@@ -918,7 +901,6 @@ func renderTemplate(tmpl string, p RunnerParams) string {
 		"{{.HardeningDirectives}}", p.HardeningDirectives,
 		"{{.ResourceDirectives}}", p.ResourceDirectives,
 		"{{.WatchChannelIDs}}", p.WatchChannelIDs,
-		"{{.ProxyExport}}", p.ProxyExport,
 		"{{.ProxyUnitDeps}}", p.ProxyUnitDeps,
 		"{{.SidecarServers}}", p.SidecarServers,
 		"{{.CoordinationBackend}}", p.CoordinationBackend,

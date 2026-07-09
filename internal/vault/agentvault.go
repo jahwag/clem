@@ -8,8 +8,9 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/jahwag/clem/internal/config"
 )
@@ -132,37 +133,86 @@ func ApplyServices(addr, avVault string, services []config.Service) error {
 	return nil
 }
 
-// passthroughNameRe strips characters agent-vault rejects in a service name.
-var passthroughNameRe = regexp.MustCompile(`[^a-z0-9]+`)
-
 // passthroughServiceName derives a stable, valid agent-vault service name for an
-// allowlisted host (e.g. "*.anthropic.com" → "allow-anthropic-com").
+// allowlisted host (e.g. "*.anthropic.com" → "allow-wildcard-anthropic-com",
+// "anthropic.com" → "allow-anthropic-com"). The wildcard marker is encoded in
+// the prefix so an apex domain and its wildcard sibling — two distinct hosts —
+// never collide on the same service name. Charset sanitization reuses
+// config.AgentVaultName, the same slugger applied to vault names, rather than
+// a second private regexp.
 func passthroughServiceName(host string) string {
-	slug := passthroughNameRe.ReplaceAllString(strings.ToLower(host), "-")
-	slug = strings.Trim(slug, "-")
+	prefix := "allow-"
+	if strings.HasPrefix(host, "*.") {
+		prefix = "allow-wildcard-"
+		host = strings.TrimPrefix(host, "*.")
+	}
+	slug := strings.Trim(config.AgentVaultName(host), "-")
 	if slug == "" {
 		slug = "host"
 	}
-	return "allow-" + slug
+	return prefix + slug
 }
 
 // ApplyPassthroughServices allowlists each host in the given agent-vault vault as
 // a passthrough service (auth-type passthrough — the host is forwarded through
 // the MITM with no credential injection). Combined with the deny policy set by
 // SetUnmatchedHostPolicy, these are the egress allowlist for a contained agent.
-// Idempotent: an "already exists" failure on re-provision is tolerated. Requires
-// an owner session (call EnsureOwner first) and that avVault exists.
+// `vault service add` is a true upsert (verified against agent-vault v0.22.0: it
+// never errors on a duplicate name), so this delegates straight to
+// ApplyServices — passthrough needs no auth flags beyond --auth-type, and
+// ApplyServices' switch already adds none for it. Requires an owner session
+// (call EnsureOwner first) and that avVault exists.
 func ApplyPassthroughServices(addr, avVault string, hosts []string) error {
+	services := make([]config.Service, 0, len(hosts))
+	for _, h := range hosts {
+		services = append(services, config.Service{
+			Name: passthroughServiceName(h), Host: h, AuthType: "passthrough",
+		})
+	}
+	return ApplyServices(addr, avVault, services)
+}
+
+// avServiceList is the subset of agent-vault's `vault service list` YAML
+// output (broker.Config{Vault, Services}) ReconcilePassthroughServices needs.
+type avServiceList struct {
+	Services []struct {
+		Name string `yaml:"name"`
+		Host string `yaml:"host"`
+	} `yaml:"services"`
+}
+
+// ReconcilePassthroughServices removes passthrough allowlist entries left over
+// from a previous provision whose host is no longer in domains — without this,
+// a domain dropped from clem.yaml's egress.domains stays reachable forever,
+// silently diverging the live allowlist from the checked-in config. Only
+// entries with the "allow-" service-name prefix (passthroughServiceName's
+// output) are ever candidates for removal; credential-injecting services from
+// ApplyServices are untouched. Uses the v0.22.0 `vault service list` +
+// `vault service remove --yes` CLI surface (verified present). Requires an
+// owner session (call EnsureOwner first) and that avVault exists.
+func ReconcilePassthroughServices(addr, avVault string, domains []string) error {
 	env := avEnv(addr)
 	name := config.AgentVaultName(avVault)
-	for _, h := range hosts {
-		args := []string{"vault", "service", "add",
-			"--name", passthroughServiceName(h), "--host", h,
-			"--auth-type", "passthrough", "--vault", name}
-		if out, err := avRun(env, args...); err != nil &&
-			!strings.Contains(strings.ToLower(string(out)), "exist") {
-			return fmt.Errorf("agent-vault passthrough add %s: %w\n%s", h, err, out)
+	out, err := avRun(env, "vault", "service", "list", "--vault", name)
+	if err != nil {
+		return fmt.Errorf("agent-vault service list %s: %w\n%s", name, err, out)
+	}
+	var parsed avServiceList
+	if err := yaml.Unmarshal(out, &parsed); err != nil {
+		return fmt.Errorf("agent-vault service list %s: parsing output: %w", name, err)
+	}
+	want := make(map[string]bool, len(domains))
+	for _, h := range domains {
+		want[passthroughServiceName(h)] = true
+	}
+	for _, s := range parsed.Services {
+		if !strings.HasPrefix(s.Name, "allow-") || want[s.Name] {
+			continue
 		}
+		if out, err := avRun(env, "vault", "service", "remove", s.Name, "--vault", name, "--yes"); err != nil {
+			return fmt.Errorf("agent-vault service remove %s: %w\n%s", s.Name, err, out)
+		}
+		fmt.Printf("  removed stale passthrough service %s (%s no longer allowlisted)\n", s.Name, s.Host)
 	}
 	return nil
 }

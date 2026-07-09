@@ -41,8 +41,9 @@ type EgressConfig struct {
 // coordination is active.
 var DefaultEgressDomains = []string{"*.anthropic.com", "github.com", "*.githubusercontent.com"}
 
-// DomainsOrDefault returns the configured allowlist or DefaultEgressDomains.
-func (e EgressConfig) DomainsOrDefault() []string {
+// domainsOrDefault returns the configured allowlist or DefaultEgressDomains.
+// Unexported: EgressDomainsOrDefault on Config is the public entry point.
+func (e EgressConfig) domainsOrDefault() []string {
 	if len(e.Domains) == 0 {
 		return append([]string(nil), DefaultEgressDomains...)
 	}
@@ -53,7 +54,7 @@ func (e EgressConfig) DomainsOrDefault() []string {
 // appending api.github.com when GitHub coordination is active (so brokered git/
 // API polling is not denied by the unmatched-host policy).
 func (c *Config) EgressDomainsOrDefault() []string {
-	domains := c.Egress.DomainsOrDefault()
+	domains := c.Egress.domainsOrDefault()
 	if !c.UsesGitHubCoordination() {
 		return domains
 	}

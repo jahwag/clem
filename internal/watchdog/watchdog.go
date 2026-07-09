@@ -163,11 +163,12 @@ prune_transcripts() {
     touch "$stamp"
 }
 {{.VaultCheckDef}}
+{{.DenyCheckDef}}
 {{.AgentChecks}}
 
 check_oom
 prune_transcripts
-{{.VaultInvoke}}`
+{{.VaultInvoke}}{{.DenyCheckInvoke}}`
 
 // vaultCheckDef is injected when the agent-vault credential proxy is active. It
 // is a single point of failure for ALL brokered agents' auth, so the watchdog
@@ -189,6 +190,38 @@ check_agent_vault() {
     if [ "$healthy" != yes ]; then
         send_alert "🔴 clem/$PROJECT agent-vault DOWN (state=$(systemctl is-active "$svc") health=$healthy) — brokered agents are failing auth"
     fi
+}
+`
+
+// denyEventCheckDef is injected when agent-vault is active and at least one
+// agent has egress containment enabled. Containment's deny policy is only as
+// good as an operator's ability to notice it firing on a host that should be
+// allowlisted (or an agent probing somewhere it shouldn't) — so this counts
+// new unmatched-host denials (agent-vault's proxy_request log line, err=no_match)
+// since the last check and alerts per denied host. Requires AGENT_VAULT_LOG_LEVEL=debug
+// on the agent-vault unit (set by clem provision when egress is enabled) since
+// proxy_request logs at slog Debug level.
+const denyEventCheckDef = `
+check_deny_events() {
+    local marker="$COOLDOWN_DIR/deny-events.last"
+    local since
+    if [ -f "$marker" ]; then
+        since="@$(cat "$marker")"
+    else
+        since="5 minutes ago"
+    fi
+
+    local hits
+    hits=$(journalctl -u "{{.VaultService}}" --since "$since" --no-pager 2>/dev/null \
+        | grep "msg=proxy_request" \
+        | grep "err=no_match" \
+        | grep -oE '\bhost=[^ ]*' \
+        | sed 's/^host=//' \
+        | sort | uniq -c | sort -rn | awk '{printf "%s x%s\n", $2, $1}')
+    if [ -n "$hits" ]; then
+        send_alert "🚫 clem/$PROJECT agent-vault denied unmatched-host requests: $hits"
+    fi
+    date +%s > "$marker"
 }
 `
 
@@ -228,15 +261,27 @@ const staleMarginSeconds = 300
 const staleFloorSeconds = 1800
 
 type watchdogParams struct {
-	Project        string
-	AgentHomes     string
-	EnvSource      string
-	AlertChannel   string
-	TokenEnvVar    string
-	AlertCurl      string
-	AgentChecks   string
-	VaultCheckDef string
-	VaultInvoke   string
+	Project         string
+	AgentHomes      string
+	EnvSource       string
+	AlertChannel    string
+	TokenEnvVar     string
+	AlertCurl       string
+	AgentChecks     string
+	VaultCheckDef   string
+	VaultInvoke     string
+	DenyCheckDef    string
+	DenyCheckInvoke string
+}
+
+// anyEgressEnabled reports whether at least one agent has egress containment on.
+func anyEgressEnabled(cfg *config.Config) bool {
+	for key := range cfg.Agents {
+		if cfg.EgressEnabledFor(key) {
+			return true
+		}
+	}
+	return false
 }
 
 // GenerateScript renders the watchdog shell script for the project.
@@ -306,16 +351,30 @@ func GenerateScript(cfg *config.Config) string {
 		vaultInvoke = "check_agent_vault\n"
 	}
 
+	// Deny-event alerting rides on the same agent-vault unit but only makes
+	// sense (and only has debug-level logs to read) when some agent actually
+	// has egress containment enabled — see provisionAgentVaultHost's matching
+	// AGENT_VAULT_LOG_LEVEL=debug gate.
+	denyCheckDef, denyCheckInvoke := "", ""
+	if cfg.Vault.IsAgentVault() && anyEgressEnabled(cfg) {
+		denyCheckDef = strings.NewReplacer(
+			"{{.VaultService}}", cfg.AgentVaultServiceName(),
+		).Replace(denyEventCheckDef)
+		denyCheckInvoke = "check_deny_events\n"
+	}
+
 	p := watchdogParams{
-		Project:        cfg.Project,
-		EnvSource:      envSource,
-		AlertChannel:   alertChannel,
-		TokenEnvVar:    backend.TokenEnvVar,
-		AlertCurl:      alertCurl,
-		AgentChecks:   strings.TrimRight(checks.String(), "\n"),
-		AgentHomes:    agentHomes(cfg, keys),
-		VaultCheckDef: vaultDef,
-		VaultInvoke:   vaultInvoke,
+		Project:         cfg.Project,
+		EnvSource:       envSource,
+		AlertChannel:    alertChannel,
+		TokenEnvVar:     backend.TokenEnvVar,
+		AlertCurl:       alertCurl,
+		AgentChecks:     strings.TrimRight(checks.String(), "\n"),
+		AgentHomes:      agentHomes(cfg, keys),
+		VaultCheckDef:   vaultDef,
+		VaultInvoke:     vaultInvoke,
+		DenyCheckDef:    denyCheckDef,
+		DenyCheckInvoke: denyCheckInvoke,
 	}
 
 	r := strings.NewReplacer(
@@ -328,6 +387,8 @@ func GenerateScript(cfg *config.Config) string {
 		"{{.AgentHomes}}", p.AgentHomes,
 		"{{.VaultCheckDef}}", p.VaultCheckDef,
 		"{{.VaultInvoke}}", p.VaultInvoke,
+		"{{.DenyCheckDef}}", p.DenyCheckDef,
+		"{{.DenyCheckInvoke}}", p.DenyCheckInvoke,
 	)
 	return r.Replace(watchdogScript)
 }

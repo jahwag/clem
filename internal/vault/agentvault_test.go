@@ -282,30 +282,31 @@ func TestApplyServices_BuildsCorrectFlagsPerAuthType(t *testing.T) {
 	}
 }
 
-func TestApplyPassthroughServices_AllowlistsHostsIdempotently(t *testing.T) {
-	calls := withAVRun(t, func(env []string, args ...string) ([]byte, error) {
-		// Second host simulates a re-provision: agent-vault reports it exists.
-		if strings.Contains(strings.Join(args, " "), "github-com") {
-			return []byte("service already exists"), errStub
-		}
-		return nil, nil
-	})
+func TestApplyPassthroughServices_AllowlistsHosts(t *testing.T) {
+	// vault service add is a true upsert in v0.22.0 (never errors on a
+	// duplicate name), so a re-provision re-adding the same hosts must
+	// succeed with no special "already exists" handling.
+	calls := withAVRun(t, func(env []string, args ...string) ([]byte, error) { return nil, nil })
 	err := ApplyPassthroughServices("http://127.0.0.1:14321", "team_worker",
 		[]string{"*.anthropic.com", "github.com"})
 	if err != nil {
-		t.Fatalf("ApplyPassthroughServices should tolerate an existing service: %v", err)
+		t.Fatalf("ApplyPassthroughServices: %v", err)
 	}
 	if len(*calls) != 2 {
 		t.Fatalf("expected 2 passthrough add calls, got %d", len(*calls))
 	}
 	first := strings.Join((*calls)[0].args, " ")
 	for _, frag := range []string{
-		"vault service add", "--name allow-anthropic-com", "--host *.anthropic.com",
+		"vault service add", "--name allow-wildcard-anthropic-com", "--host *.anthropic.com",
 		"--auth-type passthrough", "--vault team-worker",
 	} {
 		if !strings.Contains(first, frag) {
 			t.Errorf("passthrough add missing %q: %s", frag, first)
 		}
+	}
+	second := strings.Join((*calls)[1].args, " ")
+	if !strings.Contains(second, "--name allow-github-com") {
+		t.Errorf("passthrough add missing %q: %s", "--name allow-github-com", second)
 	}
 }
 
@@ -314,7 +315,82 @@ func TestApplyPassthroughServices_RealErrorPropagates(t *testing.T) {
 		return []byte("connection refused"), errStub
 	})
 	if err := ApplyPassthroughServices("http://127.0.0.1:14321", "w", []string{"github.com"}); err == nil {
-		t.Fatal("a non-existence error must propagate")
+		t.Fatal("an avRun error must propagate")
+	}
+}
+
+// Apex and wildcard forms of the same domain must produce distinct service
+// names — otherwise a re-provision that adds both "*.foo.com" and "foo.com"
+// would upsert the second over the first, silently dropping one from the
+// allowlist.
+func TestPassthroughServiceName_ApexAndWildcardDistinct(t *testing.T) {
+	apex := passthroughServiceName("foo.com")
+	wildcard := passthroughServiceName("*.foo.com")
+	if apex == wildcard {
+		t.Fatalf("apex %q and wildcard %q must be distinct service names", apex, wildcard)
+	}
+	if apex != "allow-foo-com" {
+		t.Errorf("apex name = %q, want allow-foo-com", apex)
+	}
+	if wildcard != "allow-wildcard-foo-com" {
+		t.Errorf("wildcard name = %q, want allow-wildcard-foo-com", wildcard)
+	}
+}
+
+func TestReconcilePassthroughServices_RemovesStaleHost(t *testing.T) {
+	calls := withAVRun(t, func(env []string, args ...string) ([]byte, error) {
+		if args[2] == "list" {
+			return []byte(`services:
+  - name: allow-wildcard-anthropic-com
+    host: "*.anthropic.com"
+    auth: {type: passthrough}
+  - name: allow-old-example-com
+    host: old.example.com
+    auth: {type: passthrough}
+  - name: github
+    host: github.com
+    auth: {type: bearer}
+`), nil
+		}
+		return nil, nil
+	})
+	err := ReconcilePassthroughServices("http://127.0.0.1:14321", "team_worker", []string{"*.anthropic.com"})
+	if err != nil {
+		t.Fatalf("ReconcilePassthroughServices: %v", err)
+	}
+	var removed []string
+	for _, c := range *calls {
+		if len(c.args) > 2 && c.args[2] == "remove" {
+			removed = append(removed, c.args[3])
+		}
+	}
+	if len(removed) != 1 || removed[0] != "allow-old-example-com" {
+		t.Fatalf("expected only allow-old-example-com removed, got %v", removed)
+	}
+}
+
+func TestReconcilePassthroughServices_ListErrorPropagates(t *testing.T) {
+	withAVRun(t, func(env []string, args ...string) ([]byte, error) {
+		return []byte("connection refused"), errStub
+	})
+	if err := ReconcilePassthroughServices("http://127.0.0.1:14321", "w", []string{"github.com"}); err == nil {
+		t.Fatal("a service-list error must propagate")
+	}
+}
+
+func TestReconcilePassthroughServices_RemoveErrorPropagates(t *testing.T) {
+	withAVRun(t, func(env []string, args ...string) ([]byte, error) {
+		if args[2] == "list" {
+			return []byte(`services:
+  - name: allow-old-example-com
+    host: old.example.com
+    auth: {type: passthrough}
+`), nil
+		}
+		return []byte("boom"), errStub
+	})
+	if err := ReconcilePassthroughServices("http://127.0.0.1:14321", "w", []string{"github.com"}); err == nil {
+		t.Fatal("a service-remove error must propagate")
 	}
 }
 

@@ -621,6 +621,14 @@ func Load(path string) (*Config, error) {
 		}
 	}
 	usedPorts := make(map[int]string)
+	if cfg.Vault.IsAgentVault() {
+		// Reserved unconditionally (not just when mcp_sidecars is configured,
+		// see validateMCPSidecars) so a web_terminal_port collision with
+		// agent-vault's management or MITM port is caught regardless of
+		// whether the project uses MCP sidecars at all.
+		usedPorts[cfg.Vault.ManagementPortOrDefault()] = "agent-vault management port"
+		usedPorts[cfg.Vault.MITMPortOrDefault()] = "agent-vault MITM port"
+	}
 	for key, ac := range cfg.Agents {
 		if !validName.MatchString(key) {
 			return nil, fmt.Errorf("agent key must match ^[a-z][a-z0-9-]{0,30}$, got: %q", key)

@@ -218,6 +218,50 @@ func TestGenerateScript_NoAgentVaultCheckWhenEnvBackend(t *testing.T) {
 	}
 }
 
+func TestGenerateScript_DenyEventCheckWhenEgressEnabled(t *testing.T) {
+	cfg := baseCfg()
+	cfg.Vault.Backend = "agent-vault"
+	cfg.Egress.Enabled = true
+	s := GenerateScript(cfg)
+	for _, want := range []string{
+		"check_deny_events()",
+		`journalctl -u "clem-agent-vault-test.service"`,
+		"msg=proxy_request",
+		"err=no_match",
+		"agent-vault denied unmatched-host requests",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("expected %q in watchdog script:\n%s", want, s)
+		}
+	}
+	defIdx := strings.Index(s, "check_deny_events()")
+	callIdx := strings.LastIndex(s, "check_deny_events")
+	if defIdx == -1 || callIdx <= defIdx {
+		t.Errorf("check_deny_events must be defined then invoked (def=%d call=%d)", defIdx, callIdx)
+	}
+}
+
+func TestGenerateScript_NoDenyEventCheckWhenEgressDisabled(t *testing.T) {
+	cfg := baseCfg()
+	cfg.Vault.Backend = "agent-vault"
+	// Egress left disabled: no agent has containment on, so agent-vault isn't
+	// running with AGENT_VAULT_LOG_LEVEL=debug and there is nothing for this
+	// check to read.
+	s := GenerateScript(cfg)
+	if strings.Contains(s, "check_deny_events") {
+		t.Errorf("no deny-event check expected when no agent has egress enabled:\n%s", s)
+	}
+}
+
+func TestGenerateScript_NoDenyEventCheckWhenNoAgentVault(t *testing.T) {
+	cfg := baseCfg()
+	cfg.Egress.Enabled = true
+	s := GenerateScript(cfg)
+	if strings.Contains(s, "check_deny_events") {
+		t.Errorf("no deny-event check expected without agent-vault backend:\n%s", s)
+	}
+}
+
 func TestGenerateScript_GitHubBackendAlertCurl(t *testing.T) {
 	cfg := baseCfg()
 	cfg.Coordination.Backend = "github"

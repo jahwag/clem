@@ -5,8 +5,10 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -169,6 +171,34 @@ func (v VaultBackend) ProxyHostOrDefault() string {
 		return "127.0.0.1:14322"
 	}
 	return v.ProxyHost
+}
+
+// ManagementPortOrDefault returns the numeric port from AddrOrDefault
+// (default 14321). Used to reserve the port against other loopback services
+// this host provisions (e.g. web_terminal_port).
+func (v VaultBackend) ManagementPortOrDefault() int {
+	return portFromHostString(v.AddrOrDefault(), 14321)
+}
+
+// MITMPortOrDefault returns the numeric port from ProxyHostOrDefault
+// (default 14322). Used to reserve the port against other loopback services
+// this host provisions (e.g. web_terminal_port).
+func (v VaultBackend) MITMPortOrDefault() int {
+	return portFromHostString(v.ProxyHostOrDefault(), 14322)
+}
+
+// portFromHostString extracts the numeric port from a host:port or
+// scheme://host:port string (IPv6-safe), falling back to def. Mirrors
+// internal/proxy's portOf, duplicated here to avoid a config->proxy import
+// cycle (proxy already imports config).
+func portFromHostString(s string, def int) int {
+	s = strings.TrimRight(strings.TrimPrefix(strings.TrimPrefix(s, "https://"), "http://"), "/")
+	if _, port, err := net.SplitHostPort(s); err == nil && port != "" {
+		if n, err := strconv.Atoi(port); err == nil {
+			return n
+		}
+	}
+	return def
 }
 
 // CACertPathOrDefault returns the CA cert path, default under /etc/clem.

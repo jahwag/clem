@@ -497,39 +497,6 @@ func TestGenerateService_EgressDisabled(t *testing.T) {
 	}
 }
 
-// The runner no longer emits its own HTTPS_PROXY export for contained agents:
-// egress requires vault_broker, and the authenticated agent-vault proxy URL is
-// written into the agent's .env by agent.BrokeredEnv (a plain http:// export
-// here would be wrong for the credential-carrying MITM).
-func TestGenerate_NoOwnProxyExportWhenEgressEnabled(t *testing.T) {
-	cfg := baseCfg("worker", config.AgentConfig{
-		Name:      "Worker",
-		Model:     "claude-opus-4-7",
-		Iteration: "1m",
-		Prompt:    "do the thing",
-	})
-	cfg.Egress = config.EgressConfig{Enabled: true}
-
-	out := Generate(cfg, "worker")
-	if strings.Contains(out, "export HTTPS_PROXY") {
-		t.Errorf("runner must not export its own HTTPS_PROXY (comes from .env), got:\n%s", out)
-	}
-}
-
-func TestGenerate_NoProxyExportWhenEgressDisabled(t *testing.T) {
-	cfg := baseCfg("worker", config.AgentConfig{
-		Name:      "Worker",
-		Model:     "claude-opus-4-7",
-		Iteration: "1m",
-		Prompt:    "do the thing",
-	})
-
-	out := Generate(cfg, "worker")
-	if strings.Contains(out, "export HTTPS_PROXY") {
-		t.Errorf("expected no HTTPS_PROXY export when egress disabled, got:\n%s", out)
-	}
-}
-
 func TestGenerate_DiscordWatchChannelsWired(t *testing.T) {
 	cfg := baseCfg("worker", config.AgentConfig{
 		Name:      "Worker",
@@ -777,15 +744,15 @@ func TestGenerate_CodexRunnerSelected(t *testing.T) {
 	out := Generate(cfg, "lead")
 
 	for _, want := range []string{
-		`CODEX="$HOME/.npm-global/bin/codex"`,            // codex binary path
-		"~/.codex/config.toml",                            // TOML config target
-		`cli_auth_credentials_store = \"file\"`,           // headless auth store
-		`forced_login_method = \"chatgpt\"`,               // clem login OAuth flow
-		"[mcp_servers.",                                    // TOML MCP tables
-		"--dangerously-bypass-approvals-and-sandbox",      // unattended execution
-		`timeout 7200 "$CODEX"`,                            // 2h interactive TUI cap
-		"tmux send-keys -l -t lead",                        // prompt injection contract
-		"--model gpt-5.4-codex",                            // model passthrough
+		`CODEX="$HOME/.npm-global/bin/codex"`,        // codex binary path
+		"~/.codex/config.toml",                       // TOML config target
+		`cli_auth_credentials_store = \"file\"`,      // headless auth store
+		`forced_login_method = \"chatgpt\"`,          // clem login OAuth flow
+		"[mcp_servers.",                              // TOML MCP tables
+		"--dangerously-bypass-approvals-and-sandbox", // unattended execution
+		`timeout 7200 "$CODEX"`,                      // 2h interactive TUI cap
+		"tmux send-keys -l -t lead",                  // prompt injection contract
+		"--model gpt-5.4-codex",                      // model passthrough
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("codex runner missing %q\nfull output:\n%s", want, out)

@@ -1390,10 +1390,10 @@ agents:
 }
 
 func TestEgress_Defaults(t *testing.T) {
-	var e EgressConfig
-	got := e.DomainsOrDefault()
+	cfg := &Config{}
+	got := cfg.EgressDomainsOrDefault()
 	if len(got) != len(DefaultEgressDomains) || got[0] != DefaultEgressDomains[0] {
-		t.Errorf("DomainsOrDefault=%v, want %v", got, DefaultEgressDomains)
+		t.Errorf("EgressDomainsOrDefault=%v, want %v", got, DefaultEgressDomains)
 	}
 }
 
@@ -1649,6 +1649,32 @@ func TestVaultBackend_Defaults(t *testing.T) {
 	}
 	if v.CACertPathOrDefault() != "/etc/clem/agent-vault-ca.pem" {
 		t.Errorf("ca default=%q", v.CACertPathOrDefault())
+	}
+}
+
+func TestLoad_WebTerminalPortCollidesWithAgentVaultMITMPort(t *testing.T) {
+	path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+vault:
+  backend: agent-vault
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+    iteration: 5m
+    prompt: go
+    vault_broker: true
+    vaults: [anthropic]
+    brokered_secrets: [ANTHROPIC_API_KEY]
+    web_terminal_port: 14322
+`)
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "agent-vault MITM port") {
+		t.Fatalf("expected web_terminal_port/agent-vault MITM port collision error, got %v", err)
 	}
 }
 
