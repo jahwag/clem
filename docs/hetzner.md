@@ -202,7 +202,7 @@ Agents interact with GitHub via the `GH_TOKEN` already in their `.env` from prov
 ### VPS: start
 
 ```bash
-ssh my-team "cd my-team && clem up && clem status"
+ssh my-team "cd my-team && clem start && clem status"
 ```
 
 Agents are now running 24/7. The watchdog restarts any dead sessions every 5 minutes.

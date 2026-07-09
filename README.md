@@ -212,7 +212,7 @@ sudo clem provision
 sudo clem login
 
 # 8. start and check
-sudo clem up
+sudo clem start
 clem status
 ```
 
@@ -366,8 +366,9 @@ clem vault list                    List all vaults and their keys (values hidden
 clem vault delete <vault> [KEY]    Delete a secret or entire vault
 clem provision [--remote HOST]     Create OS users, write .env, install services (root)
 clem login [agent...]              Run `claude /login` as each agent (one-time)
-clem up [agent...]                 Start agent systemd services (root)
-clem down [agent...]               Stop agent systemd services (root)
+clem start                         Start all agents; enables units, arms watchdog (root)
+clem stop                          Stop all agents; disables units so nothing restarts them (root)
+clem restart                       Stop, then start (root)
 clem status                        Table: systemd · tmux · token expiry · last log
 clem logs <agent>                  Tail an agent's runner log
 ```
@@ -462,7 +463,7 @@ Remote provisioning flow:
 # on your local machine, inside your team repo
 clem provision --remote root@<vps-ip> --gh-token ghp_...
 clem login --remote root@<vps-ip>
-ssh <vps-ip> "cd my-team && clem up && clem status"
+ssh <vps-ip> "cd my-team && clem start && clem status"
 ```
 
 See [docs/hetzner.md](docs/hetzner.md) for a Hetzner-specific walkthrough (cloud-init, `hcloud` CLI, SSH config).

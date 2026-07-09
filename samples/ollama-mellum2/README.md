@@ -61,7 +61,7 @@ clem vault init
 clem vault set discord-lead DISCORD_TOKEN="Bot <bot-token>"
 clem vault set github       GH_TOKEN="ghp_..."
 clem provision
-clem up
+clem start
 clem status
 ```
 

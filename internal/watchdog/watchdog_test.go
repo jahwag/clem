@@ -54,6 +54,23 @@ func TestGenerateScript_PostRestartRecheckSuppressesAlert(t *testing.T) {
 	}
 }
 
+func TestGenerateScript_SkipsDisabledUnits(t *testing.T) {
+	s := GenerateScript(baseCfg())
+	// 'systemctl disable --now' is the operator's permanent-stop escape hatch;
+	// the watchdog must not resurrect a deliberately disabled (or masked)
+	// agent — retrying a masked unit only fires spurious failure alerts.
+	guard := `disabled|masked) return ;;`
+	if !strings.Contains(s, guard) {
+		t.Errorf("generated script missing disabled-unit guard %q\n---\n%s", guard, s)
+	}
+	// The guard must run before any restart attempt.
+	guardIdx := strings.Index(s, guard)
+	restartIdx := strings.Index(s, `systemctl restart "$service"`)
+	if guardIdx == -1 || restartIdx == -1 || guardIdx > restartIdx {
+		t.Errorf("disabled-unit guard must precede restart (guard=%d restart=%d)", guardIdx, restartIdx)
+	}
+}
+
 func TestGenerateScript_DiscordBackendAlertCurl(t *testing.T) {
 	s := GenerateScript(baseCfg())
 	for _, want := range []string{

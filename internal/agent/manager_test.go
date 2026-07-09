@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -2028,5 +2029,90 @@ func TestProxyTokenValid_ProbesThroughProxy(t *testing.T) {
 	stub.failOn = "curl"
 	if ProxyTokenValid(av, "av_agt_tok", "cdev_lead") {
 		t.Error("failed probe (407/unreachable) must report invalid so caller rotates")
+	}
+}
+
+func TestSetMCPServersWritesClaudeJSON(t *testing.T) {
+	withStub(t) // chown is stubbed
+	home := t.TempDir()
+
+	servers := []config.MCPServerConfig{{
+		Name:    "browser-render",
+		Command: "mcp-browser-render",
+		Env: map[string]string{
+			"BROWSER_RENDER_API_KEY": "${vault:infra.BROWSER_RENDER_API_KEY}",
+		},
+	}}
+	secrets := map[string]string{"infra.BROWSER_RENDER_API_KEY": "sekrit"}
+
+	// File absent: created from scratch.
+	if err := SetMCPServers("cdev_worker", home, servers, secrets); err != nil {
+		t.Fatalf("SetMCPServers (no file): %v", err)
+	}
+	path := filepath.Join(home, ".claude.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf(".claude.json not written: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parsing .claude.json: %v", err)
+	}
+	entry := doc["mcpServers"].(map[string]any)["browser-render"].(map[string]any)
+	if entry["type"] != "stdio" || entry["command"] != "mcp-browser-render" {
+		t.Errorf("bad entry: %v", entry)
+	}
+	if got := entry["env"].(map[string]any)["BROWSER_RENDER_API_KEY"]; got != "sekrit" {
+		t.Errorf("vault ref not expanded: %v", got)
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0600 {
+		t.Errorf(".claude.json mode = %v, want 0600 (env holds secrets)", fi.Mode().Perm())
+	}
+
+	// File present with Claude Code state: other keys preserved.
+	if err := os.WriteFile(path, []byte(`{"oauthAccount":{"x":1},"mcpServers":{"old":{}}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetMCPServers("cdev_worker", home, servers, secrets); err != nil {
+		t.Fatalf("SetMCPServers (existing file): %v", err)
+	}
+	raw, _ = os.ReadFile(path)
+	doc = map[string]any{}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := doc["oauthAccount"]; !ok {
+		t.Error("existing .claude.json keys must be preserved")
+	}
+	if _, ok := doc["mcpServers"].(map[string]any)["old"]; ok {
+		t.Error("mcpServers must be overwritten, not merged")
+	}
+}
+
+// TestStartService_EnablesUnit pins that 'clem start' re-enables units: after
+// 'clem stop' the units are disabled, and a plain 'systemctl
+// start' would leave them invisible to the watchdog (which skips disabled
+// units) and lost on reboot.
+func TestStartService_EnablesUnit(t *testing.T) {
+	stub := withStub(t)
+	if err := StartService("foo.service"); err != nil {
+		t.Fatalf("StartService: %v", err)
+	}
+	want := []string{"systemctl", "enable", "--now", "foo.service"}
+	if len(stub.calls) != 1 || !slices.Equal(stub.calls[0], want) {
+		t.Errorf("calls = %v, want [%v]", stub.calls, want)
+	}
+}
+
+// TestDisableNowService_DisablesUnit pins the permanent-stop primitive:
+// disable --now is what makes the watchdog leave the unit alone.
+func TestDisableNowService_DisablesUnit(t *testing.T) {
+	stub := withStub(t)
+	if err := DisableNowService("foo.service"); err != nil {
+		t.Fatalf("DisableNowService: %v", err)
+	}
+	want := []string{"systemctl", "disable", "--now", "foo.service"}
+	if len(stub.calls) != 1 || !slices.Equal(stub.calls[0], want) {
+		t.Errorf("calls = %v, want [%v]", stub.calls, want)
 	}
 }

@@ -39,6 +39,14 @@ check_agent() {
     local stale_threshold="$4"
     local cooldown_file="$COOLDOWN_DIR/${agent_key}.cooldown"
 
+    # Deliberately stopped via 'systemctl disable --now' (or masked) — do not
+    # resurrect. This is the operator's permanent-stop escape hatch; without
+    # it every stop is undone on the next watchdog tick. Masked units can't
+    # be restarted anyway, so retrying would only fire spurious alerts.
+    case "$(systemctl is-enabled "$service" 2>/dev/null)" in
+        disabled|masked) return ;;
+    esac
+
     # Check cooldown
     if [ -f "$cooldown_file" ]; then
         local last_alert

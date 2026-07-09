@@ -100,7 +100,7 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Printf("\nProvisioning complete. Run 'clem login' then 'clem up'.\n")
+	fmt.Printf("\nProvisioning complete. Run 'clem login' then 'clem start'.\n")
 	return nil
 }
 

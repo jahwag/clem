@@ -75,7 +75,7 @@ type SkillConfig struct {
 	Path   string `yaml:"path"`
 }
 
-// MCPServerConfig declares an MCP server to register in ~/.claude/settings.json.
+// MCPServerConfig declares an MCP server to register in the agent's ~/.claude.json.
 // Env values may contain ${vault:BUCKET.KEY} refs resolved at provision time.
 // command/args run as the agent OS user; clem.yaml is operator-controlled.
 type MCPServerConfig struct {
