@@ -22,6 +22,12 @@ mkdir -p "$COOLDOWN_DIR"
 # Chat backend token sourced from orchestrator agent's .env
 {{.EnvSource}}
 
+# The agent .env may export egress-proxy and CA-bundle overrides for brokered
+# traffic. The watchdog calls the chat backend directly, so those make every
+# alert curl fail TLS validation (exit 60) — silently, since output is
+# discarded. Drop them; only the token is needed here.
+unset HTTPS_PROXY HTTP_PROXY ALL_PROXY NO_PROXY https_proxy http_proxy all_proxy no_proxy CURL_CA_BUNDLE SSL_CERT_FILE REQUESTS_CA_BUNDLE NODE_EXTRA_CA_CERTS
+
 send_alert() {
     local msg="$1"
     local safe_msg

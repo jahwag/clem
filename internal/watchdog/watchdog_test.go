@@ -71,6 +71,21 @@ func TestGenerateScript_SkipsDisabledUnits(t *testing.T) {
 	}
 }
 
+func TestGenerateScript_UnsetsProxyEnvBeforeAlertCurl(t *testing.T) {
+	s := GenerateScript(baseCfg())
+	// The sourced agent .env may export egress-proxy/CA overrides; with them
+	// set, direct backend curls fail TLS validation silently. The unset must
+	// come after the env source and before send_alert's curl.
+	unset := "unset HTTPS_PROXY"
+	unsetIdx := strings.Index(s, unset)
+	if unsetIdx == -1 {
+		t.Fatalf("generated script missing proxy-env unset\n---\n%s", s)
+	}
+	if curlIdx := strings.Index(s, "curl -s -X POST"); curlIdx != -1 && unsetIdx > curlIdx {
+		t.Errorf("proxy-env unset must precede alert curl (unset=%d curl=%d)", unsetIdx, curlIdx)
+	}
+}
+
 func TestGenerateScript_DiscordBackendAlertCurl(t *testing.T) {
 	s := GenerateScript(baseCfg())
 	for _, want := range []string{
