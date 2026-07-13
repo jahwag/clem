@@ -517,7 +517,7 @@ while true; do
     fi
 
     log "Updating codex"
-    npm install -g @openai/codex@latest 2>&1 | tail -3 | tee -a "$LOGFILE" || log "codex update failed, continuing with current version"
+    npm install -g @openai/codex@latest --include=optional 2>&1 | tail -3 | tee -a "$LOGFILE" || log "codex update failed, continuing with current version"
 
     {{.SkillsSyncCmd}}
 
