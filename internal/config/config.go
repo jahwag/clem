@@ -240,10 +240,11 @@ type AgentConfig struct {
 	// than the main session. Accepts model aliases (sonnet, haiku, opus) or
 	// full IDs (claude-sonnet-4-6). Empty = inherit main model.
 	SubagentModel string `yaml:"subagent_model"`
-	// Effort caps extended-thinking budget per session via Claude Code's
-	// effortLevel setting. Accepts "low", "medium", "high", "xhigh", "max".
-	// Empty = use Claude Code's own default (currently medium). Lowering trims
-	// output tokens — the dominant cost driver in agent loops.
+	// Effort caps the runtime's reasoning budget per session. Clem translates
+	// this harness-neutral value to Claude Code's effortLevel or Codex's
+	// model_reasoning_effort. Accepts "low", "medium", "high", "xhigh", "max".
+	// For Codex, "max" maps to its equivalent "xhigh". Empty leaves the
+	// runtime default unchanged.
 	Effort string `yaml:"effort"`
 	// Headroom routes the claude-code session through a local Headroom
 	// proxy (pipx package headroom-ai) that compresses context before it

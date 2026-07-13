@@ -189,14 +189,17 @@ while true; do
     fi
 
     # Per-iteration effort override: the agent writes low|medium|high|xhigh
-    # to ~/.claude/next-effort during an iteration; consumed (and deleted)
-    # here. CLAUDE_CODE_EFFORT_LEVEL is session-scoped and outranks settings
+    # to the harness-neutral ~/.clem/next-effort during an iteration; consumed
+    # (and deleted) here. The legacy Claude path remains supported.
+    # CLAUDE_CODE_EFFORT_LEVEL is session-scoped and outranks settings
     # files, so an absent file simply means settings.json effortLevel
     # applies — no reset bookkeeping, no drift across iterations.
     unset CLAUDE_CODE_EFFORT_LEVEL
-    if [ -f "$HOME/.claude/next-effort" ]; then
-        NEXT_EFFORT=$(tr -cd 'a-z' < "$HOME/.claude/next-effort" | head -c 16)
-        rm -f "$HOME/.claude/next-effort"
+    NEXT_EFFORT_FILE="$HOME/.clem/next-effort"
+    [ -f "$NEXT_EFFORT_FILE" ] || NEXT_EFFORT_FILE="$HOME/.claude/next-effort"
+    if [ -f "$NEXT_EFFORT_FILE" ]; then
+        NEXT_EFFORT=$(tr -cd 'a-z' < "$NEXT_EFFORT_FILE" | head -c 16)
+        rm -f "$NEXT_EFFORT_FILE"
         case "$NEXT_EFFORT" in
             low|medium|high|xhigh)
                 export CLAUDE_CODE_EFFORT_LEVEL="$NEXT_EFFORT"
@@ -240,7 +243,7 @@ while true; do
         SLEEP_BETWEEN=$SLEEP_NIGHT
     fi
 
-    if [ $EXIT_CODE -eq 143 ] || [ $ELAPSED -gt $RESET_AFTER ]; then
+    if [ $EXIT_CODE -eq 0 ] || [ $EXIT_CODE -eq 143 ] || [ $ELAPSED -gt $RESET_AFTER ]; then
         BACKOFF=$SLEEP_BETWEEN
     else
         BACKOFF=$(( BACKOFF * 2 ))
@@ -385,7 +388,7 @@ while true; do
         SLEEP_BETWEEN=$SLEEP_NIGHT
     fi
 
-    if [ $EXIT_CODE -eq 143 ] || [ $ELAPSED -gt $RESET_AFTER ]; then
+    if [ $EXIT_CODE -eq 0 ] || [ $EXIT_CODE -eq 143 ] || [ $ELAPSED -gt $RESET_AFTER ]; then
         BACKOFF=$SLEEP_BETWEEN
     else
         BACKOFF=$(( BACKOFF * 2 ))
@@ -440,6 +443,7 @@ lines = []
 lines.append('cli_auth_credentials_store = \"file\"')
 lines.append('mcp_oauth_credentials_store = \"file\"')
 lines.append('forced_login_method = \"chatgpt\"')
+{{.CodexEffortConfig}}
 lines.append('')
 # Trust the work directory so project-scoped config layers load without a prompt.
 lines.append('[projects.' + _s(os.path.expanduser('~/{{.Project}}')) + ']')
@@ -519,6 +523,22 @@ while true; do
 
     [ -n "$RUNNER_WARNINGS" ] && PROMPT="${RUNNER_WARNINGS}${PROMPT}"
 
+    # One-session reasoning override written by the shared effort-control skill.
+    # Arrays preserve the TOML string as one -c argument.
+    CODEX_EFFORT_ARGS=()
+    NEXT_EFFORT_FILE="$HOME/.clem/next-effort"
+    if [ -f "$NEXT_EFFORT_FILE" ]; then
+        NEXT_EFFORT=$(tr -cd 'a-z' < "$NEXT_EFFORT_FILE" | head -c 16)
+        rm -f "$NEXT_EFFORT_FILE"
+        case "$NEXT_EFFORT" in
+            low|medium|high|xhigh)
+                CODEX_EFFORT_ARGS=(-c "model_reasoning_effort=\"$NEXT_EFFORT\"")
+                log "Effort override for this session: $NEXT_EFFORT" ;;
+            *)
+                log "Ignoring invalid next-effort value: $NEXT_EFFORT" ;;
+        esac
+    fi
+
     log "Starting {{.AgentName}} (fresh session)"
     # Claude Code debounces large multi-line pastes: a single Enter sent right
     # after the prompt is swallowed as a soft newline, leaving the prompt typed
@@ -535,6 +555,7 @@ while true; do
     [ -n '{{.Model}}' ] && MODEL_ARG="--model {{.Model}}"
     timeout 7200 "$CODEX" --dangerously-bypass-approvals-and-sandbox \
         $MODEL_ARG \
+        "${CODEX_EFFORT_ARGS[@]}" \
         -C "$WORKDIR"
 
     EXIT_CODE=$?
@@ -548,7 +569,7 @@ while true; do
         SLEEP_BETWEEN=$SLEEP_NIGHT
     fi
 
-    if [ $EXIT_CODE -eq 143 ] || [ $ELAPSED -gt $RESET_AFTER ]; then
+    if [ $EXIT_CODE -eq 0 ] || [ $EXIT_CODE -eq 143 ] || [ $ELAPSED -gt $RESET_AFTER ]; then
         BACKOFF=$SLEEP_BETWEEN
     else
         BACKOFF=$(( BACKOFF * 2 ))
@@ -626,6 +647,7 @@ type RunnerParams struct {
 	AgentKey            string
 	AgentName           string
 	Model               string
+	CodexEffortConfig   string
 	SubagentExport      string
 	Prompt              string
 	OSUser              string
@@ -768,15 +790,16 @@ func Generate(cfg *config.Config, agentKey string) string {
 		)
 	}
 	p := RunnerParams{
-		Project:        cfg.Project,
-		AgentKey:       agentKey,
-		AgentName:      ac.Name,
-		Model:          ac.Model,
-		SubagentExport: subagentExport,
-		Prompt:         strings.ReplaceAll(promptText, "'", `'\''`),
-		OSUser:         cfg.OSUsername(agentKey),
-		HomeDir:        fmt.Sprintf("/home/%s", cfg.OSUsername(agentKey)),
-		SleepActive:    iterSec,
+		Project:           cfg.Project,
+		AgentKey:          agentKey,
+		AgentName:         ac.Name,
+		Model:             ac.Model,
+		CodexEffortConfig: codexEffortConfig(ac),
+		SubagentExport:    subagentExport,
+		Prompt:            strings.ReplaceAll(promptText, "'", `'\''`),
+		OSUser:            cfg.OSUsername(agentKey),
+		HomeDir:           fmt.Sprintf("/home/%s", cfg.OSUsername(agentKey)),
+		SleepActive:       iterSec,
 		// Night sleep defaults to the active value; iteration_night overrides.
 		// History: a hardcoded 2x night doubler was removed on the belief the
 		// prompt-cache TTL was 5 min. Subscription Claude Code actually gets
@@ -917,6 +940,7 @@ func renderTemplate(tmpl string, p RunnerParams) string {
 		"{{.AgentKey}}", p.AgentKey,
 		"{{.AgentName}}", p.AgentName,
 		"{{.Model}}", p.Model,
+		"{{.CodexEffortConfig}}", p.CodexEffortConfig,
 		"{{.Prompt}}", p.Prompt,
 		"{{.HeadroomLaunch}}", p.HeadroomLaunch,
 		"{{.OSUser}}", p.OSUser,
@@ -940,6 +964,26 @@ func renderTemplate(tmpl string, p RunnerParams) string {
 		"{{.InstructionFile}}", p.InstructionFile,
 	)
 	return r.Replace(tmpl)
+}
+
+// codexEffort translates Clem's harness-neutral effort vocabulary to Codex's.
+// Claude Code accepts "max" while Codex calls the same top tier "xhigh".
+func codexEffort(ac config.AgentConfig) string {
+	if ac.RuntimeKind() != "codex" {
+		return ""
+	}
+	if ac.Effort == "max" {
+		return "xhigh"
+	}
+	return ac.Effort
+}
+
+func codexEffortConfig(ac config.AgentConfig) string {
+	effort := codexEffort(ac)
+	if effort == "" {
+		return ""
+	}
+	return fmt.Sprintf(`lines.append('model_reasoning_effort = \"%s\"')`, effort)
 }
 
 // sidecarServersLiteral renders the Python list literal of [toolName, port]
