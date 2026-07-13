@@ -1378,9 +1378,10 @@ func InstallSkill(username string, s config.SkillConfig) error {
 
 // SyncSkillsRepo clones (or pulls) repoURL into <homeDir>/.cache/<repoName>/
 // as the agent user, then symlinks every subdir under shared/ and <agentKey>/
-// into <homeDir>/.claude/skills/<name>. Symlinks pointing into the cache that
-// no longer resolve are pruned, so removing a skill in the repo propagates on
-// next sync. Idempotent.
+// into every supported runtime's user skill directory: ~/.claude/skills,
+// ~/.agents/skills, and ~/.config/opencode/skills. Symlinks pointing into the
+// cache that no longer resolve are pruned, so removing a skill in the repo
+// propagates on next sync. Idempotent.
 //
 // repoURL is any URL git clone understands (https, ssh, git@host:path).
 // agentKey selects which per-agent subdir to surface. Top-level dirs other
@@ -1435,7 +1436,11 @@ type cmdRunner func(name string, args ...string) ([]byte, error)
 func syncSkillsCommon(homeDir, agentKey, repoURL string, run cmdRunner, mkDir func(string) error) error {
 	repoName := skillsCacheName(repoURL)
 	cache := filepath.Join(homeDir, ".cache", repoName)
-	skillsDir := filepath.Join(homeDir, ".claude", "skills")
+	skillsDirs := []string{
+		filepath.Join(homeDir, ".claude", "skills"),
+		filepath.Join(homeDir, ".agents", "skills"),
+		filepath.Join(homeDir, ".config", "opencode", "skills"),
+	}
 
 	if _, err := os.Stat(cache); os.IsNotExist(err) {
 		if err := mkDir(filepath.Dir(cache)); err != nil {
@@ -1452,8 +1457,10 @@ func syncSkillsCommon(homeDir, agentKey, repoURL string, run cmdRunner, mkDir fu
 		}
 	}
 
-	if err := mkDir(skillsDir); err != nil {
-		return fmt.Errorf("ensuring skills dir: %w", err)
+	for _, skillsDir := range skillsDirs {
+		if err := mkDir(skillsDir); err != nil {
+			return fmt.Errorf("ensuring skills dir %s: %w", skillsDir, err)
+		}
 	}
 
 	expected := make(map[string]string)
@@ -1480,15 +1487,19 @@ func syncSkillsCommon(homeDir, agentKey, repoURL string, run cmdRunner, mkDir fu
 				continue
 			}
 			target := filepath.Join(srcDir, name)
-			link := filepath.Join(skillsDir, name)
-			if out, err := run("ln", "-sfn", target, link); err != nil {
-				return fmt.Errorf("symlinking skill %s: %w\n%s", name, err, out)
+			for _, skillsDir := range skillsDirs {
+				link := filepath.Join(skillsDir, name)
+				if out, err := run("ln", "-sfn", target, link); err != nil {
+					return fmt.Errorf("symlinking skill %s into %s: %w\n%s", name, skillsDir, err, out)
+				}
 			}
 			expected[name] = src
 		}
 	}
 
-	pruneStaleSkillSymlinks(skillsDir, cache, expected, run)
+	for _, skillsDir := range skillsDirs {
+		pruneStaleSkillSymlinks(skillsDir, cache, expected, run)
+	}
 	return nil
 }
 
@@ -1579,7 +1590,29 @@ func SetMCPServers(username, homeDir string, servers []config.MCPServerConfig, s
 	if err := os.WriteFile(claudeJSONPath, append(out, '\n'), 0600); err != nil {
 		return fmt.Errorf("writing .claude.json: %w", err)
 	}
-	return chownToUser(claudeJSONPath, username)
+	if err := chownToUser(claudeJSONPath, username); err != nil {
+		return err
+	}
+
+	// Keep one runtime-neutral generated manifest. Non-Claude runners translate
+	// this into their native config on launch, so clem.yaml remains the only MCP
+	// source of truth across claude-code, opencode, and codex.
+	clemDir := filepath.Join(homeDir, ".clem")
+	if err := os.MkdirAll(clemDir, 0700); err != nil {
+		return fmt.Errorf("creating .clem directory: %w", err)
+	}
+	manifestPath := filepath.Join(clemDir, "mcp-servers.json")
+	manifest, err := json.MarshalIndent(mcpMap, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling runtime-neutral MCP manifest: %w", err)
+	}
+	if err := os.WriteFile(manifestPath, append(manifest, '\n'), 0600); err != nil {
+		return fmt.Errorf("writing runtime-neutral MCP manifest: %w", err)
+	}
+	if err := chownToUser(manifestPath, username); err != nil {
+		return err
+	}
+	return chownToUser(clemDir, username)
 }
 
 // InstallExtensions installs marketplaces, plugins, skills, and MCP servers for

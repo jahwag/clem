@@ -321,6 +321,24 @@ if _backend != 'github' and os.environ.get('SLACK_MCP_XOXP_TOKEN'):
             'SLACK_MCP_ADD_MESSAGE_TOOL': os.environ.get('SLACK_MCP_ADD_MESSAGE_TOOL', 'true'),
         },
     }
+# Merge Clem's runtime-neutral extension MCP manifest.
+_managed_mcp = os.path.expanduser('~/.clem/mcp-servers.json')
+if os.path.exists(_managed_mcp):
+    with open(_managed_mcp) as f:
+        for name, entry in json.load(f).items():
+            if entry.get('type') == 'stdio':
+                cfg['mcp'][name] = {
+                    'type': 'local',
+                    'command': [entry['command']] + entry.get('args', []),
+                    'enabled': True,
+                    'environment': entry.get('env', {}),
+                }
+            else:
+                cfg['mcp'][name] = {
+                    'type': 'remote',
+                    'url': entry['url'],
+                    'enabled': True,
+                }
 print(json.dumps(cfg, indent=2))
 " > "$WORKDIR/opencode.json"
 
@@ -462,6 +480,16 @@ if os.environ.get('TYPEFULLY_API_KEY'):
 # Privileged MCP sidecars over loopback streamable-HTTP (codex supports url MCP).
 for _name, _port in {{.SidecarServers}}:
     _http(_name, 'http://127.0.0.1:%d/mcp' % _port)
+# Merge Clem's runtime-neutral extension MCP manifest.
+_managed_mcp = os.path.expanduser('~/.clem/mcp-servers.json')
+if os.path.exists(_managed_mcp):
+    import json
+    with open(_managed_mcp) as f:
+        for name, entry in json.load(f).items():
+            if entry.get('type') == 'stdio':
+                _stdio(name, entry['command'], entry.get('args'), entry.get('env'))
+            else:
+                _http(name, entry['url'])
 open(os.path.expanduser('~/.codex/config.toml'), 'w').write('\n'.join(lines) + '\n')
 "
 
@@ -499,6 +527,9 @@ while true; do
     # submits the input box is empty and any further Enter is a harmless no-op.
     (sleep 1 && tmux send-keys -t {{.AgentKey}} "" Enter
      sleep 25 && tmux send-keys -l -t {{.AgentKey}} "$PROMPT"
+     # A literal '$' in shell instructions opens Codex's skill picker. Close
+     # any mention picker before attempting submission.
+     sleep 1 && tmux send-keys -t {{.AgentKey}} Escape
      for _ in 1 2 3 4 5; do sleep 3; tmux send-keys -t {{.AgentKey}} Enter; done) &
     MODEL_ARG=""
     [ -n '{{.Model}}' ] && MODEL_ARG="--model {{.Model}}"

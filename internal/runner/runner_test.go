@@ -749,9 +749,11 @@ func TestGenerate_CodexRunnerSelected(t *testing.T) {
 		`cli_auth_credentials_store = \"file\"`,      // headless auth store
 		`forced_login_method = \"chatgpt\"`,          // clem login OAuth flow
 		"[mcp_servers.",                              // TOML MCP tables
+		"~/.clem/mcp-servers.json",                   // harness-neutral extension MCPs
 		"--dangerously-bypass-approvals-and-sandbox", // unattended execution
 		`timeout 7200 "$CODEX"`,                      // 2h interactive TUI cap
 		"tmux send-keys -l -t lead",                  // prompt injection contract
+		"tmux send-keys -t lead Escape",              // close $ skill picker before submit
 		"--model gpt-5.4-codex",                      // model passthrough
 	} {
 		if !strings.Contains(out, want) {
@@ -762,6 +764,18 @@ func TestGenerate_CodexRunnerSelected(t *testing.T) {
 	// Codex must NOT carry the Anthropic-only quota/effort machinery.
 	if strings.Contains(out, "credentials.json") {
 		t.Errorf("codex runner should not reference claude credentials.json")
+	}
+}
+
+func TestGenerate_OpencodeRunnerMergesManagedMCPManifest(t *testing.T) {
+	cfg := baseCfg("lead", config.AgentConfig{
+		Name: "Lead", Runtime: "opencode", Iteration: "1m", Prompt: "do the thing",
+	})
+	out := Generate(cfg, "lead")
+	for _, want := range []string{"~/.clem/mcp-servers.json", "'type': 'local'", "'type': 'remote'"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("opencode runner missing managed MCP adapter %q", want)
+		}
 	}
 }
 

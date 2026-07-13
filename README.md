@@ -38,7 +38,7 @@ What sets it apart: **secrets and egress are contained at the OS layer, not by t
 | **Kernel egress containment** | Per-agent nftables UID firewall forces all traffic through a loopback proxy; a non-root agent can't disable a firewall it doesn't own. No in-process escape hatch. Opt-in `egress:` block. |
 | **Secret-zero brokering** | Brokered agents hold placeholders + a scoped inject-only token; real credentials live in a vault owned by a *separate* user and are injected on egress. `cat ~/.env` yields nothing usable for the brokered keys. |
 | **Multi-backend coordination** | Discord, Slack, or GitHub Issues via swappable `coordination.backend:` in `clem.yaml`. One config knob. |
-| **Multi-runtime** | `runtime: claude-code \| opencode`. Mix Anthropic cloud, Bedrock, Vertex, Ollama, OpenAI-compat - one surface. |
+| **Multi-runtime** | `runtime: claude-code \| opencode \| codex`. Mix Anthropic cloud, ChatGPT OAuth, Bedrock, Vertex, Ollama, and OpenAI-compatible providers behind one team definition. |
 | **Encrypted secrets** | Per-agent `.env` materialised from age/sops vaults at provision time. Never leave the host after. |
 | **Self-healing** | systemd + tmux per agent. Watchdog timer restarts dead or stalled sessions. Alerts fire only after repeated failures. |
 | **Bring your own model** | Default Claude; one flag away from Ollama Cloud / Bedrock / Vertex / local models. Tested end-to-end on local Gemma 4 (E4B QAT via Ollama). |
@@ -92,7 +92,7 @@ What sets it apart: **secrets and egress are contained at the OS layer, not by t
           └────────────────────────────────────┘
 ```
 
-Each agent runs a loop: launch `claude` (or `opencode`), inject a prompt, wait for the session to finish (up to 2h hard cap), sleep the configured `iteration` duration, repeat. Secrets live encrypted in `secrets.sops.yaml` (age/sops); `clem provision` decrypts them into per-agent `.env` files on the host.
+Each agent runs a loop: launch `claude`, `opencode`, or `codex`, inject a prompt, wait for the session to finish (up to 2h hard cap), sleep the configured `iteration` duration, repeat. Secrets live encrypted in `secrets.sops.yaml` (age/sops); `clem provision` decrypts them into per-agent `.env` files on the host.
 
 ---
 
@@ -408,7 +408,7 @@ agents:
     subagent_model: string  # optional - CLAUDE_CODE_SUBAGENT_MODEL for Task tool / Explore / general-purpose; defaults to claude-sonnet-4-6; set to "off" to inherit main model
     provider: string        # optional - anthropic (default) | bedrock | vertex | ollama | openai-compat
     provider_url: string    # required when provider is ollama or openai-compat
-    runtime: string         # optional - claude-code (default) | opencode
+    runtime: string         # optional - claude-code (default) | opencode | codex
 ```
 
 **Runtimes:**
@@ -417,6 +417,7 @@ agents:
 |---------------|-------------------------------------|-------------------------------------------------------------------------------------|
 | `claude-code` | `~/.local/bin/claude`               | Default. Anthropic-native wire format. Best for cloud Claude.                       |
 | `opencode`    | `~/.opencode/bin/opencode`          | Talks natively to 75+ providers via models.dev. Better tool-use on local models.   |
+| `codex`       | `~/.npm-global/bin/codex`           | OpenAI Codex CLI. Supports ChatGPT OAuth or `OPENAI_API_KEY`.                       |
 
 **Providers:**
 

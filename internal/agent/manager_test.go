@@ -1453,22 +1453,28 @@ func TestSyncSkillsRepo_SymlinksSharedAndAgent(t *testing.T) {
 		t.Fatalf("SyncSkillsRepo: %v", err)
 	}
 
-	skillsDir := filepath.Join(home, ".claude", "skills")
-	for _, name := range []string{"skill-a", "skill-b"} {
-		link := filepath.Join(skillsDir, name)
-		target, err := os.Readlink(link)
-		if err != nil {
-			t.Errorf("%s: expected symlink, got: %v", name, err)
-			continue
-		}
-		if !strings.HasPrefix(target, cache+string(filepath.Separator)) {
-			t.Errorf("%s: symlink target %q not under cache %q", name, target, cache)
-		}
+	skillsDirs := []string{
+		filepath.Join(home, ".claude", "skills"),
+		filepath.Join(home, ".agents", "skills"),
+		filepath.Join(home, ".config", "opencode", "skills"),
 	}
-	// skill-c (lead) and skill-d (random-dir) must NOT appear for worker
-	for _, name := range []string{"skill-c", "skill-d"} {
-		if _, err := os.Lstat(filepath.Join(skillsDir, name)); err == nil {
-			t.Errorf("worker should not see %s", name)
+	for _, skillsDir := range skillsDirs {
+		for _, name := range []string{"skill-a", "skill-b"} {
+			link := filepath.Join(skillsDir, name)
+			target, err := os.Readlink(link)
+			if err != nil {
+				t.Errorf("%s/%s: expected symlink, got: %v", skillsDir, name, err)
+				continue
+			}
+			if !strings.HasPrefix(target, cache+string(filepath.Separator)) {
+				t.Errorf("%s: symlink target %q not under cache %q", name, target, cache)
+			}
+		}
+		// skill-c (lead) and skill-d (random-dir) must NOT appear for worker.
+		for _, name := range []string{"skill-c", "skill-d"} {
+			if _, err := os.Lstat(filepath.Join(skillsDir, name)); err == nil {
+				t.Errorf("worker should not see %s in %s", name, skillsDir)
+			}
 		}
 	}
 
@@ -2067,6 +2073,22 @@ func TestSetMCPServersWritesClaudeJSON(t *testing.T) {
 	}
 	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0600 {
 		t.Errorf(".claude.json mode = %v, want 0600 (env holds secrets)", fi.Mode().Perm())
+	}
+	manifestPath := filepath.Join(home, ".clem", "mcp-servers.json")
+	manifestRaw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("runtime-neutral MCP manifest not written: %v", err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
+		t.Fatalf("parsing runtime-neutral MCP manifest: %v", err)
+	}
+	managed := manifest["browser-render"].(map[string]any)
+	if managed["command"] != "mcp-browser-render" {
+		t.Errorf("bad runtime-neutral entry: %v", managed)
+	}
+	if got := managed["env"].(map[string]any)["BROWSER_RENDER_API_KEY"]; got != "sekrit" {
+		t.Errorf("runtime-neutral manifest leaked unresolved vault ref: %v", got)
 	}
 
 	// File present with Claude Code state: other keys preserved.
