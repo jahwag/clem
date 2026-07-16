@@ -133,7 +133,10 @@ func EnsureSystemUser(username string) error {
 }
 
 // AgentVaultVersion is the pinned agent-vault release clem installs.
-const AgentVaultVersion = "v0.22.0"
+// v0.25.0 is the first release that streams MITM responses without the old
+// 100 MiB ceiling. The ceiling silently truncated Codex's platform tarball;
+// npm then reported success after installing only the JavaScript launcher.
+const AgentVaultVersion = "v0.25.0"
 
 // InstallAgentVault installs the pinned agent-vault release to /usr/local/bin,
 // verifying against the release checksums.txt. This verifies INTEGRITY (the
@@ -271,7 +274,10 @@ func BrokeredEnv(av config.VaultBackend, ac config.AgentConfig, token, vaultName
 	// url.UserPassword percent-encodes token/vault so reserved chars (@ : / #)
 	// in a minted token can't corrupt the proxy URL.
 	proxyURL := (&url.URL{
-		Scheme: "https",
+		// agent-vault >= v0.23 exposes a plain HTTP CONNECT proxy on loopback.
+		// The tunneled upstream connection remains HTTPS and is intercepted
+		// with agent-vault's CA; only the local proxy hop is no longer TLS.
+		Scheme: "http",
 		User:   url.UserPassword(token, vaultName),
 		Host:   av.ProxyHostOrDefault(),
 	}).String()
@@ -297,14 +303,6 @@ func BrokeredEnv(av config.VaultBackend, ac config.AgentConfig, token, vaultName
 	env["REQUESTS_CA_BUNDLE"] = ca
 	env["CURL_CA_BUNDLE"] = ca
 	env["GIT_SSL_CAINFO"] = ca
-	// HTTPS_PROXY is an HTTPS (TLS) proxy, so git tunnels to it over TLS and must
-	// trust the agent-vault CA for the PROXY connection too — not just the
-	// upstream (GIT_SSL_CAINFO). git has no env var for http.proxySSLCAInfo, so
-	// inject it via GIT_CONFIG_*. Without this, EVERY git operation through the
-	// broker (push/pull/clone to any host) fails proxy certificate verification.
-	env["GIT_CONFIG_COUNT"] = "1"
-	env["GIT_CONFIG_KEY_0"] = "http.proxySSLCAInfo"
-	env["GIT_CONFIG_VALUE_0"] = ca
 	return env
 }
 
@@ -1179,16 +1177,10 @@ func InstallRuntime(username, kind string) error {
 	}
 }
 
-// InstallCodex installs OpenAI's codex CLI for the given user via npm. Codex is
-// distributed on npm (no curl|bash installer like claude/opencode), so this
-// requires Node.js/npm to be present for the agent user. It uses a per-user
-// global prefix so the binary is owned by the agent (self-update works) and
-// lands at the stable path the runner invokes: ~/.npm-global/bin/codex.
+// InstallCodex invokes Clem's staged updater, which must already have been
+// written by provisioning. It succeeds only with a validated live release.
 func InstallCodex(username string) error {
-	script := "set -e; " +
-		"command -v npm >/dev/null 2>&1 || { echo 'npm not found: install Node.js/npm for this user before provisioning a codex agent' >&2; exit 1; }; " +
-		"npm config set prefix \"$HOME/.npm-global\"; " +
-		"npm install -g @openai/codex@latest"
+	script := `"$HOME/.local/bin/clem-codex-update" require`
 	cmd := exec.Command("sudo", "-iu", username, "bash", "-c", script)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

@@ -413,6 +413,7 @@ BACKOFF=10
 MAX_BACKOFF=900
 RESET_AFTER=300
 CODEX="$HOME/.npm-global/bin/codex"
+CODEX_UPDATER="$HOME/.local/bin/clem-codex-update"
 WORKDIR="$HOME/{{.Project}}"
 LOGFILE="$HOME/.claude/{{.AgentKey}}-runner.log"
 
@@ -444,6 +445,7 @@ lines.append('cli_auth_credentials_store = \"file\"')
 lines.append('mcp_oauth_credentials_store = \"file\"')
 lines.append('forced_login_method = \"chatgpt\"')
 {{.CodexEffortConfig}}
+lines.append('check_for_update_on_startup = false')
 lines.append('')
 # Trust the work directory so project-scoped config layers load without a prompt.
 lines.append('[projects.' + _s(os.path.expanduser('~/{{.Project}}')) + ']')
@@ -516,8 +518,7 @@ while true; do
         fi
     fi
 
-    log "Updating codex"
-    npm install -g @openai/codex@latest --include=optional 2>&1 | tail -3 | tee -a "$LOGFILE" || log "codex update failed, continuing with current version"
+    "$CODEX_UPDATER" update 2>&1 | tee -a "$LOGFILE" || log "codex update failed, continuing with current validated version"
 
     {{.SkillsSyncCmd}}
 
@@ -553,6 +554,7 @@ while true; do
      for _ in 1 2 3 4 5; do sleep 3; tmux send-keys -t {{.AgentKey}} Enter; done) &
     MODEL_ARG=""
     [ -n '{{.Model}}' ] && MODEL_ARG="--model {{.Model}}"
+    PROMOTED_VERSION=$(cat "$HOME/.npm-global/codex/state/promoted" 2>/dev/null || true)
     timeout 7200 "$CODEX" --dangerously-bypass-approvals-and-sandbox \
         $MODEL_ARG \
         "${CODEX_EFFORT_ARGS[@]}" \
@@ -561,6 +563,13 @@ while true; do
     EXIT_CODE=$?
     ELAPSED=$(( $(date +%s) - START ))
     log "Exited $EXIT_CODE after ${ELAPSED}s"
+
+    if [ $EXIT_CODE -ne 0 ] && [ $ELAPSED -lt 25 ] && [ -n "$PROMOTED_VERSION" ]; then
+        log "Codex $PROMOTED_VERSION exited before prompt injection; rolling back and quarantining"
+        "$CODEX_UPDATER" rollback-early "$PROMOTED_VERSION" 2>&1 | tee -a "$LOGFILE"
+    elif [ $ELAPSED -ge 25 ] && [ -n "$PROMOTED_VERSION" ]; then
+        "$CODEX_UPDATER" clear-promotion
+    fi
 
     HOUR=$(date +%H)
     if [ "$HOUR" -ge 7 ] && [ "$HOUR" -lt 22 ]; then

@@ -160,6 +160,7 @@ func TestGenerateAgentVaultService(t *testing.T) {
 		"--mitm-port 14322",
 		// Telemetry (PostHog product analytics) must be opted out in the unit.
 		"Environment=AGENT_VAULT_TELEMETRY=false",
+		"--max-response-bytes 0",
 		// The watchdog's deny-event alerting greps per-request proxy_request
 		// journal lines, which agent-vault only emits at debug level.
 		"--log-level debug",

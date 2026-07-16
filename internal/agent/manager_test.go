@@ -1827,7 +1827,7 @@ func TestBrokeredEnv_PlaceholdersAndConnection(t *testing.T) {
 		}
 	}
 	// Connection + CA trust.
-	if env["HTTPS_PROXY"] != "https://av_agt_tok:anthropic@127.0.0.1:14322" {
+	if env["HTTPS_PROXY"] != "http://av_agt_tok:anthropic@127.0.0.1:14322" {
 		t.Errorf("HTTPS_PROXY=%q", env["HTTPS_PROXY"])
 	}
 	if env["AGENT_VAULT_TOKEN"] != "av_agt_tok" || env["AGENT_VAULT_VAULT"] != "anthropic" {
@@ -1836,12 +1836,11 @@ func TestBrokeredEnv_PlaceholdersAndConnection(t *testing.T) {
 	if env["NODE_EXTRA_CA_CERTS"] != "/etc/clem/agent-vault-ca.pem" {
 		t.Errorf("NODE_EXTRA_CA_CERTS=%q", env["NODE_EXTRA_CA_CERTS"])
 	}
-	// git tunnels through the TLS proxy, so it must trust the agent-vault CA for
-	// the proxy connection too (http.proxySSLCAInfo) — else every git op fails.
-	if env["GIT_CONFIG_COUNT"] != "1" || env["GIT_CONFIG_KEY_0"] != "http.proxySSLCAInfo" ||
-		env["GIT_CONFIG_VALUE_0"] != "/etc/clem/agent-vault-ca.pem" {
-		t.Errorf("git proxy CA config missing/wrong: COUNT=%q KEY_0=%q VALUE_0=%q",
-			env["GIT_CONFIG_COUNT"], env["GIT_CONFIG_KEY_0"], env["GIT_CONFIG_VALUE_0"])
+	// The local proxy hop is plain HTTP from agent-vault v0.23 onward. Git still
+	// trusts the intercepted upstream via GIT_SSL_CAINFO, but must not be told
+	// that the proxy itself uses TLS.
+	if _, ok := env["GIT_CONFIG_COUNT"]; ok {
+		t.Errorf("unexpected TLS-proxy git config: %v", env)
 	}
 }
 

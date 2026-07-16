@@ -745,25 +745,30 @@ func TestGenerate_CodexRunnerSelected(t *testing.T) {
 	out := Generate(cfg, "lead")
 
 	for _, want := range []string{
-		`CODEX="$HOME/.npm-global/bin/codex"`,                    // codex binary path
-		"~/.codex/config.toml",                                   // TOML config target
-		`cli_auth_credentials_store = \"file\"`,                  // headless auth store
-		`forced_login_method = \"chatgpt\"`,                      // clem login OAuth flow
-		`model_reasoning_effort = \"high\"`,                      // harness-neutral effort passthrough
-		"[mcp_servers.",                                          // TOML MCP tables
-		"~/.clem/mcp-servers.json",                               // harness-neutral extension MCPs
-		"--dangerously-bypass-approvals-and-sandbox",             // unattended execution
-		`timeout 7200 "$CODEX"`,                                  // 2h interactive TUI cap
-		"npm install -g @openai/codex@latest --include=optional", // platform package must survive updates
-		"tmux send-keys -l -t lead",                              // prompt injection contract
-		"tmux send-keys -t lead Escape",                          // close $ skill picker before submit
-		"--model gpt-5.4-codex",                                  // model passthrough
-		`NEXT_EFFORT_FILE="$HOME/.clem/next-effort"`,             // shared one-session effort handoff
+		`CODEX="$HOME/.npm-global/bin/codex"`, // codex binary path
+		`CODEX_UPDATER="$HOME/.local/bin/clem-codex-update"`,
+		"~/.codex/config.toml",                       // TOML config target
+		`cli_auth_credentials_store = \"file\"`,      // headless auth store
+		`forced_login_method = \"chatgpt\"`,          // clem login OAuth flow
+		`check_for_update_on_startup = false`,        // Clem owns staged updates
+		`model_reasoning_effort = \"high\"`,          // harness-neutral effort passthrough
+		"[mcp_servers.",                              // TOML MCP tables
+		"~/.clem/mcp-servers.json",                   // harness-neutral extension MCPs
+		"--dangerously-bypass-approvals-and-sandbox", // unattended execution
+		`timeout 7200 "$CODEX"`,                      // 2h interactive TUI cap
+		"tmux send-keys -l -t lead",                  // prompt injection contract
+		"tmux send-keys -t lead Escape",              // close $ skill picker before submit
+		"--model gpt-5.4-codex",                      // model passthrough
+		`NEXT_EFFORT_FILE="$HOME/.clem/next-effort"`, // shared one-session effort handoff
 		`CODEX_EFFORT_ARGS=(-c "model_reasoning_effort=\"$NEXT_EFFORT\"")`,
+		`rollback-early "$PROMOTED_VERSION"`, // transactional early-failure rollback
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("codex runner missing %q\nfull output:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "npm install -g") {
+		t.Errorf("codex runner must not update the live installation in place")
 	}
 
 	// Codex must NOT carry the Anthropic-only quota machinery.

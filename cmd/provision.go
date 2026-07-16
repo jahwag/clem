@@ -116,6 +116,19 @@ func provisionAgent(agentKey string, ac config.AgentConfig) error {
 	if err := agent.EnsureUser(osUser); err != nil {
 		return fmt.Errorf("agent %s: %w", agentKey, err)
 	}
+	// Codex provisioning and runtime updates share the exact same generated,
+	// testable staged installer. Write it before InstallRuntime invokes it.
+	if ac.RuntimeKind() == "codex" {
+		binDir := filepath.Join(homeDir, ".local", "bin")
+		if err := agent.EnsureOwnedDir(binDir, osUser); err != nil {
+			return fmt.Errorf("ensuring %s: %w", binDir, err)
+		}
+		updaterPath := filepath.Join(binDir, "clem-codex-update")
+		if err := os.WriteFile(updaterPath, []byte(runner.GenerateCodexUpdater()), 0755); err != nil {
+			return fmt.Errorf("writing codex updater for %s: %w", agentKey, err)
+		}
+		chownDir(updaterPath, osUser)
+	}
 
 	// 1a. Install the agent's runtime (claude-code or opencode) into the
 	// user's home so self-update works and the runner always invokes a

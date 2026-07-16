@@ -129,7 +129,9 @@ Environment=HOME={{.DataDir}}
 # proxy_request journal lines, which agent-vault only emits at debug level.
 Environment=AGENT_VAULT_TELEMETRY=false
 EnvironmentFile={{.EnvFile}}
-ExecStart=/usr/local/bin/agent-vault server --port {{.MgmtPort}} --mitm-port {{.MitmPort}} --log-level debug
+# Keep large model/runtime artifacts streaming. agent-vault v0.22 silently
+# truncated responses at 100 MiB; 0 means unlimited streaming, not buffering.
+ExecStart=/usr/local/bin/agent-vault server --port {{.MgmtPort}} --mitm-port {{.MitmPort}} --max-response-bytes 0 --log-level debug
 Restart=always
 RestartSec=2
 NoNewPrivileges=yes
