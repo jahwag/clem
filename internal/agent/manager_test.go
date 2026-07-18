@@ -49,6 +49,49 @@ func withStub(t *testing.T) *stubExec {
 	return stub
 }
 
+// TestRTKInstallScript_PinsDigestAndDest pins the supply-chain contract: the
+// install script must fetch the exact pinned release asset, refuse a tarball
+// whose sha256 differs from the clem-pinned digest, and land the binary at
+// /usr/local/bin/rtk. Would catch a pin bump that forgot the digest, or a
+// refactor that drops verification.
+func TestRTKInstallScript_PinsDigestAndDest(t *testing.T) {
+	for arch, asset := range rtkAsset {
+		s := rtkInstallScript(asset, rtkSHA256[arch])
+		for _, want := range []string{
+			"set -euo pipefail",
+			"releases/download/v" + RTKVersion + "/" + asset,
+			rtkSHA256[arch] + "  " + asset,
+			"sha256sum -c",
+			"install -m 0755 rtk /usr/local/bin/rtk",
+		} {
+			if !strings.Contains(s, want) {
+				t.Errorf("%s install script missing %q:\n%s", arch, want, s)
+			}
+		}
+	}
+}
+
+// TestInstallRTK_InstallsThenInitsHook pins the flow and its order: ensure
+// the pinned binary (version probe, then verified download) before running
+// `rtk init` as the agent user — init would fail with no binary, and the
+// hook must be written for the nag-suppression contract to hold.
+func TestInstallRTK_InstallsThenInitsHook(t *testing.T) {
+	stub := withStub(t)
+	if err := InstallRTK("myteam-lead"); err != nil {
+		t.Fatalf("InstallRTK: %v", err)
+	}
+	if len(stub.calls) != 3 {
+		t.Fatalf("want 3 calls (version probe, install, init), got %d: %v", len(stub.calls), stub.calls)
+	}
+	if got := stub.calls[1][2]; !strings.Contains(got, "sha256sum -c") {
+		t.Errorf("second call should run the verified install script, got %q", got)
+	}
+	init := strings.Join(stub.calls[2], " ")
+	if init != "sudo -iu myteam-lead rtk init -g --hook-only --auto-patch" {
+		t.Errorf("unexpected init call: %q", init)
+	}
+}
+
 // TestSecretPatternRegex_MatchesKnownCredentials verifies the regex actually
 // matches the secret shapes we claim to detect. Would catch a typo in any
 // length bound or character class that silently lets real tokens through.

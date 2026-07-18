@@ -252,6 +252,15 @@ type AgentConfig struct {
 	// rate limits. The runner falls back to a direct claude launch when the
 	// binary is missing. claude-code runtime only; ignored for opencode/codex.
 	Headroom bool `yaml:"headroom"`
+	// RTK installs the rtk output-filter CLI (github.com/rtk-ai/rtk) at
+	// provision: one pinned static binary at /usr/local/bin/rtk shared by
+	// all agents, plus rtk's PreToolUse hook in the agent's settings.json
+	// (60-90% fewer tokens on git/test/build output). The hook rewrites
+	// commands automatically under the claude-code runtime only; for
+	// codex/opencode it is inert but still installed — it silences rtk's
+	// per-command "No hook installed" hint, and those runtimes adopt rtk
+	// through prompt instructions instead.
+	RTK bool `yaml:"rtk"`
 	// GitName and GitEmail set the agent's git user identity during provision.
 	// Without these, commits are authored with whatever identity the OAuth login
 	// stored, which may leak the operator's personal email into public history.

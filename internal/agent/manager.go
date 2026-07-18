@@ -1286,6 +1286,64 @@ func InstallHeadroom(username string) error {
 	return nil
 }
 
+// RTKVersion is the pinned rtk (github.com/rtk-ai/rtk) release clem installs.
+// Bump the version and the digests in rtkSHA256 together, from the release's
+// checksums.txt.
+const RTKVersion = "0.43.0"
+
+// rtkAsset and rtkSHA256 map GOARCH to the release asset and its digest.
+// Unlike InstallAgentVault's checksums.txt flow, the digests are clem-pinned
+// (in-source), so a replaced release asset fails verification instead of
+// installing.
+var rtkAsset = map[string]string{
+	"amd64": "rtk-x86_64-unknown-linux-musl.tar.gz",
+	"arm64": "rtk-aarch64-unknown-linux-gnu.tar.gz",
+}
+
+var rtkSHA256 = map[string]string{
+	"amd64": "ff8a1e7766496e175291a85aeca1dc97c9ff6df33e51e5893d1fbc78fea2a609",
+	"arm64": "5519f7ca12e5c143a609f0d28a0a77b97413a8dce31c2681f1a41c24519a8731",
+}
+
+// rtkInstallScript returns the bash that downloads the pinned rtk release
+// asset, verifies it against the clem-pinned digest, and lands the binary at
+// /usr/local/bin/rtk. Split from InstallRTK so tests can pin the
+// supply-chain contract without network or root.
+func rtkInstallScript(asset, sha string) string {
+	return fmt.Sprintf(`set -euo pipefail
+TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT; cd "$TMP"
+curl -fsSL -o "%[1]s" "https://github.com/rtk-ai/rtk/releases/download/v%[2]s/%[1]s"
+echo "%[3]s  %[1]s" | sha256sum -c --quiet -
+tar -xzf "%[1]s" rtk
+install -m 0755 rtk /usr/local/bin/rtk`, asset, RTKVersion, sha)
+}
+
+// InstallRTK installs the rtk output-filter CLI and its hook for the given
+// user. The binary install is host-global and idempotent (skipped when the
+// pinned version is already at /usr/local/bin/rtk); `rtk init` then writes
+// rtk's PreToolUse hook into the user's ~/.claude/settings.json, so callers
+// must run this after WriteSettings, which rewrites that file wholesale and
+// would drop the hook. Callers may treat failure as a warning: agents run
+// fine without rtk.
+func InstallRTK(username string) error {
+	sha, ok := rtkSHA256[runtime.GOARCH]
+	if !ok {
+		return fmt.Errorf("unsupported arch %q for rtk install", runtime.GOARCH)
+	}
+	verCheck := "/usr/local/bin/rtk --version 2>/dev/null"
+	if out, err := sys.Run("bash", "-c", verCheck); err != nil ||
+		!strings.Contains(string(out), RTKVersion) {
+		fmt.Printf("  installing rtk %s (%s)\n", RTKVersion, runtime.GOARCH)
+		if out, err := sys.Run("bash", "-c", rtkInstallScript(rtkAsset[runtime.GOARCH], sha)); err != nil {
+			return fmt.Errorf("installing rtk %s: %w\n%s", RTKVersion, err, out)
+		}
+	}
+	if out, err := sys.Run("sudo", "-iu", username, "rtk", "init", "-g", "--hook-only", "--auto-patch"); err != nil {
+		return fmt.Errorf("rtk init for %s: %w\n%s", username, err, out)
+	}
+	return nil
+}
+
 // InstallCaveman installs the caveman plugin for the agent user. Idempotent.
 // https://github.com/JuliusBrussee/caveman
 func InstallCaveman(username string) error {

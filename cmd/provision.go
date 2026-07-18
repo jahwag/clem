@@ -147,6 +147,15 @@ func provisionAgent(agentKey string, ac config.AgentConfig) error {
 	}
 	fmt.Printf("  wrote %s/.claude/settings.json\n", homeDir)
 
+	// 3ac. Optional rtk output filter. Must follow step 3: WriteSettings
+	// rewrites settings.json wholesale and would drop the hook `rtk init`
+	// writes there. Non-fatal like headroom.
+	if ac.RTK {
+		if err := agent.InstallRTK(osUser); err != nil {
+			fmt.Printf("  WARNING: %v (agent will run without rtk)\n", err)
+		}
+	}
+
 	// 3aa. Install extensions (marketplaces, plugins, skills, MCP servers).
 	// caveman: true is handled as a shorthand inside InstallExtensions.
 	ext := ac.Extensions

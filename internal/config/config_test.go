@@ -102,6 +102,38 @@ agents:
 	}
 }
 
+// TestLoad_ParsesAgentRTK pins the rtk opt-in: `rtk: true` on an agent must
+// survive strict decoding and land on AgentConfig.RTK, defaulting to off.
+func TestLoad_ParsesAgentRTK(t *testing.T) {
+	path := writeYAML(t, `
+project: myteam
+coordination:
+  backend: discord
+  server_id: "1"
+  channels: {general: "g"}
+operator:
+  discord_ids: ["277434478803156993"]
+agents:
+  lead:
+    name: "Lead"
+    model: "claude-sonnet-4-6"
+    rtk: true
+  worker:
+    name: "Worker"
+    model: "claude-sonnet-4-6"
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Agents["lead"].RTK {
+		t.Error("lead should have RTK enabled")
+	}
+	if cfg.Agents["worker"].RTK {
+		t.Error("worker should default to RTK disabled")
+	}
+}
+
 // TestLoad_AllowsAnchorHolderExtensionKeys pins the escape hatch that keeps
 // strict decoding compatible with shared YAML anchors: top-level "x-" keys
 // are collected (not rejected), and merge keys referencing anchors defined in
