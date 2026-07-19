@@ -625,6 +625,14 @@ func provisionAgentVaultHost() error {
 	if err := agent.StartService(cfg.AgentVaultServiceName()); err != nil {
 		return fmt.Errorf("agent-vault: starting service: %w", err)
 	}
+	// enable --now is deliberately idempotent and does not re-exec an already
+	// running unit. Re-provision may have replaced the pinned binary or changed
+	// its listener contract, so force one restart before health/API operations.
+	// This is especially important for the v0.22 -> v0.25 migration: the proxy
+	// hop changed from TLS to plain HTTP and an old process rejects every client.
+	if err := agent.RestartService(cfg.AgentVaultServiceName()); err != nil {
+		return fmt.Errorf("agent-vault: restarting service: %w", err)
+	}
 	addr := cfg.Vault.AddrOrDefault()
 	if err := waitHealthy(addr, 30); err != nil {
 		return fmt.Errorf("agent-vault: %w", err)
