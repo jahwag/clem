@@ -26,7 +26,7 @@
 
 `clem` runs a team of Claude Code agents 24/7 on any Linux host. Each agent is a separate OS user in a tmux session under systemd. Agents coordinate over **Discord, Slack, or GitHub Issues**, pick up tasks, write code, and open PRs. A watchdog restarts anything that crashes. You write one clem.yaml; clem provisions the OS users and keeps them running.
 
-What sets it apart: **secrets and egress are contained at the OS layer, not by the agent's cooperation.** A secret-zero broker hands the agent only placeholders while a separate user injects the real credential on its outbound requests; egress containment builds on that same broker — a per-UID kernel firewall forces all egress through agent-vault's TLS-MITM proxy, which allowlists approved hosts and denies the rest (a non-root agent can't disable a firewall it doesn't own). Enforced by the kernel and a separate user, not by the agent. See the [security model](#security-model).
+What sets it apart: **selected secrets and egress can be contained at the OS layer, not by the agent's cooperation.** A secret-zero broker hands the agent placeholders for configured HTTP credentials while a separate user injects the real values on outbound requests. Optional egress containment builds on that same broker: a per-UID kernel firewall forces all traffic through agent-vault's TLS-MITM proxy, which allowlists approved hosts and denies the rest (a non-root agent can't disable a firewall it doesn't own). See the [security model](#security-model).
 
 ---
 
@@ -107,9 +107,9 @@ An autonomous agent is an untrusted workload: prompt injection, a poisoned depen
 | **remove** | drop the credential/MCP entirely | nowhere | unused attack surface |
 | **egress firewall** | per-agent nftables UID rule forces all traffic through agent-vault's loopback TLS-MITM, which allowlists approved hosts and denies the rest; everything else is rejected by the kernel (requires `vault_broker`) | n/a | data exfiltration to unapproved hosts |
 
-**Why this is stronger than in-process or single-container sandboxes:** the boundary is a **per-OS-UID kernel firewall a non-root agent cannot disable**, plus a credential broker running as a **different user the agent cannot read** — neither depends on the agent's cooperation, and there is no in-process escape hatch. A compromised agent holds no usable secrets and can reach no unapproved network.
+**Why this is stronger than in-process or single-container sandboxes:** credential brokering keeps configured HTTP secrets under a **different OS user the agent cannot read**. Egress containment can be layered on top with a **per-OS-UID kernel firewall a non-root agent cannot disable**. Neither boundary relies on an in-process switch. A brokered-only agent still has unrestricted network access; an egress-contained agent is also brokered and can reach only approved hosts.
 
-Honest about the parts that are borrowed: the credential broker *and* the TLS-MITM egress proxy are one battle-tested OSS primitive ([Infisical agent-vault](https://github.com/Infisical/agent-vault)); the kernel boundary is nftables. clem's contribution is the **OS-level composition** — per-agent UID identity + kernel firewall + secret supply, wired so the agent literally cannot route around either.
+Honest about the parts that are borrowed: the credential broker *and* the TLS-MITM egress proxy are one battle-tested OSS primitive ([Infisical agent-vault](https://github.com/Infisical/agent-vault)); the kernel boundary is nftables. clem's contribution is the **OS-level composition** — per-agent UID identity + isolated secret supply, with optional kernel routing that the agent cannot bypass.
 
 → Full threat model, guarantees, and known limitations: **[docs/threat-model.md](docs/threat-model.md)**.
 → Worked reference config: **[samples/secure-fleet/](samples/secure-fleet/)**.

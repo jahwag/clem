@@ -6,7 +6,7 @@
 
 <!-- ============================ SEO ============================ -->
 <title>clem: self-hosted Claude Code agent fleets, contained at the OS layer</title>
-<meta name="description" content="clem runs a team of Claude Code agents 24/7 on any Linux host you own. Each agent is a real OS user; secrets and egress are contained by the kernel and a separate user, not by the agent's cooperation. Open source, MIT.">
+<meta name="description" content="clem runs a team of Claude Code agents 24/7 on any Linux host you own. Optional credential brokering isolates configured secrets under a separate user; optional per-UID firewalling restricts egress. Open source, MIT.">
 <link rel="canonical" href="https://myclementine.ai/">
 <meta name="theme-color" content="#F6F0E2">
 <link rel="icon" type="image/png" sizes="48x48" href="favicon-48.png">
@@ -17,7 +17,7 @@
 <meta property="og:site_name" content="clem">
 <meta property="og:url" content="https://myclementine.ai/">
 <meta property="og:title" content="clem: self-hosted Claude Code agent fleets, contained at the OS layer">
-<meta property="og:description" content="Run a team of Claude Code agents 24/7 on any Linux host. Each agent is a real OS user; secrets and egress are contained by the kernel, not by trust. Open source, MIT.">
+<meta property="og:description" content="Run a team of Claude Code agents 24/7 on any Linux host, with optional isolated credential brokering and kernel-enforced egress controls. Open source, MIT.">
 <meta property="og:image" content="https://myclementine.ai/og-card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -38,7 +38,7 @@
   "alternateName": "Clementine",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Linux",
-  "description": "clem runs a team of Claude Code agents 24/7 on any Linux host you own. Each agent is a real OS user with its own home directory and git identity; secrets and egress are contained at the kernel layer by a separate user, not by the agent's cooperation.",
+  "description": "clem runs a team of Claude Code agents 24/7 on any Linux host you own. Each agent is a real OS user with its own home directory and git identity; optional credential brokering and per-UID firewalling add separate secret and egress boundaries.",
   "url": "https://myclementine.ai/",
   "downloadUrl": "https://github.com/jahwag/clem",
   "softwareVersion": "0.19.0",
@@ -58,7 +58,7 @@
     {
       "@type": "Question",
       "name": "Why not just run Claude Code in a container?",
-      "acceptedAnswer": { "@type": "Answer", "text": "A container is a process boundary that is usually configured for convenience: blanket outbound network, a shared kernel, and sandbox settings the workload can often influence. clem puts the boundary below the agent instead. You pick a disposition per agent: a per-UID nftables rule that pins every outbound byte to an auditing proxy, or a secret-zero broker where the real credentials live with a different OS user. Either way the agent cannot disable a firewall it does not own or read another user's files. clem also provisions what containers do not: per-agent git and GitHub identity, chat coordination, and a watchdog." }
+      "acceptedAnswer": { "@type": "Answer", "text": "A container is a process boundary that is usually configured for convenience: blanket outbound network, a shared kernel, and sandbox settings the workload can often influence. clem can put two opt-in boundaries below the agent instead. A secret-zero broker keeps configured HTTP credentials under a different OS user; egress containment adds a per-UID nftables rule that pins traffic to that broker's allowlisting proxy. The agent cannot read the isolated credentials or disable a firewall it does not own. clem also provisions what containers do not: per-agent git and GitHub identity, chat coordination, and a watchdog." }
     },
     {
       "@type": "Question",
@@ -73,7 +73,7 @@
     {
       "@type": "Question",
       "name": "What can a compromised agent actually reach?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Its own home directory and whatever you allow-listed, by design. An egress-contained agent has every outbound byte pinned to an auditing proxy by a kernel rule it cannot rewrite; a brokered agent holds only placeholders, with the real credentials kept by a separate user it cannot read. The threat model documents the guarantees and the explicit non-goals." }
+      "acceptedAnswer": { "@type": "Answer", "text": "Without opt-in controls, its own files and normal network access. For configured brokered credentials it holds placeholders while the real values stay with a separate user; with egress containment, a kernel rule pins its traffic to approved hosts through the broker. It still holds its model credential and any explicitly unbrokered secrets. The threat model documents the guarantees and explicit non-goals." }
     },
     {
       "@type": "Question",
@@ -580,7 +580,7 @@ agents:
            <span class="eyebrow kicker">Autonomous, not unsupervised</span>
            <h2 class="display" style="font-size:clamp(30px,4vw,48px);margin:0 0 24px">They run on their own. You hold the keys.</h2>
            <p class="lead" style="max-width:520px;margin:0 0 22px">An autonomous agent is an untrusted workload. It needs secrets and network access to do real work, but you should not trust it to hold a raw credential or to decide for itself what it can reach.</p>
-           <p style="font-size:16px;color:var(--ink-soft);max-width:520px;margin:0">clem puts the boundary below the agent. Each one runs as its own non-root user. Secrets and egress are enforced by the kernel and a separate user the agent cannot read or override. Compromise the agent and the boundary still holds.</p>
+           <p style="font-size:16px;color:var(--ink-soft);max-width:520px;margin:0">clem puts opt-in boundaries below the agent. Each one runs as its own non-root user. Credential brokering keeps configured HTTP secrets under a separate user the agent cannot read; egress containment adds a per-UID kernel rule that forces traffic through the broker's allowlisting proxy. Compromise the agent and those configured boundaries still hold.</p>
            <blockquote class="quote-side">&ldquo;It did all the work it was allowed to. The last call is still yours.&rdquo;</blockquote>
          </div>
          <div class="checks">
@@ -608,7 +608,7 @@ agents:
          <div data-reveal>
            <span class="eyebrow kicker">In production</span>
            <h2 class="display" style="font-size:clamp(28px,3.6vw,44px);margin:0 0 20px">clem runs the <a href="https://consultant.dev" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px">consultant.dev</a> engineering team.</h2>
-           <p class="lead" style="max-width:420px;margin:0 0 22px">Agents review and ship real pull requests around the clock, coordinating over Discord. Each one is a separate OS user, contained below the agent by the kernel and a separate user.</p>
+           <p class="lead" style="max-width:420px;margin:0 0 22px">Agents review and ship real pull requests around the clock, coordinating over Discord. Each one is a separate OS user, with optional isolated credential brokering and kernel-enforced egress containment.</p>
            <div class="mono" style="display:inline-flex;align-items:center;gap:10px;font-size:13px;color:var(--ink-mute)"><span style="width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)"></span> live &middot; 24/7 under systemd</div>
            <p style="font-size:12.5px;color:var(--ink-mute);margin:14px 0 0;max-width:420px">Coordination channel shown is a representative rendering, not a live screenshot. Agent names and messages vary by team.</p>
          </div>
@@ -702,7 +702,7 @@ agents:
          </div>
          <div class="qa">
            <h3>What can a compromised agent reach?</h3>
-           <p>Its own home directory and whatever you allow-listed, by design. Egress is pinned by a kernel rule it cannot rewrite, and brokered secrets stay with a separate user it cannot read. The <a href="https://github.com/jahwag/clem/blob/main/docs/threat-model.md">threat model</a> lists the guarantees and the non-goals.</p>
+           <p>Without opt-in controls, its own files and normal network access. Configured brokered credentials stay with a separate user it cannot read; egress containment adds a kernel rule that restricts traffic to approved hosts through the broker. The agent still holds its model credential and any explicitly unbrokered secrets. The <a href="https://github.com/jahwag/clem/blob/main/docs/threat-model.md">threat model</a> lists the guarantees and the non-goals.</p>
          </div>
          <div class="qa">
            <h3>How do I give the agents work?</h3>

@@ -1,6 +1,6 @@
 # Sample: the secure fleet
 
-A worked reference for clem's least-privilege security model — the configuration shape behind [`docs/threat-model.md`](../../docs/threat-model.md). A compromised agent here holds **no usable secrets** and can reach **no unapproved network**, both enforced by the kernel and separate OS users rather than the agent's cooperation.
+A worked reference for clem's least-privilege security model — the configuration shape behind [`docs/threat-model.md`](../../docs/threat-model.md). Configured HTTP credentials are isolated behind a separate OS user; the contained worker can reach no unapproved network because its UID is pinned to an allowlisting proxy by the kernel. The sample also calls out credentials, such as Discord gateway tokens, that remain real until moved behind a sidecar.
 
 ## What it demonstrates
 
@@ -8,14 +8,14 @@ Every credential gets one of four **dispositions**:
 
 | Disposition | In this sample | Mechanism |
 |---|---|---|
-| **broker** | the `lead` brokers `ANTHROPIC_API_KEY`, `GATEWAY_API_KEY`, `GH_TOKEN` | `vault.backend: agent-vault` + `vault.services` + per-agent `vault_broker`/`brokered_secrets`. agent-vault (separate UID) injects the real value on the agent's own outbound HTTPS; the agent's `.env` holds only placeholders + a scoped inject-only token. |
+| **broker** | both agents broker their configured HTTP credentials | `vault.backend: agent-vault` + `vault.services` + per-agent `vault_broker`/`brokered_secrets`. agent-vault (separate UID) injects the real value on the agent's own outbound HTTPS; the agent's `.env` holds placeholders for those configured keys + a scoped inject-only token. |
 | **egress firewall** | the `worker` is egress-contained | top-level `egress:` block → per-agent nftables UID firewall forces all egress through a loopback proxy; everything else is kernel-rejected. |
-| **sidecar** | noted for `DISCORD_TOKEN` (coming) | the WS gateway token can't be brokered and a stdio MCP would leak it (same UID); a privileged sidecar (`clem-mcp` user, loopback HTTP MCP) will hold it. |
+| **sidecar** | recommended for `DISCORD_TOKEN`, but not configured in this minimal sample | the WS gateway token can't be HTTP-brokered and a stdio MCP would leak it (same UID); a privileged sidecar (`clem-mcp` user, loopback HTTP MCP) can hold it instead. |
 | **remove** | unused MCPs/creds | simply not provisioned — attack surface that doesn't exist can't be exfiltrated. |
 
 ## The one rule to know
 
-**Brokering and egress containment are mutually exclusive *per agent*** in this release (a brokered agent's proxy points at agent-vault, which doesn't chain through the egress proxy). So you pick per agent — here the `lead` is brokered (`egress: false`) and the `worker` is egress-contained. Choose the disposition that fits each agent's job.
+**Egress containment builds on brokering.** A contained agent must set `vault_broker: true`: agent-vault is both the credential-injecting proxy and the only egress path allowed by the UID firewall. Here the `lead` is brokered-only (`egress: false`), while the `worker` is brokered and egress-contained.
 
 ## Use it
 
