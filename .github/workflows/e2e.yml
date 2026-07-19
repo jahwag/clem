@@ -270,7 +270,8 @@ jobs:
           sudo -u egtest-lead curl -s --max-time 6 https://example.com >/dev/null 2>&1; chk "direct internet HTTPS" BLOCK $?
           sudo -u egtest-lead curl -s --max-time 6 https://1.1.1.1 >/dev/null 2>&1;     chk "raw-IP HTTPS (no DNS)" BLOCK $?
           sudo -u egtest-lead timeout 6 bash -c 'echo > /dev/tcp/93.184.216.34/443' 2>/dev/null; chk "arbitrary outbound TCP" BLOCK $?
-          sudo -u egtest-lead curl -sk --max-time 6 https://127.0.0.1:14322/ >/dev/null 2>&1; chk "loopback to agent-vault MITM :14322" ALLOW $?
+          # agent-vault >= v0.23 exposes a plain HTTP CONNECT proxy on loopback.
+          sudo -u egtest-lead curl -s --max-time 6 http://127.0.0.1:14322/ >/dev/null 2>&1; chk "loopback to agent-vault MITM :14322" ALLOW $?
           # Through-the-broker: allowlisted host tunnels; unlisted host is denied (403).
           # Through a MITM broker, a denied host returns HTTP 403 (a completed
           # transaction, curl exit 0), so assert on the status code, not exit code.
