@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -122,9 +123,15 @@ func TestRemoteCloneCmd_NoTokenInURL(t *testing.T) {
 	if strings.Contains(cmd, "oauth2:") || strings.Contains(cmd, "ghp_secrettoken@") {
 		t.Fatalf("token must not be embedded in clone URL:\n%s", cmd)
 	}
+	// GitHub rejects Bearer for classic PATs; the clone must use HTTP Basic
+	// with the token as password (x-access-token username).
+	wantAuth := "Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:ghp_secrettoken")) // clem:allow-secret
+	if strings.Contains(cmd, "bearer") || strings.Contains(cmd, "ghp_secrettoken") {
+		t.Fatalf("clone cmd must not use bearer or expose the raw token:\n%s", cmd)
+	}
 	for _, want := range []string{
 		`http.extraheader`,
-		`AUTHORIZATION: bearer ghp_secrettoken`,
+		wantAuth,
 		`clone https://github.com/org/clem.git`,
 	} {
 		if !strings.Contains(cmd, want) {

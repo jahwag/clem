@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strings"
 )
@@ -14,7 +15,12 @@ func remoteCloneCmd(repoName, cleanURL, token string) string {
 	if token == "" {
 		return fmt.Sprintf("git clone %s %s 2>/dev/null || (cd %s && git pull)", cleanURL, repoDir, repoDir)
 	}
-	header := fmt.Sprintf("AUTHORIZATION: bearer %s", token)
+	// GitHub's git-over-HTTPS endpoint rejects "Authorization: Bearer <token>"
+	// for classic PATs ("invalid credentials"); it accepts HTTP Basic with the
+	// token as the password. "x-access-token" as the username works for classic
+	// PATs, fine-grained PATs, and App installation tokens alike.
+	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
+	header := "Authorization: Basic " + basic
 	return fmt.Sprintf(
 		`git -c http.extraheader=%s clone %s %s 2>/dev/null || (cd %s && git -c http.extraheader=%s pull)`,
 		shellDoubleQuote(header),
