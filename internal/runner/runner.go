@@ -591,6 +591,17 @@ while true; do
         PREV=""
         while sleep 60; do
             if pane | grep -q "esc to interrupt"; then PREV=""; continue; fi
+            # A dead auth banner means every turn fails until credentials are
+            # repaired; recycling keeps retrying cheaply and picks up a fixed
+            # login within minutes instead of after the 2h session timeout.
+            if pane | grep -q "log out and sign in again"; then
+                if [ "$PREV" = auth ]; then
+                    log "Auth failure banner persists; recycling CLI session"
+                    pkill -TERM -f "$CODEX" 2>/dev/null
+                    exit 0
+                fi
+                PREV=auth; continue
+            fi
             if pane | grep -qi "esc to go back"; then
                 [ "$PREV" = menu ] && tmux send-keys -t {{.AgentKey}} Escape
                 PREV=menu

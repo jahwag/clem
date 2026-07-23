@@ -761,6 +761,7 @@ func TestGenerate_CodexRunnerSelected(t *testing.T) {
 		`pane() { tmux capture-pane -p -t lead`,      // state-driven injection reads the pane
 		"esc to interrupt|Worked for",                // submission is verified, not assumed
 		"Phase 3: stuck-state watchdog",              // mid-session recovery loop
+		"log out and sign in again",                  // dead-auth banner recycles the session
 		`kill "$DRIVER_PID"`,                         // driver dies with the CLI session
 		"--model gpt-5.4-codex",                      // model passthrough
 		`NEXT_EFFORT_FILE="$HOME/.clem/next-effort"`, // shared one-session effort handoff
