@@ -541,17 +541,68 @@ while true; do
     fi
 
     log "Starting {{.AgentName}} (fresh session)"
-    # Claude Code debounces large multi-line pastes: a single Enter sent right
-    # after the prompt is swallowed as a soft newline, leaving the prompt typed
-    # but never submitted (the agent looks "stuck" with its prompt in the box).
-    # Retry the Enter a few times over a wider settle window — once the prompt
-    # submits the input box is empty and any further Enter is a harmless no-op.
-    (sleep 1 && tmux send-keys -t {{.AgentKey}} "" Enter
-     sleep 25 && tmux send-keys -l -t {{.AgentKey}} "$PROMPT"
-     # A literal '$' in shell instructions opens Codex's skill picker. Close
-     # any mention picker before attempting submission.
-     sleep 1 && tmux send-keys -t {{.AgentKey}} Escape
-     for _ in 1 2 3 4 5; do sleep 3; tmux send-keys -t {{.AgentKey}} Enter; done) &
+    # Drive the CLI by pane state, not blind timing. New-version start screens,
+    # update dialogs, and menus swallow blind keystrokes as navigation — the
+    # session then sits stuck (settings screen open, or prompt typed but never
+    # submitted). Read the pane, act on what is actually on screen, verify the
+    # submission, then keep a watchdog for stuck states that appear mid-session.
+    # All state checks anchor on the last 4 non-empty pane lines (the CLI footer)
+    # so agent transcript text can't false-positive the markers.
+    pane() { tmux capture-pane -p -t {{.AgentKey}} 2>/dev/null | grep -v "^ *$" | tail -4; }
+    (
+        # Phase 1: reach the composer. Menus dismiss with Escape; update/trust
+        # dialogs advance with Enter; the composer shows a '›' input line.
+        READY=""
+        for _ in $(seq 45); do
+            sleep 2
+            if pane | grep -qi "esc to go back"; then
+                tmux send-keys -t {{.AgentKey}} Escape
+            elif pane | grep -q "›"; then
+                READY=1; break
+            else
+                tmux send-keys -t {{.AgentKey}} "" Enter
+            fi
+        done
+        # Phase 2: type the prompt and verify the CLI actually started working.
+        # A literal '$' in shell instructions opens Codex's skill picker. Close
+        # any mention picker before attempting submission; Escape is a no-op on
+        # a composer that just holds text.
+        SUBMITTED=""
+        if [ -n "$READY" ]; then
+            tmux send-keys -l -t {{.AgentKey}} "$PROMPT"
+            sleep 2
+            tmux send-keys -t {{.AgentKey}} Escape
+            for _ in $(seq 10); do
+                tmux send-keys -t {{.AgentKey}} Enter
+                sleep 3
+                if pane | grep -qE "esc to interrupt|Worked for"; then SUBMITTED=1; break; fi
+                pane | grep -qi "esc to go back" && tmux send-keys -t {{.AgentKey}} Escape
+            done
+        fi
+        if [ -z "$SUBMITTED" ]; then
+            log "Prompt injection failed pane verification; recycling CLI session"
+            pkill -TERM -f "$CODEX" 2>/dev/null
+            exit 0
+        fi
+        log "Prompt submission verified on pane"
+        # Phase 3: stuck-state watchdog. A menu screen, or sidecar-injected
+        # composer text (starts with '['), parked across two consecutive idle
+        # checks gets driven back to work instead of stalling the session.
+        PREV=""
+        while sleep 60; do
+            if pane | grep -q "esc to interrupt"; then PREV=""; continue; fi
+            if pane | grep -qi "esc to go back"; then
+                [ "$PREV" = menu ] && tmux send-keys -t {{.AgentKey}} Escape
+                PREV=menu
+            elif pane | grep -qE "^ *› *\["; then
+                [ "$PREV" = text ] && tmux send-keys -t {{.AgentKey}} Enter
+                PREV=text
+            else
+                PREV=""
+            fi
+        done
+    ) &
+    DRIVER_PID=$!
     MODEL_ARG=""
     [ -n '{{.Model}}' ] && MODEL_ARG="--model {{.Model}}"
     PROMOTED_VERSION=$(cat "$HOME/.npm-global/codex/state/promoted" 2>/dev/null || true)
@@ -561,6 +612,7 @@ while true; do
         -C "$WORKDIR"
 
     EXIT_CODE=$?
+    kill "$DRIVER_PID" 2>/dev/null
     ELAPSED=$(( $(date +%s) - START ))
     log "Exited $EXIT_CODE after ${ELAPSED}s"
 
