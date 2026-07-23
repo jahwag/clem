@@ -758,6 +758,11 @@ func TestGenerate_CodexRunnerSelected(t *testing.T) {
 		`timeout 7200 "$CODEX"`,                      // 2h interactive TUI cap
 		"tmux send-keys -l -t lead",                  // prompt injection contract
 		"tmux send-keys -t lead Escape",              // close $ skill picker before submit
+		`pane() { tmux capture-pane -p -t lead`,      // state-driven injection reads the pane
+		"esc to interrupt|Worked for",                // submission is verified, not assumed
+		"Phase 3: stuck-state watchdog",              // mid-session recovery loop
+		"log out and sign in again",                  // dead-auth banner recycles the session
+		`kill "$DRIVER_PID"`,                         // driver dies with the CLI session
 		"--model gpt-5.4-codex",                      // model passthrough
 		`NEXT_EFFORT_FILE="$HOME/.clem/next-effort"`, // shared one-session effort handoff
 		`CODEX_EFFORT_ARGS=(-c "model_reasoning_effort=\"$NEXT_EFFORT\"")`,
