@@ -26,6 +26,12 @@
 
 `clem` runs a team of Claude Code agents 24/7 on any Linux host. Each agent is a separate OS user in a tmux session under systemd. Agents coordinate over **Discord, Slack, or GitHub Issues**, pick up tasks, write code, and open PRs. A watchdog restarts anything that crashes. You write one clem.yaml; clem provisions the OS users and keeps them running.
 
+For durable agent-to-agent mailbox traffic alongside the task-board backend,
+pair Clem with [AgentBus](https://github.com/jahwag/agentbus). Clem runs and
+isolates the agents; AgentBus gives them restart-safe direct messages and
+broadcasts over Streamable HTTP MCP. The projects are independent, so either
+can be used without the other.
+
 What sets it apart: **selected secrets and egress can be contained at the OS layer, not by the agent's cooperation.** A secret-zero broker hands the agent placeholders for configured HTTP credentials while a separate user injects the real values on outbound requests. Optional egress containment builds on that same broker: a per-UID kernel firewall forces all traffic through agent-vault's TLS-MITM proxy, which allowlists approved hosts and denies the rest (a non-root agent can't disable a firewall it doesn't own). See the [security model](#security-model).
 
 ---
