@@ -84,6 +84,7 @@ func TestGenerate_HeadroomWrapsCodexLaunch(t *testing.T) {
 
 	out := Generate(&cfg, "worker")
 	for _, want := range []string{
+		`export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"`,
 		`headroom" wrap codex -p "$HEADROOM_PORT" --no-context-tool --no-serena`,
 		`timeout 7200 "${LAUNCH[@]}" --dangerously-bypass-approvals-and-sandbox`,
 	} {
