@@ -250,7 +250,7 @@ type AgentConfig struct {
 	// proxy (pipx package headroom-ai) that compresses context before it
 	// reaches the API (~12% fewer tokens measured), stretching subscription
 	// rate limits. The runner falls back to a direct claude launch when the
-	// binary is missing. claude-code runtime only; ignored for opencode/codex.
+	// binary is missing. Supported for claude-code and codex; ignored for opencode.
 	Headroom bool `yaml:"headroom"`
 	// RTK installs the rtk output-filter CLI (github.com/rtk-ai/rtk) at
 	// provision: one pinned static binary at /usr/local/bin/rtk shared by
