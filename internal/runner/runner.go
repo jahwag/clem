@@ -798,7 +798,7 @@ func codexHeadroomLaunchSnippet(enabled bool) string {
 		return ""
 	}
 	return `if [ -x "$HOME/.local/bin/headroom" ]; then
-    export PATH="$HOME/.local/bin:$PATH"
+    export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"
     HEADROOM_PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])')
     LAUNCH=("$HOME/.local/bin/headroom" wrap codex -p "$HEADROOM_PORT" --no-context-tool --no-serena)
 else
