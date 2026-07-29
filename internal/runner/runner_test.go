@@ -70,6 +70,29 @@ func TestGenerate_HeadroomOffLaunchesClaudeDirectly(t *testing.T) {
 	}
 }
 
+func TestGenerate_HeadroomWrapsCodexLaunch(t *testing.T) {
+	cfg := config.Config{
+		Project: "test",
+		Agents: map[string]config.AgentConfig{
+			"worker": {
+				Name:     "Worker",
+				Runtime:  "codex",
+				Headroom: true,
+			},
+		},
+	}
+
+	out := Generate(&cfg, "worker")
+	for _, want := range []string{
+		`headroom" wrap codex -p "$HEADROOM_PORT" --no-context-tool --no-serena`,
+		`timeout 7200 "${LAUNCH[@]}" --dangerously-bypass-approvals-and-sandbox`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("headroom-enabled Codex runner missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestGenerate_CavemanInjectsLevel(t *testing.T) {
 	for _, level := range []config.CavemanLevel{config.CavemanLite, config.CavemanFull, config.CavemanUltra} {
 		cfg := baseCfg("lead", config.AgentConfig{
@@ -755,7 +778,7 @@ func TestGenerate_CodexRunnerSelected(t *testing.T) {
 		"[mcp_servers.",                              // TOML MCP tables
 		"~/.clem/mcp-servers.json",                   // harness-neutral extension MCPs
 		"--dangerously-bypass-approvals-and-sandbox", // unattended execution
-		`timeout 7200 "$CODEX"`,                      // 2h interactive TUI cap
+		`timeout 7200 "${LAUNCH[@]}"`,                // 2h interactive TUI cap
 		"tmux send-keys -l -t lead",                  // prompt injection contract
 		"tmux send-keys -t lead Escape",              // close $ skill picker before submit
 		`pane() { tmux capture-pane -p -t lead`,      // state-driven injection reads the pane

@@ -413,6 +413,8 @@ BACKOFF=10
 MAX_BACKOFF=900
 RESET_AFTER=300
 CODEX="$HOME/.npm-global/bin/codex"
+LAUNCH=("$CODEX")
+{{.CodexHeadroomLaunch}}
 CODEX_UPDATER="$HOME/.local/bin/clem-codex-update"
 WORKDIR="$HOME/{{.Project}}"
 LOGFILE="$HOME/.claude/{{.AgentKey}}-runner.log"
@@ -617,7 +619,7 @@ while true; do
     MODEL_ARG=""
     [ -n '{{.Model}}' ] && MODEL_ARG="--model {{.Model}}"
     PROMOTED_VERSION=$(cat "$HOME/.npm-global/codex/state/promoted" 2>/dev/null || true)
-    timeout 7200 "$CODEX" --dangerously-bypass-approvals-and-sandbox \
+    timeout 7200 "${LAUNCH[@]}" --dangerously-bypass-approvals-and-sandbox \
         $MODEL_ARG \
         "${CODEX_EFFORT_ARGS[@]}" \
         -C "$WORKDIR"
@@ -760,6 +762,9 @@ type RunnerParams struct {
 	// plain claude binary or a `headroom wrap claude` invocation when the
 	// agent has headroom: true. claude-code template only.
 	HeadroomLaunch string
+	// CodexHeadroomLaunch optionally replaces the Codex launch array with a
+	// Headroom wrapper. It is empty when Headroom is disabled.
+	CodexHeadroomLaunch string
 }
 
 // headroomLaunchSnippet returns the bash block that sets $LAUNCH for the
@@ -786,6 +791,19 @@ func headroomLaunchSnippet(enabled bool) string {
         log "headroom enabled but not installed; launching claude directly"
         LAUNCH="$CLAUDE"
     fi`
+}
+
+func codexHeadroomLaunchSnippet(enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	return `if [ -x "$HOME/.local/bin/headroom" ]; then
+    export PATH="$HOME/.local/bin:$PATH"
+    HEADROOM_PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])')
+    LAUNCH=("$HOME/.local/bin/headroom" wrap codex -p "$HEADROOM_PORT" --no-context-tool --no-serena)
+else
+    log "headroom enabled but not installed; launching codex directly"
+fi`
 }
 
 // bashDoubleQuoteEscaper escapes the four characters that stay live inside a
@@ -887,6 +905,7 @@ func Generate(cfg *config.Config, agentKey string) string {
 		SkillsSyncCmd:       skillsSyncCmd,
 		InstructionFile:     ac.InstructionFileName(),
 		HeadroomLaunch:      headroomLaunchSnippet(ac.Headroom),
+		CodexHeadroomLaunch: codexHeadroomLaunchSnippet(ac.Headroom),
 	}
 	switch ac.RuntimeKind() {
 	case "opencode":
@@ -1015,6 +1034,7 @@ func renderTemplate(tmpl string, p RunnerParams) string {
 		"{{.CodexEffortConfig}}", p.CodexEffortConfig,
 		"{{.Prompt}}", p.Prompt,
 		"{{.HeadroomLaunch}}", p.HeadroomLaunch,
+		"{{.CodexHeadroomLaunch}}", p.CodexHeadroomLaunch,
 		"{{.OSUser}}", p.OSUser,
 		"{{.HomeDir}}", p.HomeDir,
 		"{{.SleepActive}}", fmt.Sprintf("%d", p.SleepActive),
