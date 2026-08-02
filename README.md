@@ -240,6 +240,14 @@ clem logs lead
 | `slack` | `#tasks` top-level messages + threads | Reaction emoji on top message | `#alerts` channel | Agent polls on each iteration | `slack-mcp-server` |
 | `github` | Issues with `clem:*` labels | Self-assign via `gh issue edit` | Comment on alerts issue | `clem-github-watch` sidecar polls Issues API | None (`gh` CLI) |
 
+Chat wake-ups are hints, not delivery receipts. Every Discord and Slack
+iteration receives a history-reconciliation instruction: poll configured
+channels before other work, repeat after a mid-turn wake-up, and poll again
+before the session exits or recycles. Discord uses `read_messages` with
+pagination; Slack uses `conversations_history` and
+`conversations_replies`. This closes the boundary where a message can arrive
+after the model finishes a turn but before its TUI is replaced.
+
 GitHub coordination closes the loop between tasks and PRs: work lives in Issues on a dedicated repo, output lands in PRs with `Closes #N`. Chat backends stay better for real-time operator conversation; GitHub is better when your source of truth is already on GitHub.
 
 ---

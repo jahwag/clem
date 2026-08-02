@@ -548,6 +548,95 @@ func TestGenerate_DiscordWatchChannelsWired(t *testing.T) {
 	}
 }
 
+func TestGenerate_DiscordReconcilesHistoryAtIterationBoundaries(t *testing.T) {
+	cfg := baseCfg("worker", config.AgentConfig{
+		Name:      "Worker",
+		Model:     "claude-opus-4-7",
+		Iteration: "1m",
+		Prompt:    "do the thing",
+	})
+
+	out := Generate(cfg, "worker")
+
+	for _, want := range []string{
+		"Push notifications are wake-up hints only",
+		"mcp__discord-bot__read_messages",
+		"limit 100",
+		"Before other work",
+		"before ending or recycling the iteration",
+		"Never require the operator to resend",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected Discord history replay instruction %q in runner, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestGenerate_SlackReconcilesHistoryAtIterationBoundaries(t *testing.T) {
+	cfg := baseCfg("worker", config.AgentConfig{
+		Name:      "Worker",
+		Model:     "claude-opus-4-7",
+		Iteration: "1m",
+		Prompt:    "do the thing",
+	})
+	cfg.Coordination.Backend = "slack"
+
+	out := Generate(cfg, "worker")
+
+	for _, want := range []string{
+		"Polling is message delivery",
+		"mcp__slack-mcp__conversations_history",
+		"limit \"100\"",
+		"mcp__slack-mcp__conversations_replies",
+		"Before other work",
+		"before ending or recycling the iteration",
+		"Never require the operator to resend",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected Slack history replay instruction %q in runner, got:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "mcp__discord-bot__read_messages") {
+		t.Fatalf("Slack runner must not receive Discord replay instructions, got:\n%s", out)
+	}
+}
+
+func TestGenerate_GitHubDoesNotInjectChatHistoryReplay(t *testing.T) {
+	cfg := baseCfg("worker", config.AgentConfig{
+		Name:      "Worker",
+		Model:     "claude-opus-4-7",
+		Iteration: "1m",
+		Prompt:    "do the thing",
+	})
+	cfg.Coordination.Backend = "github"
+
+	out := Generate(cfg, "worker")
+
+	if strings.Contains(out, "coordination replay") {
+		t.Fatalf("GitHub runner must not receive chat history replay instructions, got:\n%s", out)
+	}
+}
+
+func TestGenerate_CoordinationReplayAppliesToEveryInteractiveRuntime(t *testing.T) {
+	for _, runtime := range []string{"", "opencode", "codex"} {
+		t.Run(runtime, func(t *testing.T) {
+			cfg := baseCfg("worker", config.AgentConfig{
+				Name:      "Worker",
+				Runtime:   runtime,
+				Model:     "test-model",
+				Iteration: "1m",
+				Prompt:    "do the thing",
+			})
+
+			out := Generate(cfg, "worker")
+			replayAt := strings.Index(out, "[clem coordination replay]")
+			if replayAt == -1 {
+				t.Fatalf("runtime %q missing coordination replay instruction", runtime)
+			}
+		})
+	}
+}
+
 func TestGenerate_DiscordWatchEmptyWhenNoChannels(t *testing.T) {
 	cfg := &config.Config{
 		Project: "test",
