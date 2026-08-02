@@ -255,6 +255,13 @@ handles the returned page and explicitly acknowledges its delivery ID. During
 a mixed-version rollout, the injected prompt falls back to paginated
 `read_messages` when those tools are unavailable.
 
+For an established project, install the matching mcp-discord release and seed
+each configured channel's last reviewed message ID before provisioning this
+Clem change. Use `mcp-discord-seed-delivery` as the target agent OS user with
+the same `~/.clem/discord-delivery.json` path. Do not enable the durable prompt
+against an unseeded established channel because the safe default replays from
+the channel's oldest message.
+
 GitHub coordination closes the loop between tasks and PRs: work lives in Issues on a dedicated repo, output lands in PRs with `Closes #N`. Chat backends stay better for real-time operator conversation; GitHub is better when your source of truth is already on GitHub.
 
 ---
