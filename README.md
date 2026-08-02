@@ -255,6 +255,11 @@ handles the returned page and explicitly acknowledges its delivery ID. During
 a mixed-version rollout, the injected prompt falls back to paginated
 `read_messages` when those tools are unavailable.
 
+Replies use a stable `client_message_id` per logical outbound message, derived
+from the triggering message ID plus a stable purpose or phase discriminator.
+Retries of one logical reply reuse its ID, while separate replies to the same
+trigger, such as receipt and resolution, use different discriminators.
+
 For an established project, install the matching mcp-discord release and seed
 each configured channel's last reviewed message ID before provisioning this
 Clem change. Use `mcp-discord-seed-delivery` as the target agent OS user with
