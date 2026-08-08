@@ -413,6 +413,8 @@ BACKOFF=10
 MAX_BACKOFF=900
 RESET_AFTER=300
 CODEX="$HOME/.npm-global/bin/codex"
+LAUNCH=("$CODEX")
+{{.CodexHeadroomLaunch}}
 CODEX_UPDATER="$HOME/.local/bin/clem-codex-update"
 WORKDIR="$HOME/{{.Project}}"
 LOGFILE="$HOME/.claude/{{.AgentKey}}-runner.log"
@@ -617,7 +619,7 @@ while true; do
     MODEL_ARG=""
     [ -n '{{.Model}}' ] && MODEL_ARG="--model {{.Model}}"
     PROMOTED_VERSION=$(cat "$HOME/.npm-global/codex/state/promoted" 2>/dev/null || true)
-    timeout 7200 "$CODEX" --dangerously-bypass-approvals-and-sandbox \
+    timeout 7200 "${LAUNCH[@]}" --dangerously-bypass-approvals-and-sandbox \
         $MODEL_ARG \
         "${CODEX_EFFORT_ARGS[@]}" \
         -C "$WORKDIR"
@@ -760,6 +762,9 @@ type RunnerParams struct {
 	// plain claude binary or a `headroom wrap claude` invocation when the
 	// agent has headroom: true. claude-code template only.
 	HeadroomLaunch string
+	// CodexHeadroomLaunch optionally replaces the Codex launch array with a
+	// Headroom wrapper. It is empty when Headroom is disabled.
+	CodexHeadroomLaunch string
 }
 
 // headroomLaunchSnippet returns the bash block that sets $LAUNCH for the
@@ -788,6 +793,19 @@ func headroomLaunchSnippet(enabled bool) string {
     fi`
 }
 
+func codexHeadroomLaunchSnippet(enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	return `if [ -x "$HOME/.local/bin/headroom" ]; then
+    export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"
+    HEADROOM_PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])')
+    LAUNCH=("$HOME/.local/bin/headroom" wrap codex -p "$HEADROOM_PORT" --code-memory none)
+else
+    log "headroom enabled but not installed; launching codex directly"
+fi`
+}
+
 // bashDoubleQuoteEscaper escapes the four characters that stay live inside a
 // bash double-quoted string.
 var bashDoubleQuoteEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, `$`, `\$`, "`", "\\`")
@@ -805,6 +823,26 @@ func escapeForAlert(s string) string {
 	return bashDoubleQuoteEscaper.Replace(string(j[1 : len(j)-1]))
 }
 
+// coordinationReplayPrompt makes chat notifications a wake-up mechanism,
+// never the delivery boundary. A notification can land while the model is
+// finishing a turn or while the TUI is being recycled, so every fresh
+// iteration must reconcile backend history before doing other work.
+func coordinationReplayPrompt(cfg *config.Config) string {
+	backend, err := coordination.Known(cfg.Coordination.Backend)
+	if err != nil {
+		return ""
+	}
+
+	switch backend.Name {
+	case "discord":
+		return "[clem coordination replay] Push notifications are wake-up hints only, not delivery or acknowledgement. Before other work, when a push notice arrives, and again before ending or recycling the iteration, call mcp__discord-bot__read_messages with limit 100 for each configured text channel. Continue with before_message_id when a page is full, and inspect relevant task thread history. Handle every trusted operator message without a later substantive response. Never require the operator to resend a message because it arrived during another turn."
+	case "slack":
+		return "[clem coordination replay] Polling is message delivery for Slack; terminal activity is not acknowledgement. Before other work, and again before ending or recycling the iteration, call mcp__slack-mcp__conversations_history with limit \"100\" for each configured channel. Follow next_cursor until history overlaps the previous sweep, and call mcp__slack-mcp__conversations_replies for relevant task threads. Handle every trusted operator message without a later substantive response. Never require the operator to resend a message because it arrived during another turn."
+	default:
+		return ""
+	}
+}
+
 // Generate renders the runner.sh content for an agent. Dispatches on the
 // agent's runtime (claude-code default, or opencode).
 func Generate(cfg *config.Config, agentKey string) string {
@@ -820,6 +858,9 @@ func Generate(cfg *config.Config, agentKey string) string {
 	promptText := agentdoc.Substitute(ac.Prompt, cfg, agentKey)
 	if ac.Caveman.Enabled() {
 		promptText = "/caveman " + ac.Caveman.Level() + "\n" + promptText
+	}
+	if replayPrompt := coordinationReplayPrompt(cfg); replayPrompt != "" {
+		promptText = strings.TrimRight(promptText, " \n") + "\n" + replayPrompt
 	}
 	// Interactive TUIs (claude-code, opencode) do not exit after completing a
 	// prompt — they wait for the next tmux-injected input. The runner loop
@@ -887,6 +928,7 @@ func Generate(cfg *config.Config, agentKey string) string {
 		SkillsSyncCmd:       skillsSyncCmd,
 		InstructionFile:     ac.InstructionFileName(),
 		HeadroomLaunch:      headroomLaunchSnippet(ac.Headroom),
+		CodexHeadroomLaunch: codexHeadroomLaunchSnippet(ac.Headroom),
 	}
 	switch ac.RuntimeKind() {
 	case "opencode":
@@ -1015,6 +1057,7 @@ func renderTemplate(tmpl string, p RunnerParams) string {
 		"{{.CodexEffortConfig}}", p.CodexEffortConfig,
 		"{{.Prompt}}", p.Prompt,
 		"{{.HeadroomLaunch}}", p.HeadroomLaunch,
+		"{{.CodexHeadroomLaunch}}", p.CodexHeadroomLaunch,
 		"{{.OSUser}}", p.OSUser,
 		"{{.HomeDir}}", p.HomeDir,
 		"{{.SleepActive}}", fmt.Sprintf("%d", p.SleepActive),

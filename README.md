@@ -26,6 +26,12 @@
 
 `clem` runs a team of Claude Code agents 24/7 on any Linux host. Each agent is a separate OS user in a tmux session under systemd. Agents coordinate over **Discord, Slack, or GitHub Issues**, pick up tasks, write code, and open PRs. A watchdog restarts anything that crashes. You write one clem.yaml; clem provisions the OS users and keeps them running.
 
+For durable agent-to-agent mailbox traffic alongside the task-board backend,
+pair Clem with [AgentBus](https://github.com/jahwag/agentbus). Clem runs and
+isolates the agents; AgentBus gives them restart-safe direct messages and
+broadcasts over Streamable HTTP MCP. The projects are independent, so either
+can be used without the other.
+
 What sets it apart: **selected secrets and egress can be contained at the OS layer, not by the agent's cooperation.** A secret-zero broker hands the agent placeholders for configured HTTP credentials while a separate user injects the real values on outbound requests. Optional egress containment builds on that same broker: a per-UID kernel firewall forces all traffic through agent-vault's TLS-MITM proxy, which allowlists approved hosts and denies the rest (a non-root agent can't disable a firewall it doesn't own). See the [security model](#security-model).
 
 ---
@@ -233,6 +239,14 @@ clem logs lead
 | `discord` (default) | `#tasks` forum threads | Thread prefix `[TODO]` → `[IN PROGRESS]` | `#alerts` channel | `mcp-discord` gateway watcher | `mcp-discord` |
 | `slack` | `#tasks` top-level messages + threads | Reaction emoji on top message | `#alerts` channel | Agent polls on each iteration | `slack-mcp-server` |
 | `github` | Issues with `clem:*` labels | Self-assign via `gh issue edit` | Comment on alerts issue | `clem-github-watch` sidecar polls Issues API | None (`gh` CLI) |
+
+Chat wake-ups are hints, not delivery receipts. Every Discord and Slack
+iteration receives a history-reconciliation instruction: poll configured
+channels before other work, repeat after a mid-turn wake-up, and poll again
+before the session exits or recycles. Discord uses `read_messages` with
+pagination; Slack uses `conversations_history` and
+`conversations_replies`. This closes the boundary where a message can arrive
+after the model finishes a turn but before its TUI is replaced.
 
 GitHub coordination closes the loop between tasks and PRs: work lives in Issues on a dedicated repo, output lands in PRs with `Closes #N`. Chat backends stay better for real-time operator conversation; GitHub is better when your source of truth is already on GitHub.
 

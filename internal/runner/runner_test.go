@@ -70,6 +70,30 @@ func TestGenerate_HeadroomOffLaunchesClaudeDirectly(t *testing.T) {
 	}
 }
 
+func TestGenerate_HeadroomWrapsCodexLaunch(t *testing.T) {
+	cfg := config.Config{
+		Project: "test",
+		Agents: map[string]config.AgentConfig{
+			"worker": {
+				Name:     "Worker",
+				Runtime:  "codex",
+				Headroom: true,
+			},
+		},
+	}
+
+	out := Generate(&cfg, "worker")
+	for _, want := range []string{
+		`export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"`,
+		`headroom" wrap codex -p "$HEADROOM_PORT" --code-memory none`,
+		`timeout 7200 "${LAUNCH[@]}" --dangerously-bypass-approvals-and-sandbox`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("headroom-enabled Codex runner missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestGenerate_CavemanInjectsLevel(t *testing.T) {
 	for _, level := range []config.CavemanLevel{config.CavemanLite, config.CavemanFull, config.CavemanUltra} {
 		cfg := baseCfg("lead", config.AgentConfig{
@@ -524,6 +548,95 @@ func TestGenerate_DiscordWatchChannelsWired(t *testing.T) {
 	}
 }
 
+func TestGenerate_DiscordReconcilesHistoryAtIterationBoundaries(t *testing.T) {
+	cfg := baseCfg("worker", config.AgentConfig{
+		Name:      "Worker",
+		Model:     "claude-opus-4-7",
+		Iteration: "1m",
+		Prompt:    "do the thing",
+	})
+
+	out := Generate(cfg, "worker")
+
+	for _, want := range []string{
+		"Push notifications are wake-up hints only",
+		"mcp__discord-bot__read_messages",
+		"limit 100",
+		"Before other work",
+		"before ending or recycling the iteration",
+		"Never require the operator to resend",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected Discord history replay instruction %q in runner, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestGenerate_SlackReconcilesHistoryAtIterationBoundaries(t *testing.T) {
+	cfg := baseCfg("worker", config.AgentConfig{
+		Name:      "Worker",
+		Model:     "claude-opus-4-7",
+		Iteration: "1m",
+		Prompt:    "do the thing",
+	})
+	cfg.Coordination.Backend = "slack"
+
+	out := Generate(cfg, "worker")
+
+	for _, want := range []string{
+		"Polling is message delivery",
+		"mcp__slack-mcp__conversations_history",
+		"limit \"100\"",
+		"mcp__slack-mcp__conversations_replies",
+		"Before other work",
+		"before ending or recycling the iteration",
+		"Never require the operator to resend",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected Slack history replay instruction %q in runner, got:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "mcp__discord-bot__read_messages") {
+		t.Fatalf("Slack runner must not receive Discord replay instructions, got:\n%s", out)
+	}
+}
+
+func TestGenerate_GitHubDoesNotInjectChatHistoryReplay(t *testing.T) {
+	cfg := baseCfg("worker", config.AgentConfig{
+		Name:      "Worker",
+		Model:     "claude-opus-4-7",
+		Iteration: "1m",
+		Prompt:    "do the thing",
+	})
+	cfg.Coordination.Backend = "github"
+
+	out := Generate(cfg, "worker")
+
+	if strings.Contains(out, "coordination replay") {
+		t.Fatalf("GitHub runner must not receive chat history replay instructions, got:\n%s", out)
+	}
+}
+
+func TestGenerate_CoordinationReplayAppliesToEveryInteractiveRuntime(t *testing.T) {
+	for _, runtime := range []string{"", "opencode", "codex"} {
+		t.Run(runtime, func(t *testing.T) {
+			cfg := baseCfg("worker", config.AgentConfig{
+				Name:      "Worker",
+				Runtime:   runtime,
+				Model:     "test-model",
+				Iteration: "1m",
+				Prompt:    "do the thing",
+			})
+
+			out := Generate(cfg, "worker")
+			replayAt := strings.Index(out, "[clem coordination replay]")
+			if replayAt == -1 {
+				t.Fatalf("runtime %q missing coordination replay instruction", runtime)
+			}
+		})
+	}
+}
+
 func TestGenerate_DiscordWatchEmptyWhenNoChannels(t *testing.T) {
 	cfg := &config.Config{
 		Project: "test",
@@ -755,7 +868,7 @@ func TestGenerate_CodexRunnerSelected(t *testing.T) {
 		"[mcp_servers.",                              // TOML MCP tables
 		"~/.clem/mcp-servers.json",                   // harness-neutral extension MCPs
 		"--dangerously-bypass-approvals-and-sandbox", // unattended execution
-		`timeout 7200 "$CODEX"`,                      // 2h interactive TUI cap
+		`timeout 7200 "${LAUNCH[@]}"`,                // 2h interactive TUI cap
 		"tmux send-keys -l -t lead",                  // prompt injection contract
 		"tmux send-keys -t lead Escape",              // close $ skill picker before submit
 		`pane() { tmux capture-pane -p -t lead`,      // state-driven injection reads the pane

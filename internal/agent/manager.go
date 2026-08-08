@@ -1255,13 +1255,18 @@ func InstallClaude(username string) error {
 // The runner falls back to a direct claude launch when the binary is missing,
 // so callers may treat a failure here as a warning rather than aborting the
 // provision.
+// Keep the wrapper CLI stable: generated runners depend on its exact flags,
+// and a surprise upstream option removal can take every enabled agent offline.
+const headroomVersion = "0.34.0"
+
 func InstallHeadroom(username string) error {
+	pkg := fmt.Sprintf(`"headroom-ai[proxy]==%s"`, headroomVersion)
 	cmd := exec.Command("sudo", "-iu", username, "bash", "-c",
 		"if command -v pipx >/dev/null; then "+
-			"pipx install --force \"headroom-ai[proxy]\"; "+
+			"pipx install --force "+pkg+"; "+
 			"else "+
-			"python3 -m pip install --user --upgrade \"headroom-ai[proxy]\" 2>/dev/null || "+
-			"python3 -m pip install --user --upgrade --break-system-packages \"headroom-ai[proxy]\"; "+
+			"python3 -m pip install --user --upgrade "+pkg+" 2>/dev/null || "+
+			"python3 -m pip install --user --upgrade --break-system-packages "+pkg+"; "+
 			"fi")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
