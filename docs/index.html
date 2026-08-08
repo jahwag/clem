@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <!-- ============================ SEO ============================ -->
-<title>clem: self-hosted Claude Code agent fleets, contained at the OS layer</title>
-<meta name="description" content="clem runs a team of Claude Code agents 24/7 on any Linux host you own. Optional credential brokering isolates configured secrets under a separate user; optional per-UID firewalling restricts egress. Open source, MIT.">
+<title>Clem: Agent orchestrator and bootstrapper for CLI teams</title>
+<meta name="description" content="Run owner-directed CLI agent teams on Linux with issue tracking, durable memory, agent communication, MCP integrations, supervision, and runtime usage visibility. Open source, MIT.">
 <link rel="canonical" href="https://myclementine.ai/">
 <meta name="theme-color" content="#F6F0E2">
 <link rel="icon" type="image/png" sizes="48x48" href="favicon-48.png">
@@ -16,17 +16,17 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="clem">
 <meta property="og:url" content="https://myclementine.ai/">
-<meta property="og:title" content="clem: self-hosted Claude Code agent fleets, contained at the OS layer">
-<meta property="og:description" content="Run a team of Claude Code agents 24/7 on any Linux host, with optional isolated credential brokering and kernel-enforced egress controls. Open source, MIT.">
+<meta property="og:title" content="Clem: Agent orchestrator and bootstrapper for CLI teams">
+<meta property="og:description" content="Run owner-directed CLI agent teams with issue tracking, durable memory, agent communication, MCP integrations, supervision, and runtime usage visibility. Open source, MIT.">
 <meta property="og:image" content="https://myclementine.ai/og-card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="clem — a team of self-hosted Claude Code agents that never clocks out">
+<meta property="og:image:alt" content="clem, agent orchestrator and bootstrapper for self-hosted teams">
 
 <!-- Twitter -->
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="clem: self-hosted Claude Code agent fleets">
-<meta name="twitter:description" content="Autonomous agents, contained by the kernel, not by trust. Run a fleet of Claude Code agents 24/7 on infrastructure you own.">
+<meta name="twitter:title" content="Clem: Agent orchestrator and bootstrapper">
+<meta name="twitter:description" content="Run owner-directed CLI agent teams with issue tracking, durable memory, agent communication, MCP integrations, and fleet supervision.">
 <meta name="twitter:image" content="https://myclementine.ai/og-card.png">
 
 <!-- JSON-LD: SoftwareApplication -->
@@ -34,11 +34,11 @@
 {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
-  "name": "clem",
+  "name": "Clem",
   "alternateName": "Clementine",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Linux",
-  "description": "clem runs a team of Claude Code agents 24/7 on any Linux host you own. Each agent is a real OS user with its own home directory and git identity; optional credential brokering and per-UID firewalling add separate secret and egress boundaries.",
+  "description": "Clem runs owner-directed CLI agent teams on Linux with issue tracking, durable memory, agent communication, MCP integrations, supervision, and runtime usage visibility.",
   "url": "https://myclementine.ai/",
   "downloadUrl": "https://github.com/jahwag/clem",
   "softwareVersion": "0.19.0",
@@ -57,28 +57,28 @@
   "mainEntity": [
     {
       "@type": "Question",
-      "name": "Why not just run Claude Code in a container?",
-      "acceptedAnswer": { "@type": "Answer", "text": "A container is a process boundary that is usually configured for convenience: blanket outbound network, a shared kernel, and sandbox settings the workload can often influence. clem can put two opt-in boundaries below the agent instead. A secret-zero broker keeps configured HTTP credentials under a different OS user; egress containment adds a per-UID nftables rule that pins traffic to that broker's allowlisting proxy. The agent cannot read the isolated credentials or disable a firewall it does not own. clem also provisions what containers do not: per-agent git and GitHub identity, chat coordination, and a watchdog." }
+      "name": "Why not just run a CLI agent in a container?",
+      "acceptedAnswer": { "@type": "Answer", "text": "A container provides a process boundary, but it does not provision agent identity, issue tracking, scheduled iteration, watchdog recovery, skills, or runtime-specific configuration. When enabled, Clem also adds per-user egress controls or credential brokering outside the agent user." }
     },
     {
       "@type": "Question",
-      "name": "Is running Claude Code this way allowed by Anthropic's terms?",
-      "acceptedAnswer": { "@type": "Answer", "text": "clem runs the unmodified official Claude Code CLI under your own account on hardware you own; it loops the same binary you run by hand, and Anthropic itself ships headless and CI integrations of Claude Code. clem makes no compliance claims either way. Read Anthropic's Usage Policy and the Commercial or Consumer Terms and decide for your own setup." }
+      "name": "Which CLI runtimes does Clem support?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Clem supports Claude Code, Codex, and OpenCode. Each agent can use its own runtime, model, provider, effort level, credentials, and schedule." }
     },
     {
       "@type": "Question",
       "name": "What do I need to run a fleet?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Any Linux host with systemd: a spare laptop, a Raspberry Pi, a home server, a small VPS. Agents spend most of their time waiting on the model API, so CPU and RAM needs are modest. You also need a Claude Code login or Anthropic API key for each agent, and a Discord or Slack space for coordination." }
+      "acceptedAnswer": { "@type": "Answer", "text": "Any Linux host with systemd, a supported CLI runtime with its required credentials, and a configured Discord, Slack, or GitHub work surface." }
     },
     {
       "@type": "Question",
       "name": "What can a compromised agent actually reach?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Without opt-in controls, its own files and normal network access. For configured brokered credentials it holds placeholders while the real values stay with a separate user; with egress containment, a kernel rule pins its traffic to approved hosts through the broker. It still holds its model credential and any explicitly unbrokered secrets. The threat model documents the guarantees and explicit non-goals." }
+      "acceptedAnswer": { "@type": "Answer", "text": "Without opt-in controls, an agent has access to its own files and the host's normal network path. With credential brokering, configured secrets remain under a separate user. With egress containment, per-user rules restrict traffic through the configured proxy. The agent still holds its model credential and any explicitly unbrokered secrets. The threat model lists the guarantees and non-goals." }
     },
     {
       "@type": "Question",
       "name": "How do I give the agents work?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Talk to them. Post a task in the coordination channel and an agent claims it, works it, and reports back. Each agent also has a standing role prompt it executes every iteration, so the fleet keeps making progress between your messages." }
+      "acceptedAnswer": { "@type": "Answer", "text": "Assign an issue through the configured Discord, Slack, or GitHub surface. The agent claims it, works it across scheduled iterations, reports status, and records completion or a blocker." }
     }
   ]
 }
@@ -86,9 +86,9 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=Source+Sans+3:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap">
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=Source+Sans+3:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
-<noscript><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=Source+Sans+3:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet"></noscript>
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap" rel="stylesheet"></noscript>
 
 <style>
 :root{
@@ -96,9 +96,9 @@
   --ink:#1E1B17; --ink-soft:#5b5347; --ink-mute:#655d4d;
   --orange:#C2532B; --orange-dark:#A8431F; --green:#3B5A3A;
   --line:rgba(30,27,23,0.10); --line-strong:rgba(30,27,23,0.20);
-  --head:'Playfair Display',Georgia,'Times New Roman',serif;
-  --body:'Source Sans 3',-apple-system,system-ui,'Segoe UI',sans-serif;
-  --mono:'Spline Sans Mono',ui-monospace,'SF Mono',Menlo,monospace;
+ --head:'Newsreader',Georgia,'Times New Roman',serif;
+ --body:'DM Sans',-apple-system,system-ui,'Segoe UI',sans-serif;
+ --mono:'DM Mono',ui-monospace,'SF Mono',Menlo,monospace;
   --nav-h:64px;
 }
 *{box-sizing:border-box}
@@ -241,7 +241,7 @@ p a{text-decoration:underline;text-underline-offset:2px;text-decoration-thicknes
 .quote-side{font-family:var(--head);font-style:italic;font-weight:500;font-size:27px;line-height:1.4;color:var(--green);border-left:2px solid var(--orange);padding-left:20px;margin:26px 0 0}
 
 /* faq */
-.faq-grid{display:grid;grid-template-columns:1fr 1fr;gap:32px 56px;max-width:1040px}
+.faq-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:32px 42px;max-width:1240px}
 .qa h3{font-family:var(--head);font-weight:600;font-size:23px;margin:0 0 8px;color:var(--ink)}
 .qa p{font-size:14.5px;line-height:1.6;color:var(--ink-soft);margin:0}
 .qa a{color:var(--orange-dark);text-decoration:underline;text-underline-offset:2px}
@@ -322,7 +322,7 @@ p a{text-decoration:underline;text-underline-offset:2px;text-decoration-thicknes
 .no-leaflet .progress,.no-leaflet .hint{display:none}
 .no-leaflet [data-reveal]{opacity:1;transform:none}
 
-/* mobile: native horizontal swipe (scroll-snap) — keeps the sideways identity on touch */
+/* mobile: native horizontal swipe (scroll-snap) keeps the sideways identity on touch */
 html.swipe .leaflet-track{position:static;height:100vh;height:100dvh;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;overscroll-behavior-x:contain}
 html.swipe .leaflet-track::-webkit-scrollbar{display:none}
 html.swipe .leaflet-inner{flex-direction:row;transform:none!important;height:100vh;height:100dvh}
@@ -363,12 +363,108 @@ html.swipe .hero-cta,html.swipe .grove-row{flex-wrap:wrap}
   *{animation:none!important}
   .medallion svg,.ring{animation:none!important}
 }
+.architecture-wrap{background:rgba(246,240,226,.78);border:1px solid var(--line-strong);border-radius:18px;padding:18px;box-shadow:0 20px 48px -34px rgba(30,27,23,.45);overflow:auto}
+.architecture-wrap .mermaid{display:flex;justify-content:center;min-width:900px;margin:0;background:transparent;font-family:var(--body)}
+.architecture-wrap svg{max-width:100%;height:auto}
+.architecture-note{font-size:13px;color:var(--ink-mute);margin:14px 4px 0;text-align:center}
+@media(max-width:900px){.architecture-wrap{padding:10px}.architecture-wrap .mermaid{justify-content:flex-start}.architecture-note{text-align:left}}
+
+/* ---------- professional orchard refinement ---------- */
+:root{
+ --paper:#F8F5ED;
+ --panel:#EFE9DC;
+ --panel-2:#E4DCC8;
+ --ink:#20231D;
+ --ink-soft:#5D655C;
+ --ink-mute:#70776D;
+ --orange:#D65B2A;
+ --orange-dark:#A64220;
+ --green:#294D35;
+ --line:rgba(32,35,29,.11);
+ --line-strong:rgba(32,35,29,.19);
+ --nav-h:72px;
+ --announce-h:34px;
+}
+body{font-size:16px;line-height:1.58;letter-spacing:-.006em}
+.announcement{position:fixed;z-index:70;inset:0 0 auto;height:var(--announce-h);display:flex;align-items:center;justify-content:center;gap:10px;padding-inline:20px;background:#20231D;color:#F8F5ED;font-size:12px;font-weight:500;letter-spacing:.005em;text-decoration:none}
+.announcement span{font:500 9px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;background:var(--orange);color:#fff;border-radius:999px;padding:5px 7px}
+.announcement b{font-weight:600;color:#F2BA93}
+.display{font-weight:600;letter-spacing:-.032em;line-height:.99}
+.eyebrow{font-size:11px;font-weight:500;letter-spacing:.14em}
+.lead{font-size:18px;line-height:1.65;letter-spacing:-.012em}
+.nav{top:var(--announce-h);background:rgba(248,245,237,.92);border-bottom-color:rgba(32,35,29,.09);backdrop-filter:blur(18px) saturate(1.2)}
+.nav-in{max-width:1320px;padding-inline:clamp(20px,4vw,52px)}
+.brand{gap:11px}.brand img{width:30px;height:33px}.brand span{font-size:21px;letter-spacing:-.025em}
+.nav-links{gap:27px;font-size:13.5px}.nav-cta{padding:11px 19px;box-shadow:0 8px 22px rgba(166,66,32,.13)}
+.progress{top:calc(var(--announce-h) + var(--nav-h));height:3px;background:linear-gradient(90deg,var(--orange),#E99A55)}
+.panel{padding-top:calc(var(--announce-h) + var(--nav-h) + 34px);padding-bottom:36px;padding-inline:clamp(28px,5vw,74px)}
+.panel-in{max-width:1240px}
+.panel-beige{background:#EFE9DC}
+.panel-orange{background:#A64220}
+.hero-grid{grid-template-columns:1.08fr .92fr;gap:clamp(56px,7vw,96px)}
+.hero h1{font-size:clamp(54px,6vw,84px);margin-bottom:24px;max-width:680px}
+.hero p{max-width:620px;margin-bottom:18px}
+.hero-outcome{font-size:15px;line-height:1.55;color:var(--green);font-weight:600;max-width:590px!important;margin:0 0 27px!important}
+.hero-cta{gap:11px}
+.btn{min-height:47px;padding:0 20px;border-radius:10px;font-size:14px;transition:transform .18s ease,background .18s ease,border-color .18s ease,box-shadow .18s ease}
+.btn:hover{transform:translateY(-1px)}
+.btn-primary{box-shadow:0 11px 28px rgba(166,66,32,.17)}
+.btn-ghost{background:rgba(255,255,255,.22)}
+.fineprint{font-size:10.5px;letter-spacing:.035em;margin-top:20px}
+.plate-hero{border-radius:18px;padding:11px;border-color:rgba(32,35,29,.1);box-shadow:0 28px 70px -32px rgba(32,35,29,.38),0 8px 20px -12px rgba(32,35,29,.18);animation:none}
+.hero-chip{position:absolute;z-index:3;display:flex;align-items:center;gap:8px;padding:10px 13px;border:1px solid rgba(32,35,29,.12);border-radius:10px;background:rgba(255,253,248,.94);backdrop-filter:blur(10px);box-shadow:0 12px 32px -18px rgba(32,35,29,.38);font:600 11px/1 var(--body);color:var(--ink)}
+.hero-chip span{width:7px;height:7px;border-radius:50%;background:var(--orange)}.chip-one{top:10%;left:-2%}.chip-two{right:-4%;top:44%}.chip-three{left:7%;bottom:8%}
+.compat-strip{display:flex;align-items:center;justify-content:center;gap:clamp(18px,3vw,42px);margin-top:28px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink-mute);font-size:12px}
+.compat-strip span{font:500 9px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--orange-dark)}.compat-strip b{font-weight:600;color:#596258}
+.deco{opacity:.42;filter:saturate(.82);box-shadow:0 18px 44px -28px rgba(32,35,29,.35)}
+.sec-head{max-width:780px}.sec-head h2{letter-spacing:-.03em}.kicker{margin-bottom:18px}
+.bigquote{font-size:clamp(32px,4vw,50px);line-height:1.2;letter-spacing:-.025em}
+.steps{gap:12px}.step{border-color:var(--line);border-radius:15px;padding:22px 24px;background:rgba(248,245,237,.7)}
+.step .num{font-size:30px}.step h3{font-size:22px}.step p{font-size:14px;line-height:1.55}
+.terminal{border-radius:16px;box-shadow:0 24px 60px -30px rgba(32,35,29,.48)}
+.term-chrome{padding:12px 17px}.term-pre{font-size:12px;line-height:1.75}
+.grove-row{gap:16px}
+.gcard{flex-basis:290px;border-radius:16px;padding:28px;background:rgba(255,253,248,.72);border-color:var(--line);box-shadow:0 12px 34px -30px rgba(32,35,29,.4)}
+.panel-beige .gcard{background:#F8F5ED}
+.gcard .ico{border-radius:10px;margin-bottom:22px;background:#F3E9DD}.gcard h3{font-size:21px;letter-spacing:-.015em}.gcard p{font-size:14px;line-height:1.58}
+.check{border-radius:14px;padding:20px;background:rgba(248,245,237,.74);border-color:var(--line)}
+.check .ic{border-radius:10px;background:#F3E9DD}.check h3{font-size:15px}.quote-side{font-size:29px;line-height:1.32;border-left-width:3px}
+.proof-wrap{gap:clamp(48px,6vw,82px)}
+.dc{border-radius:18px;box-shadow:0 28px 70px -34px rgba(32,35,29,.44)}
+.faq-grid{column-gap:48px;row-gap:0}.qa{padding-block:22px;border-top:1px solid var(--line)}.qa h3{font-size:20px}.qa p{font-size:14px;line-height:1.62}
+.closing h2{letter-spacing:-.035em}.foot{padding-block:26px}
+.hint{right:28px;bottom:24px;font-size:10.5px;letter-spacing:.12em}
+#architecture{width:190vw}
+#architecture .panel-in{max-width:1780px!important;margin-left:6vw;margin-right:0}
+#architecture .sec-head{max-width:940px;margin-bottom:22px!important}
+.architecture-wrap{background:#FFFDF8;border-color:rgba(32,35,29,.12);border-radius:20px;padding:18px 22px;box-shadow:0 28px 74px -40px rgba(32,35,29,.36)}
+.architecture-wrap .mermaid{width:1720px;min-width:1720px;justify-content:flex-start}
+.architecture-wrap svg{width:1720px!important;max-width:none!important;height:auto!important}
+.architecture-wrap .nodeLabel{font-size:20px!important;line-height:1.4!important}
+.architecture-wrap .edgeLabel{font-size:15px!important;line-height:1.35!important}
+.architecture-wrap .cluster-label{font-size:20px!important;font-weight:600!important}
+.architecture-note{font-size:12px;letter-spacing:.005em;margin-top:10px}
+@media(max-width:900px){
+ :root{--nav-h:64px;--announce-h:30px}
+ body{font-size:15px}
+ .announcement{justify-content:flex-start;overflow:hidden;white-space:nowrap;font-size:10px}.announcement b{display:none}
+ .panel{padding-inline:20px}
+ .hero h1{font-size:clamp(46px,13vw,66px)}
+ .hero-grid{gap:34px}
+ .hero-chip{display:none}.compat-strip{justify-content:flex-start;overflow-x:auto;gap:24px}
+ .deco{opacity:.24}
+ .architecture-wrap{border-radius:15px;padding:10px}
+ #architecture .panel-in{margin-left:0}
+ .architecture-wrap .mermaid{width:1600px;min-width:1600px}
+ .architecture-wrap svg{width:1600px!important}
+}
 </style>
 </head>
 <body>
 <a class="skip-link" href="#hero">Skip to content</a>
 
 <!-- ===================== NAV ===================== -->
+<a class="announcement" href="#architecture"><span>New</span> The complete Clem stack: orchestration, memory, communication, issue tracking, and operations <b>Explore the architecture&nbsp; →</b></a>
 <nav class="nav">
   <div class="nav-in">
     <a class="brand" href="#top" aria-label="clem home">
@@ -376,11 +472,11 @@ html.swipe .hero-cta,html.swipe .grove-row{flex-wrap:wrap}
       <span>clem</span>
     </a>
     <div class="nav-links" id="nav-links">
-      <a href="#how">How it works</a>
+    <a href="#architecture">Architecture</a>
       <a href="#grove">Features</a>
       <a href="#security">Security</a>
       <a href="#proof">In production</a>
-      <a class="nav-cta" href="https://github.com/jahwag/clem">GitHub</a>
+      <a class="nav-cta" href="#start">Install Clem</a>
     </div>
     <button class="nav-burger" id="burger" aria-label="Jump to start"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
   </div>
@@ -399,31 +495,97 @@ html.swipe .hero-cta,html.swipe .grove-row{flex-wrap:wrap}
      <div class="panel-in hero">
        <div class="hero-grid">
          <div data-reveal>
-           <span class="eyebrow kicker">Self-hosted Claude Code agent teams</span>
-           <h1 class="display">A team of agents that never clocks out.</h1>
-           <p class="lead">clem runs a standing team of Claude Code agents on a Linux box you own. Each one is a real OS user. It finds its own work, finishes it, and tells the team what happened. Day and night, while you get on with everything else.</p>
+          <span class="eyebrow kicker">Agent orchestrator and bootstrapper</span>
+           <h1 class="display">Turn CLI agents into a working team.</h1>
+           <p class="lead">Clem turns the CLI agents you choose into an owner-directed team. Assign work through Discord, Slack, or GitHub, preserve context with ZestMem, coordinate agents with AgentBus, and supervise the fleet from your own Linux host.</p>
+           <p class="hero-outcome">You assign the issues and keep the judgment. Agents persist on assigned work and report what happened.</p>
            <div class="hero-cta">
-             <a class="btn btn-primary" href="https://github.com/jahwag/clem"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.8 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.5-2.7 5.5-5.3 5.8.4.4.8 1.1.8 2.2v3.3c0 .4.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z"/></svg>Get started on GitHub</a>
-             <a class="btn btn-ghost" href="#how">See how it works</a>
+             <a class="btn btn-primary" href="#start">Install Clem</a>
+             <a class="btn btn-ghost" href="https://github.com/jahwag/clem">View source</a>
            </div>
-           <p class="fineprint">Open source. Written in Go. MIT licensed. Runs on anything with systemd.</p>
+           <p class="fineprint">Open source · Go · MIT licensed · Runs on Linux with systemd</p>
          </div>
          <div class="medallion" data-reveal aria-hidden="true">
            <div class="halo"></div>
-           <picture><source media="(max-width:900px)" srcset="img/citrus-hero-640.webp"><img class="plate plate-hero" src="img/citrus-hero.webp" width="1240" height="692" alt="" fetchpriority="high" decoding="async"></picture>
+           <picture><source media="(max-width:900px)" srcset="img/citrus-hero-640.webp"><img class="plate plate-hero" src="img/citrus-hero.webp" width="1240" height="692" alt="Botanical clementine branch" fetchpriority="high" decoding="async"></picture>
+           <div class="hero-chip chip-one"><span></span>Agent identity</div>
+           <div class="hero-chip chip-two"><span></span>Durable memory</div>
+           <div class="hero-chip chip-three"><span></span>MCP tools</div>
          </div>
        </div>
-     </div>
+       <div class="compat-strip" data-reveal aria-label="Works with"><span>Works with</span><b>systemd</b><b>GitHub</b><b>Discord</b><b>Slack</b><b>MCP</b><b>SOPS</b><b>Ollama</b></div>
+      </div>
    </section>
 
-   <!-- 2 · THE IDEA -->
+   <!-- 2 · ARCHITECTURE -->
+   <section class="panel panel--xwide panel-beige" id="architecture">
+    <div class="panel-in" style="max-width:1380px">
+     <div class="sec-head" style="max-width:820px;margin-bottom:28px" data-reveal>
+      <span class="eyebrow kicker">The Clem stack</span>
+      <h2 class="display">One stack for running a CLI agent team.</h2>
+      <p class="lead" style="margin:16px 0 0">Clem runs the team and tracks its work through Discord, Slack, or GitHub. AgentBus carries agent-to-agent messages, ZestMem preserves operator-curated durable memory, and MCP servers connect agents to configured tools and services.</p>
+     </div>
+     <div class="architecture-wrap" data-reveal>
+      <pre class="mermaid">
+flowchart LR
+  owner["Owner<br/>priorities, roles, approvals"]
+  issues["Clem issue tracking<br/>Work surfaces: Discord · Slack · GitHub"]
+
+  subgraph core["Clem core"]
+    direction TB
+    orchestrator["Agent orchestrator<br/>schedule · lifecycle · supervise · coordinate"]
+    bootstrapper["Agent bootstrapper<br/>OS users · identity · config · CLI runtimes"]
+    enablement["Agent environment<br/>prompts · skills · best practices<br/>context compression · output compression"]
+    operations["Fleet supervision<br/>schedules · watchdog · logs · terminals<br/>runtime usage signals"]
+    security["Security and isolation<br/>vault and credential brokering · egress<br/>permissions · resource limits"]
+    agents["CLI agent team<br/>Claude Code · Codex · other CLIs"]
+    orchestrator --> bootstrapper
+    bootstrapper --> agents
+    orchestrator --> operations
+    bootstrapper --> security
+    enablement -. "installs configuration" .-> agents
+    operations -. "starts and supervises" .-> agents
+    security -. "confines and protects" .-> agents
+  end
+
+  subgraph companions["Companion services"]
+    agentbus["AgentBus<br/>agent communication bus"]
+    zestmem["ZestMem<br/>durable agent memory"]
+  end
+
+  mcp["MCP servers and sidecars<br/>tools · data · internal services"]
+  systems["Repositories and systems<br/>GitHub · browsers · APIs · databases"]
+
+  owner -->|"defines the team"| orchestrator
+  owner <-->|"assigns and reviews"| issues
+  issues <-->|"claim · update · complete"| agents
+  agents <-->|"messages"| agentbus
+  agents <-->|"recall · remember"| zestmem
+  agents <-->|"tool calls"| mcp
+  mcp <-->|"scoped access"| systems
+
+  classDef person fill:#C2532B,color:#fff,stroke:#A8431F,stroke-width:2px
+  classDef coreNode fill:#F6F0E2,color:#1E1B17,stroke:#C2532B,stroke-width:2px
+  classDef companion fill:#E2D5B8,color:#1E1B17,stroke:#3B5A3A,stroke-width:2px
+  classDef external fill:#fffaf0,color:#1E1B17,stroke:#655d4d,stroke-width:1.5px
+  class owner person
+  class orchestrator,bootstrapper,enablement,operations,security,agents coreNode
+  class agentbus,zestmem companion
+  class issues,mcp,systems external
+      </pre>
+      <p class="architecture-note">AgentBus and ZestMem are optional, independently deployable companion services. Clem uses GitHub, Discord, or Slack as the human-facing work surface.</p>
+     </div>
+    </div>
+   </section>
+
+   <!-- 3 · THE IDEA -->
    <section class="panel panel--narrow panel-beige">
      <img class="deco" src="img/citrus-half.webp" alt="" aria-hidden="true" loading="lazy" decoding="async" width="196" height="196" style="width:196px;top:11%;right:5%">
      <div class="panel-in" data-reveal style="max-width:760px;margin:0 auto;text-align:center">
        <span class="eyebrow kicker">Start here</span>
-       <h2 class="display" style="font-size:clamp(30px,4vw,48px);margin:0 0 26px">You've heard &ldquo;AI agent.&rdquo; Here's what one actually does.</h2>
-       <p class="lead" style="max-width:600px;margin:0 auto 44px">Most people imagine a chatbot: you type, it answers, it forgets you. A clem agent works the other way around. It wakes on a timer, checks the task board, picks one job, finishes it, and writes down what it learned. Then it waits a few minutes and goes again, at 3pm and at 3am.</p>
-       <blockquote class="bigquote" style="margin:0 auto">&ldquo;A chatbot answers questions. An agent does the work.&rdquo;</blockquote>
+       <h2 class="display" style="font-size:clamp(30px,4vw,48px);margin:0 0 26px">From assigned issue to reviewed artifact.</h2>
+       <p class="lead" style="max-width:600px;margin:0 auto 44px">On the schedule you set, each agent checks its assigned issues, continues one item, verifies its work, and reports progress. When no assigned work is ready, it waits.</p>
+       <blockquote class="bigquote" style="margin:0 auto">&ldquo;Assigned work stays visible from claim to handoff.&rdquo;</blockquote>
      </div>
    </section>
 
@@ -432,16 +594,16 @@ html.swipe .hero-cta,html.swipe .grove-row{flex-wrap:wrap}
      <div class="panel-in">
        <div class="sec-head center" style="margin:0 auto 52px" data-reveal>
          <span class="eyebrow kicker">One turn around the loop</span>
-         <h2 class="display">A single day, start to finish.</h2>
+         <h2 class="display">One scheduled iteration, start to finish.</h2>
        </div>
        <div class="loop-grid">
          <div class="steps">
-           <div class="step" data-reveal><div class="row"><span class="num">1</span><h3>Wakes</h3></div><p>The workday starts. Nobody pressed a button.</p></div>
-           <div class="step" data-reveal><div class="row"><span class="num">2</span><h3>Reads the board</h3></div><p>Scans the team's task list for anything with its name on it.</p></div>
-           <div class="step" data-reveal><div class="row"><span class="num">3</span><h3>Picks one job</h3></div><p>Exactly one. It finishes that before starting another.</p></div>
-           <div class="step" data-reveal><div class="row"><span class="num">4</span><h3>Does the work</h3></div><p>Builds it, runs the tests, and verifies the result.</p></div>
-           <div class="step" data-reveal><div class="row"><span class="num">5</span><h3>Ships and reports</h3></div><p>Opens the pull request and posts an update to the team.</p></div>
-           <div class="step" data-reveal><div class="row"><span class="num">6</span><h3>Rests</h3></div><p>Pauses a few minutes, longer overnight, then begins again.</p></div>
+           <div class="step" data-reveal><div class="row"><span class="num">1</span><h3>Checks assigned issues</h3></div><p>Reads the configured work surface and operator corrections.</p></div>
+           <div class="step" data-reveal><div class="row"><span class="num">2</span><h3>Continues one item</h3></div><p>Resumes an active issue or claims one assigned to its role.</p></div>
+           <div class="step" data-reveal><div class="row"><span class="num">3</span><h3>Implements</h3></div><p>Produces one concrete artifact without opening unrelated work.</p></div>
+           <div class="step" data-reveal><div class="row"><span class="num">4</span><h3>Verifies</h3></div><p>Runs the relevant tests and checks the result.</p></div>
+           <div class="step" data-reveal><div class="row"><span class="num">5</span><h3>Reports status</h3></div><p>Opens or updates the pull request and reports to the team.</p></div>
+           <div class="step" data-reveal><div class="row"><span class="num">6</span><h3>Waits</h3></div><p>Ends the iteration and waits for the next scheduled run.</p></div>
          </div>
          <div data-reveal style="display:flex;justify-content:center;align-items:center">
            <svg class="ring" viewBox="0 0 320 320" style="overflow:visible">
@@ -452,7 +614,7 @@ html.swipe .hero-cta,html.swipe .grove-row{flex-wrap:wrap}
            </svg>
          </div>
        </div>
-       <p class="serif" data-reveal style="text-align:center;font-style:italic;font-size:16px;color:var(--ink-mute);margin:48px auto 0;max-width:640px">Run a few agents at once and the work adds up while you sleep.</p>
+       <p class="serif" data-reveal style="text-align:center;font-style:italic;font-size:16px;color:var(--ink-mute);margin:48px auto 0;max-width:640px">Each iteration advances owner-assigned work or waits when nothing is ready.</p>
      </div>
    </section>
 
@@ -462,10 +624,10 @@ html.swipe .hero-cta,html.swipe .grove-row{flex-wrap:wrap}
        <div class="hood-grid">
          <div data-reveal>
            <span class="eyebrow kicker">Under the skin</span>
-           <h2 class="display" style="font-size:clamp(30px,4vw,48px);margin:0 0 22px">Just systemd, tmux, and a loop.</h2>
-           <p class="lead" style="max-width:440px;margin:0 0 18px">No magic. Each agent is a systemd service running a tmux session that loops the <span class="mono" style="color:var(--orange-dark)">claude</span> CLI on a timer. The same parts your machine already has.</p>
-           <p class="mono" style="font-size:13px;color:var(--ink-mute);margin:0;line-height:1.9">systemd &rarr; tmux &rarr; runner loop &rarr; claude</p>
-           <p style="font-size:15px;color:var(--ink-soft);margin:20px 0 0;max-width:440px">One file describes the whole team. Log in to any agent, attach to its tmux, read its logs. Nothing is hidden from you.</p>
+           <h2 class="display" style="font-size:clamp(30px,4vw,48px);margin:0 0 22px">Built from inspectable Linux services.</h2>
+          <p class="lead" style="max-width:440px;margin:0 0 18px">Each agent runs in a systemd-managed tmux session, with Clem generating and supervising the surrounding configuration for your chosen <span class="mono" style="color:var(--orange-dark)">CLI agent</span>.</p>
+          <p class="mono" style="font-size:13px;color:var(--ink-mute);margin:0;line-height:1.9">systemd &rarr; tmux &rarr; runner loop &rarr; CLI agent</p>
+           <p style="font-size:15px;color:var(--ink-soft);margin:20px 0 0;max-width:440px">A single Clem configuration defines agents, roles, runtimes, schedules, and integrations. Inspect the generated services, attach to an agent's tmux session, or read its logs from the host.</p>
          </div>
          <div data-reveal style="display:flex;justify-content:center">
            <div class="terminal">
@@ -480,44 +642,48 @@ coordination:
 
 egress:
   enabled: true
-  domains: [&quot;*.anthropic.com&quot;, &quot;github.com&quot;]
+  domains: [&quot;api.openai.com&quot;, &quot;*.anthropic.com&quot;, &quot;github.com&quot;]
 
 agents:
   lead:
     name: Atlas
     role: Lead Software Engineer
-    model: claude-opus-4-8
+    runtime: codex
+    model: gpt-5.4
     effort: high
     iteration: 10m
   worker:
     name: Scout
     role: Software Engineer
+    runtime: claude-code
     model: claude-sonnet-4-6
     effort: medium
     iteration: 5m"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>copy</span></button>
              </div>
-<pre class="term-pre"><code><span class="cmt"># one file describes the whole team</span>
+<pre class="term-pre"><code><span class="cmt"># one configuration defines the team</span>
 <span class="key">project</span>: myteam            <span class="cmt"># OS user prefix &rarr; myteam-lead</span>
 
 <span class="key">coordination</span>:
   <span class="key">backend</span>: discord         <span class="cmt"># or: slack | github</span>
   <span class="key">server_id</span>: <span class="str">"${DISCORD_SERVER_ID}"</span>
 
-<span class="cmt"># pin every outbound byte to a loopback proxy</span>
+<span class="cmt"># route contained agents through the configured proxy</span>
 <span class="key">egress</span>:
   <span class="key">enabled</span>: <span class="str">true</span>
-  <span class="key">domains</span>: [<span class="str">"*.anthropic.com"</span>, <span class="str">"github.com"</span>]
+  <span class="key">domains</span>: [<span class="str">"api.openai.com"</span>, <span class="str">"*.anthropic.com"</span>, <span class="str">"github.com"</span>]
 
 <span class="key">agents</span>:
   <span class="key">lead</span>:
     <span class="key">name</span>: Atlas
     <span class="key">role</span>: Lead Software Engineer
-    <span class="key">model</span>: claude-opus-4-8
+    <span class="key">runtime</span>: codex
+    <span class="key">model</span>: gpt-5.4
     <span class="key">effort</span>: high
     <span class="key">iteration</span>: 10m
   <span class="key">worker</span>:
     <span class="key">name</span>: Scout
     <span class="key">role</span>: Software Engineer
+    <span class="key">runtime</span>: claude-code
     <span class="key">model</span>: claude-sonnet-4-6
     <span class="key">effort</span>: medium
     <span class="key">iteration</span>: 5m</code></pre>
@@ -532,41 +698,41 @@ agents:
      <div class="panel-in" style="max-width:none">
        <div class="sec-head" style="max-width:680px;margin-bottom:44px" data-reveal>
          <span class="eyebrow kicker">What you get</span>
-         <h2 class="display">Real Linux users, systemd services, and pull requests.</h2>
-         <p class="lead" style="margin:16px 0 0">Each agent is a normal user on your machine. It is all right there on your box, not behind someone else's API.</p>
+         <h2 class="display">A complete operating layer for CLI agents.</h2>
+         <p class="lead" style="margin:16px 0 0">Agents run as inspectable services on infrastructure you control. Clem itself does not require a hosted control plane; agents still connect to the model providers and services you configure.</p>
        </div>
        <div class="grove-row" data-reveal>
          <div class="gcard">
            <span class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/></svg></span>
-           <h3>Per-agent OS identity</h3><p>Each agent is its own Linux user with its own home directory, git identity, GitHub PRs, and bot account. One crashing cannot take down another.</p>
+           <h3>Per-agent OS identity</h3><p>Each agent has its own Linux user, home directory, Git identity, runtime credentials, and work-surface identity. Optional resource limits reduce cross-agent interference.</p>
          </div>
          <div class="gcard">
            <span class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></span>
-           <h3>Kernel egress containment</h3><p>A per-UID nftables rule routes every byte through an auditing proxy. The agent cannot disable what it does not own.</p>
+           <h3>Kernel egress containment</h3><p>When containment is enabled, per-user <code>nftables</code> rules route agent traffic through the configured proxy. The rules run outside the agent user's permissions.</p>
          </div>
          <div class="gcard">
            <span class="ico"><svg viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 19 4M16 7l3 3M14 9l2 2"/></svg></span>
-           <h3>Secret-zero broker</h3><p>Agents hold placeholders. A separate user injects the real credential on egress, so the secret never lands in the agent. Chosen per agent &mdash; egress containment or brokering, not both.</p>
+           <h3>Secret-zero broker</h3><p>Agents hold placeholders. A separate user injects the real credential on egress, so the secret never lands in the agent. Choose either egress containment or brokering for each agent, not both.</p>
          </div>
          <div class="gcard">
            <span class="ico"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6v6H9z"/></svg></span>
-           <h3>Privileged MCP sidecars</h3><p>Secret-holding tools run as another user behind a loopback MCP endpoint. The agent reaches it but never holds the key.</p>
+           <h3>Privileged MCP sidecars</h3><p>Secret-holding tools run as another user behind a loopback MCP endpoint, so the agent does not need the credential.</p>
          </div>
          <div class="gcard">
            <span class="ico"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"/></svg></span>
-           <h3>24/7 self-healing</h3><p>A systemd watchdog restarts dead or stalled agents. Alerts fire only after repeated failures, not at the first hiccup.</p>
+           <h3>Watchdog recovery</h3><p>A systemd watchdog restarts agents that exit or stop making progress. Alerts fire after repeated failures.</p>
          </div>
          <div class="gcard">
            <span class="ico"><svg viewBox="0 0 24 24"><path d="M4 4h16v12H4z"/><path d="M8 20h8M9 16v4M15 16v4"/></svg></span>
-           <h3>Coordination you already use</h3><p>Discord, Slack, or GitHub Issues. Agents pick up tasks where you already work. Swap backends with one config line.</p>
+           <h3>Issue tracking where you work</h3><p>Clem tracks assigned agent work through Discord, Slack, or GitHub. Agents claim issues, report status, and record completion on the configured surface.</p>
          </div>
          <div class="gcard">
            <span class="ico"><svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M8 7V5a4 4 0 0 1 8 0v2"/></svg></span>
-           <h3>Self-hosted, your infra</h3><p>Everything runs on the host you control. Source, secrets, and MCP servers all stay local. Nothing phones home.</p>
+           <h3>No hosted Clem control plane</h3><p>Clem runs on the host you control. Agents connect to the model providers, work surfaces, MCP servers, and other services you configure.</p>
          </div>
          <div class="gcard">
            <span class="ico"><svg viewBox="0 0 24 24"><path d="M12 3a14 14 0 0 0 0 18M12 3a14 14 0 0 1 0 18"/><circle cx="12" cy="12" r="9"/></svg></span>
-           <h3>Runs on any Linux host</h3><p>Anything with systemd: a spare laptop, a Raspberry Pi, a home server, a small VPS. Agents mostly wait on the API, so needs are modest.</p>
+           <h3>Runs on supported Linux hosts</h3><p>Run Clem on an x86-64 or arm64 Linux host with systemd, from a spare machine to a VPS.</p>
          </div>
        </div>
      </div>
@@ -577,24 +743,24 @@ agents:
      <div class="panel-in">
        <div class="sec-grid">
          <div data-reveal>
-           <span class="eyebrow kicker">Autonomous, not unsupervised</span>
-           <h2 class="display" style="font-size:clamp(30px,4vw,48px);margin:0 0 24px">They run on their own. You hold the keys.</h2>
-           <p class="lead" style="max-width:520px;margin:0 0 22px">An autonomous agent is an untrusted workload. It needs secrets and network access to do real work, but you should not trust it to hold a raw credential or to decide for itself what it can reach.</p>
-           <p style="font-size:16px;color:var(--ink-soft);max-width:520px;margin:0">clem puts opt-in boundaries below the agent. Each one runs as its own non-root user. Credential brokering keeps configured HTTP secrets under a separate user the agent cannot read; egress containment adds a per-UID kernel rule that forces traffic through the broker's allowlisting proxy. Compromise the agent and those configured boundaries still hold.</p>
-           <blockquote class="quote-side">&ldquo;It did all the work it was allowed to. The last call is still yours.&rdquo;</blockquote>
+           <span class="eyebrow kicker">Owner-directed, continuously supervised</span>
+           <h2 class="display" style="font-size:clamp(30px,4vw,48px);margin:0 0 24px">Configure the boundaries. Inspect the result.</h2>
+           <p class="lead" style="max-width:520px;margin:0 0 22px">Treat every agent as an untrusted workload. It may need credentials and network access, but it should receive only the access required for its assigned role.</p>
+           <p style="font-size:16px;color:var(--ink-soft);max-width:520px;margin:0">Clem provides opt-in controls outside the agent user. Credential brokering keeps configured HTTP secrets under a separate user; egress containment routes traffic through the configured allowlisting proxy. The <a href="https://github.com/jahwag/clem/blob/main/docs/threat-model.md" style="color:var(--orange-dark)">threat model</a> documents the guarantees and non-goals.</p>
+           <blockquote class="quote-side">&ldquo;Agents execute within configured boundaries. Operators retain sensitive decisions.&rdquo;</blockquote>
          </div>
          <div class="checks">
            <div class="check" data-reveal>
              <span class="ic"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
-             <div><h3>Set the boundaries</h3><p>Each agent touches only what you allow-list, by design.</p></div>
+             <div><h3>Set the boundaries</h3><p>Configure per-agent egress, permissions, credentials, and resource limits.</p></div>
            </div>
            <div class="check" data-reveal>
              <span class="ic"><svg viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg></span>
-             <div><h3>Approve the big calls</h3><p>Money, customers, and anything hard to undo waits for you.</p></div>
+             <div><h3>Reserve sensitive actions</h3><p>Team instructions should reserve money, customer, production, and other sensitive decisions for an operator.</p></div>
            </div>
            <div class="check" data-reveal>
              <span class="ic"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></span>
-             <div><h3>Full visibility</h3><p>Every action is logged and readable. <a href="https://github.com/jahwag/clem/blob/main/docs/threat-model.md" style="color:var(--orange-dark)">Read the threat model</a>.</p></div>
+             <div><h3>Inspect the fleet</h3><p>Read service logs, agent output, current status, and repeated-failure alerts from the host.</p></div>
            </div>
          </div>
        </div>
@@ -607,10 +773,9 @@ agents:
        <div class="proof-wrap">
          <div data-reveal>
            <span class="eyebrow kicker">In production</span>
-           <h2 class="display" style="font-size:clamp(28px,3.6vw,44px);margin:0 0 20px">clem runs the <a href="https://consultant.dev" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px">consultant.dev</a> engineering team.</h2>
-           <p class="lead" style="max-width:420px;margin:0 0 22px">Agents review and ship real pull requests around the clock, coordinating over Discord. Each one is a separate OS user, with optional isolated credential brokering and kernel-enforced egress containment.</p>
-           <div class="mono" style="display:inline-flex;align-items:center;gap:10px;font-size:13px;color:var(--ink-mute)"><span style="width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)"></span> live &middot; 24/7 under systemd</div>
-           <p style="font-size:12.5px;color:var(--ink-mute);margin:14px 0 0;max-width:420px">Coordination channel shown is a representative rendering, not a live screenshot. Agent names and messages vary by team.</p>
+           <h2 class="display" style="font-size:clamp(28px,3.6vw,44px);margin:0 0 20px">Clem runs the <a href="https://consultant.dev" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px">consultant.dev</a> engineering team.</h2>
+           <p class="lead" style="max-width:420px;margin:0 0 22px">At consultant.dev, Clem agents work assigned engineering issues and report through Discord. Each runs as a separate OS user, with optional credential brokering and egress containment.</p>
+           <p style="font-size:12.5px;color:var(--ink-mute);margin:14px 0 0;max-width:420px">The coordination channel is a representative rendering, not a live screenshot. Agent names and messages vary by team.</p>
          </div>
          <div data-reveal>
            <div class="dc" role="img" aria-label="clem agents coordinating in a Discord server: bot accounts Aria and Nova post short status updates about a pull-request review and vault credentials.">
@@ -685,40 +850,40 @@ agents:
        </div>
        <div class="faq-grid" data-reveal style="margin:0 auto">
          <div class="qa">
-           <h3>Why not just run Claude Code in a container?</h3>
-           <p>A container is a process boundary, usually set up for convenience: open outbound network, a shared kernel, sandbox settings the workload can often influence. clem puts the boundary below the agent. A per-UID <code>nftables</code> rule pins every byte to an auditing proxy, or a broker keeps the real credential with another user. The agent cannot disable a firewall it does not own.</p>
+           <h3>Why not just run a CLI agent in a container?</h3>
+           <p>A container provides a process boundary, but it does not provision agent identity, issue tracking, scheduled iteration, watchdog recovery, skills, or runtime-specific configuration. When enabled, Clem also adds per-user egress controls or credential brokering outside the agent user.</p>
          </div>
          <div class="qa">
-           <h3>Is this allowed by Anthropic's terms?</h3>
-           <p>clem runs the unmodified official Claude Code CLI (or whatever model runtime you choose) under your own account, on hardware you own &mdash; the same binary you run by hand, and Anthropic itself documents headless and CI use of Claude Code. clem makes no compliance claims and takes no position on your provider or plan. Choosing a credential that fits your usage &mdash; an API key, a local model, or a subscription where its terms allow &mdash; is your call, especially for automated, always-on, or multi-agent setups. Read Anthropic's <a href="https://www.anthropic.com/legal/aup" rel="noopener">Usage Policy</a> and <a href="https://www.anthropic.com/legal/consumer-terms" rel="noopener">terms</a> and decide for your setup.</p>
+           <h3>Which CLI runtimes does Clem support?</h3>
+           <p>Clem supports Claude Code, Codex, and OpenCode. Each agent can use its own runtime, model, provider, effort level, credentials, and schedule.</p>
          </div>
          <div class="qa">
            <h3>What do I need to run a fleet?</h3>
-           <p>Any Linux host with <code>systemd</code>: a spare laptop, a Pi, a home server, a small VPS. A Claude Code login or API key per agent, and a Discord or Slack space for coordination. That is it.</p>
+           <p>Any Linux host with <code>systemd</code>, a supported CLI runtime with its required credentials, and a configured Discord, Slack, or GitHub work surface.</p>
          </div>
          <div class="qa">
-           <h3>How do agents authenticate?</h3>
-           <p>Each agent authenticates independently &mdash; an Anthropic API key, a Claude Code login, or a local or third-party model through Ollama. For automated, always-on, or multi-agent use an API key is the natural fit &mdash; Anthropic's terms allow automated access only through the API; a personal interactive login suits a single agent you watch. clem stays out of it &mdash; it runs the official CLI with whatever credential you provide. Check Anthropic's <a href="https://www.anthropic.com/legal/aup" rel="noopener">Usage Policy</a> for your setup; the README covers the per-method details.</p>
+           <h3>Which provider terms apply?</h3>
+           <p>Provider terms differ by runtime, credential type, account, and usage pattern. Review the terms for every CLI and account you configure, especially for scheduled or multi-agent use. Clem does not make compliance claims for a provider or plan.</p>
          </div>
          <div class="qa">
            <h3>What can a compromised agent reach?</h3>
-           <p>Without opt-in controls, its own files and normal network access. Configured brokered credentials stay with a separate user it cannot read; egress containment adds a kernel rule that restricts traffic to approved hosts through the broker. The agent still holds its model credential and any explicitly unbrokered secrets. The <a href="https://github.com/jahwag/clem/blob/main/docs/threat-model.md">threat model</a> lists the guarantees and the non-goals.</p>
+           <p>Without opt-in controls, an agent has access to its own files and the host's normal network path. With credential brokering, configured secrets remain under a separate user. With egress containment, per-user rules restrict traffic through the configured proxy. The agent still holds its model credential and any explicitly unbrokered secrets. The <a href="https://github.com/jahwag/clem/blob/main/docs/threat-model.md">threat model</a> lists the guarantees and non-goals.</p>
          </div>
          <div class="qa">
            <h3>How do I give the agents work?</h3>
-           <p>Talk to them. Post a task in the channel and an agent claims it, works it, and reports back. Each one also has a standing role it runs every iteration, so the fleet keeps moving between your messages.</p>
+          <p>Assign an issue through the configured Discord, Slack, or GitHub surface. The agent claims it, works it across scheduled iterations, reports status, and records completion or a blocker.</p>
          </div>
          <div class="qa">
            <h3>Is it really free?</h3>
-           <p>Yes. clem is open source under the MIT license &mdash; no clem account, no seat pricing, nothing to buy. You bring your own machine and your own model: run a local model through Ollama for zero inference cost, connect an Anthropic API key, or use your own Claude login where your plan permits. clem is the infrastructure; the compute and credentials are yours.</p>
+           <p>Yes. Clem is open source under the MIT license. There is no Clem account or seat pricing. You provide the host, runtime, model access, and any companion services. A local model avoids a per-token provider bill but still uses your hardware.</p>
          </div>
          <div class="qa">
-           <h3>Won't agents running 24/7 burn a fortune in tokens?</h3>
-           <p>You set the ceiling. "Always on" is not "always calling": each agent sleeps a duration you choose between iterations, and clem stretches it overnight. Run a local model through Ollama for zero inference cost, or pick a cheaper model per agent and meter it with an API key &mdash; usage stays visible and bounded, billed to whatever credential you supply. Nothing runs that you did not schedule.</p>
+           <h3>How do I control model usage?</h3>
+           <p>Set active and overnight iteration schedules, choose the model and effort level per agent, use cheaper subagent models where supported, and monitor usage through the configured runtime. Clem does not impose a provider budget ceiling.</p>
          </div>
          <div class="qa">
            <h3>Don't I still have to review everything they produce?</h3>
-           <p>Yes &mdash; agents propose, you dispose. They open pull requests and post updates to the channel like any teammate, and you review and merge on your own time. Anything irreversible &mdash; money, customers, production &mdash; waits for your approval by design. clem buys you parallel work overnight, not a rubber stamp: the review queue is real, and it stays yours.</p>
+           <p>Yes. Agents produce artifacts and report status; your team reviews and approves the result. Team instructions should reserve sensitive actions for an operator, and technical controls should enforce boundaries where possible.</p>
          </div>
        </div>
      </div>
@@ -729,8 +894,8 @@ agents:
      <img class="deco" src="img/citrus-branch.webp" alt="" aria-hidden="true" loading="lazy" decoding="async" width="258" height="141" style="width:258px;top:9%;left:4%">
      <div class="panel-in closing" data-reveal>
        <span class="eyebrow kicker" style="color:rgba(246,240,226,.95)">Get started</span>
-       <h2 class="display">Run your fleet.</h2>
-       <p style="font-size:18px;line-height:1.6;color:rgba(246,240,226,.97);max-width:560px;margin:0 auto 34px">One file describes the whole team. Free and open source, MIT licensed.</p>
+       <h2 class="display">Install Clem.</h2>
+       <p style="font-size:18px;line-height:1.6;color:rgba(246,240,226,.97);max-width:560px;margin:0 auto 34px">A single configuration defines agents, roles, runtimes, schedules, and integrations. Free and open source under the MIT license.</p>
        <div class="terminal" style="max-width:560px;margin:0 auto 24px;background:#23201B">
          <div class="term-chrome">
            <div class="dots"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c841"></span></div>
@@ -748,14 +913,14 @@ clem --version"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11
        </div>
        <p style="font-size:12.5px;color:rgba(246,240,226,.92);max-width:560px;margin:14px auto 0">Want to verify first? Every release ships a <code style="font-family:var(--mono)">checksums.txt</code> and an SBOM, or <a href="https://github.com/jahwag/clem" style="color:#fff;text-decoration:underline">read the source and build it yourself</a>.</p>
        <div style="display:flex;gap:13px;justify-content:center;flex-wrap:wrap">
-         <a class="btn btn-paper" href="https://github.com/jahwag/clem"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.8 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.5-2.7 5.5-5.3 5.8.4.4.8 1.1.8 2.2v3.3c0 .4.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z"/></svg>Get started on GitHub</a>
+         <a class="btn btn-paper" href="https://github.com/jahwag/clem"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.2.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.8 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.5-2.7 5.5-5.3 5.8.4.4.8 1.1.8 2.2v3.3c0 .4.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z"/></svg>View source</a>
          <a class="btn btn-onorange" href="https://discord.gg/pR4qeMH4u4"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.3 4.4A19.8 19.8 0 0 0 15.4 3l-.2.5a18.3 18.3 0 0 1 4.2 1.3 17 17 0 0 0-6.8-1.3 17 17 0 0 0-6.8 1.3A18.5 18.5 0 0 1 9 3.5L8.8 3a19.8 19.8 0 0 0-5 1.4C1 8.6.4 12.6.7 16.6a20 20 0 0 0 6 3l.8-1.2c-.7-.3-1.3-.6-1.9-1l.5-.3a14 14 0 0 0 12 0l.5.3c-.6.4-1.2.7-1.9 1l.8 1.2a20 20 0 0 0 6-3c.4-4.7-.6-8.7-3.5-12.2zM8.5 14.3c-1.1 0-2-1-2-2.3s.9-2.3 2-2.3 2 1 2 2.3-.9 2.3-2 2.3zm7 0c-1.1 0-2-1-2-2.3s.9-2.3 2-2.3 2 1 2 2.3-.9 2.3-2 2.3z"/></svg>Join Discord</a>
        </div>
        <div class="gh-buttons">
          <a class="github-button" href="https://github.com/jahwag/clem" data-color-scheme="no-preference: light; light: light; dark: light;" data-icon="octicon-star" data-size="large" data-show-count="true" aria-label="Star jahwag/clem on GitHub">Star</a>
          <a class="github-button" href="https://github.com/sponsors/jahwag" data-color-scheme="no-preference: light; light: light; dark: light;" data-icon="octicon-heart" data-size="large" aria-label="Sponsor @jahwag">Sponsor</a>
        </div>
-       <p class="mono" style="font-size:13px;color:rgba(246,240,226,.95);margin:28px 0 0">Your agents. Your machine. Your rules.</p>
+       <p class="mono" style="font-size:13px;color:rgba(246,240,226,.95);margin:28px 0 0">Owner-directed agent teams, running on your infrastructure.</p>
      </div>
    </section>
 
@@ -889,6 +1054,26 @@ clem --version"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11
     });
   });
 })();
+</script>
+<script type="module">
+ import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+ mermaid.initialize({
+  startOnLoad: true,
+  theme: 'base',
+  securityLevel: 'strict',
+  flowchart: { htmlLabels: true, useMaxWidth: false, curve: 'basis', nodeSpacing: 44, rankSpacing: 58 },
+  themeVariables: {
+   background: '#F6F0E2',
+   primaryColor: '#F6F0E2',
+   primaryTextColor: '#1E1B17',
+   primaryBorderColor: '#C2532B',
+   lineColor: '#655d4d',
+   clusterBkg: '#ECE3CE',
+   clusterBorder: '#C9B997',
+   fontSize: '20px',
+   fontFamily: 'DM Sans, system-ui, sans-serif'
+  }
+ });
 </script>
 <script async defer src="https://buttons.github.io/buttons.js"></script>
 </body>
