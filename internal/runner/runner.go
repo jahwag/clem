@@ -69,7 +69,11 @@ cfg = {'mcpServers': {}}
 # agent's tmux session — see mcp-discord's CLEM_TMUX_TARGET docs.
 # Skipped when coordination backend is github (agents use gh CLI instead).
 if _backend != 'github' and os.environ.get('DISCORD_TOKEN'):
-    _discord_env = {'DISCORD_TOKEN': os.environ['DISCORD_TOKEN']}
+    _discord_env = {
+        'DISCORD_TOKEN': os.environ['DISCORD_TOKEN'],
+        'DISCORD_DELIVERY_STATE_PATH': os.path.join(
+            os.path.expanduser('~'), '.clem', 'discord-delivery.json'),
+    }
     _watch = '{{.WatchChannelIDs}}'
     if _watch:
         _discord_env['DISCORD_WATCH_CHANNELS'] = _watch
@@ -300,7 +304,11 @@ if os.environ.get('ANTHROPIC_MODEL'):
         'models': {os.environ['ANTHROPIC_MODEL']: {}},
     }
 if _backend != 'github' and os.environ.get('DISCORD_TOKEN'):
-    _discord_env = {'DISCORD_TOKEN': os.environ['DISCORD_TOKEN']}
+    _discord_env = {
+        'DISCORD_TOKEN': os.environ['DISCORD_TOKEN'],
+        'DISCORD_DELIVERY_STATE_PATH': os.path.join(
+            os.path.expanduser('~'), '.clem', 'discord-delivery.json'),
+    }
     _watch = '{{.WatchChannelIDs}}'
     if _watch:
         _discord_env['DISCORD_WATCH_CHANNELS'] = _watch
@@ -467,7 +475,11 @@ def _http(name, url):
     lines.append('')
 # Discord bot (same gateway-watcher behaviour as the claude runner).
 if _backend != 'github' and os.environ.get('DISCORD_TOKEN'):
-    _denv = {'DISCORD_TOKEN': os.environ['DISCORD_TOKEN']}
+    _denv = {
+        'DISCORD_TOKEN': os.environ['DISCORD_TOKEN'],
+        'DISCORD_DELIVERY_STATE_PATH': os.path.join(
+            os.path.expanduser('~'), '.clem', 'discord-delivery.json'),
+    }
     _watch = '{{.WatchChannelIDs}}'
     if _watch:
         _denv['DISCORD_WATCH_CHANNELS'] = _watch
@@ -835,7 +847,7 @@ func coordinationReplayPrompt(cfg *config.Config) string {
 
 	switch backend.Name {
 	case "discord":
-		return "[clem coordination replay] Push notifications are wake-up hints only, not delivery or acknowledgement. Before other work, when a push notice arrives, and again before ending or recycling the iteration, call mcp__discord-bot__read_messages with limit 100 for each configured text channel. Continue with before_message_id when a page is full, and inspect relevant task thread history. Handle every trusted operator message without a later substantive response. Never require the operator to resend a message because it arrived during another turn."
+		return "[clem coordination replay] Push notifications are wake-up hints only, not delivery or acknowledgement. Before other work, when a push notice arrives, and again before ending or recycling the iteration, call mcp__discord-bot__read_pending_messages with limit 100 for each configured text channel. Handle every returned message, then call mcp__discord-bot__acknowledge_delivery with its delivery_id. When a page is full, acknowledge it and read the next pending page. Inspect relevant task thread history the same way. When replying to a delivered message, set reply_to_message_id and derive a stable client_message_id for that logical outbound message from the triggering message ID plus a stable purpose or phase discriminator. Retries of the same logical reply reuse that client_message_id; separate replies to one trigger, such as receipt and resolution, use different discriminators. If the durable tools are unavailable during a compatibility rollout, fall back to read_messages with limit 100 and before_message_id pagination. Handle every trusted operator message without a later substantive response. Never require the operator to resend a message because it arrived during another turn."
 	case "slack":
 		return "[clem coordination replay] Polling is message delivery for Slack; terminal activity is not acknowledgement. Before other work, and again before ending or recycling the iteration, call mcp__slack-mcp__conversations_history with limit \"100\" for each configured channel. Follow next_cursor until history overlaps the previous sweep, and call mcp__slack-mcp__conversations_replies for relevant task threads. Handle every trusted operator message without a later substantive response. Never require the operator to resend a message because it arrived during another turn."
 	default:

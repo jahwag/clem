@@ -548,6 +548,30 @@ func TestGenerate_DiscordWatchChannelsWired(t *testing.T) {
 	}
 }
 
+func TestGenerate_DiscordDeliveryStatePathWiredForEveryRuntime(t *testing.T) {
+	for _, runtime := range []string{"", "opencode", "codex"} {
+		t.Run(runtime, func(t *testing.T) {
+			cfg := baseCfg("worker", config.AgentConfig{
+				Name:      "Worker",
+				Runtime:   runtime,
+				Model:     "test-model",
+				Iteration: "1m",
+				Prompt:    "do the thing",
+			})
+
+			out := Generate(cfg, "worker")
+			for _, want := range []string{
+				"DISCORD_DELIVERY_STATE_PATH",
+				"discord-delivery.json",
+			} {
+				if !strings.Contains(out, want) {
+					t.Fatalf("runtime %q missing %q in Discord MCP env", runtime, want)
+				}
+			}
+		})
+	}
+}
+
 func TestGenerate_DiscordReconcilesHistoryAtIterationBoundaries(t *testing.T) {
 	cfg := baseCfg("worker", config.AgentConfig{
 		Name:      "Worker",
@@ -560,7 +584,14 @@ func TestGenerate_DiscordReconcilesHistoryAtIterationBoundaries(t *testing.T) {
 
 	for _, want := range []string{
 		"Push notifications are wake-up hints only",
-		"mcp__discord-bot__read_messages",
+		"mcp__discord-bot__read_pending_messages",
+		"mcp__discord-bot__acknowledge_delivery",
+		"delivery_id",
+		"stable client_message_id for that logical outbound message",
+		"triggering message ID plus a stable purpose or phase discriminator",
+		"Retries of the same logical reply reuse that client_message_id",
+		"receipt and resolution, use different discriminators",
+		"fall back to read_messages",
 		"limit 100",
 		"Before other work",
 		"before ending or recycling the iteration",

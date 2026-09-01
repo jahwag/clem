@@ -243,10 +243,29 @@ clem logs lead
 Chat wake-ups are hints, not delivery receipts. Every Discord and Slack
 iteration receives a history-reconciliation instruction: poll configured
 channels before other work, repeat after a mid-turn wake-up, and poll again
-before the session exits or recycles. Discord uses `read_messages` with
-pagination; Slack uses `conversations_history` and
+before the session exits or recycles. Discord uses durable pending reads when
+available; Slack uses `conversations_history` and
 `conversations_replies`. This closes the boundary where a message can arrive
 after the model finishes a turn but before its TUI is replaced.
+
+Discord MCP versions with durable delivery use `read_pending_messages` and
+`acknowledge_delivery`. Clem gives every runtime the same private state path at
+`~/.clem/discord-delivery.json`. A channel cursor advances only after the agent
+handles the returned page and explicitly acknowledges its delivery ID. During
+a mixed-version rollout, the injected prompt falls back to paginated
+`read_messages` when those tools are unavailable.
+
+Replies use a stable `client_message_id` per logical outbound message, derived
+from the triggering message ID plus a stable purpose or phase discriminator.
+Retries of one logical reply reuse its ID, while separate replies to the same
+trigger, such as receipt and resolution, use different discriminators.
+
+For an established project, install the matching mcp-discord release and seed
+each configured channel's last reviewed message ID before provisioning this
+Clem change. Use `mcp-discord-seed-delivery` as the target agent OS user with
+the same `~/.clem/discord-delivery.json` path. Do not enable the durable prompt
+against an unseeded established channel because the safe default replays from
+the channel's oldest message.
 
 GitHub coordination closes the loop between tasks and PRs: work lives in Issues on a dedicated repo, output lands in PRs with `Closes #N`. Chat backends stay better for real-time operator conversation; GitHub is better when your source of truth is already on GitHub.
 
